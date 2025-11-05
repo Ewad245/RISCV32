@@ -12,37 +12,48 @@ public class App {
     }
 
     public static void main(String[] args) {
-        SimpleMemory memory = new SimpleMemory(128 * 1024 * 1024);
-        MemoryManager memoryManager = new MemoryManager(memory);
-        RV32iCpu cpu = new RV32iCpu(memoryManager);
+        // Create a computer with 128MB of memory
+        RV32iComputer computer = new RV32iComputer(128 * 1024 * 1024);
+        RV32iCpu cpu = computer.getCpu();
+        MemoryManager memoryManager = computer.getMemoryManager();
         ElfLoader elfLoader = new ElfLoader(memoryManager);
 
         try {
             // Load ELF file
-            elfLoader.loadElf(args[0]);
+            args = new String[] { "app/build/resources/main/hello_os.elf" };
+            if (args.length > 0) {
+                elfLoader.loadElf(args[0]);
+                int entryPoint = elfLoader.getEntryPoint();
 
-            // Set CPU's program counter to ELF entry point
-            // cpu.setPC(elfLoader.getEntryPoint());
+                PrintStream output = new PrintStream(System.out, false);
+                output.println("Entry Point: " + entryPoint);
+                // Print memory map for debugging
+                output.println(memoryManager.getMemoryMap());
+                output.flush();
 
-            // Start the CPU
-            int entryPoint = elfLoader.getEntryPoint();
-            PrintStream output = new PrintStream(System.out, false);
-            output.println("Entry Point: " + entryPoint);
-            // Optional: Print memory map for debugging
-            output.println(memoryManager.getMemoryMap());
-            output.flush();
+                // Create a task for the main program
+                Task mainTask = computer.createTask(entryPoint);
+                if (mainTask != null) {
+                    output.println("Created main task with ID: " + mainTask.getId());
+                } else {
+                    output.println("Failed to create main task");
+                }
 
-            // Start the CPU
-            cpu.setProgramCounterEntryPoint(entryPoint);
-            cpu.turnOn();
+                // Start the CPU
+                cpu.setProgramCounterEntryPoint(entryPoint);
+                cpu.turnOn();
 
-            // Optional: Print CPU state after execution
-            // System.out.println(cpu.getState());
-
+                // The program will run and use syscalls for I/O and task management
+                // - Syscall 64 (write) for console output
+                // - Syscall 63 (read) for console input
+                // - Syscall 24 (yield) for cooperative multitasking
+                // - Syscall 93 (exit) to terminate
+            } else {
+                System.err.println("Error: No ELF file specified. Please provide an ELF file path as an argument.");
+            }
         } catch (Exception e) {
             System.err.println("Error running program: " + e.getMessage());
             e.printStackTrace();
         }
-
     }
 }

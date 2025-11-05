@@ -73,7 +73,7 @@ public class RV32iCpuTest {
     // Load instruction tests
     @Test
     void testLw() throws MemoryAccessException {
-        // LW x1, 4(x2)
+        // LW x1, 0(x2)
         InstructionDecoded inst = new InstructionDecoded();
         inst.setOpcode(0b0000011);
         inst.setRd(1);
@@ -81,23 +81,17 @@ public class RV32iCpuTest {
         inst.setRs1(2);
         inst.setImm_i(0);
 
-        // Use virtual address that maps directly to DATA_START
-        int virtualBaseAddr = 0x82010000;
-
-        // Calculate mapped physical address using CPU's mapping
-        int mappedAddr = cpu.mapAddressTest(virtualBaseAddr);
+        // Use a simple address that works with our dynamic memory system
+        int testAddr = 0x1000;
 
         // Set base address in register
-        cpu.setRegister(2, mappedAddr);
+        cpu.setRegister(2, testAddr);
 
-        // Write test value to mapped physical address
-        memory.writeWord(mappedAddr, 42);
-
-        // Debug output
-        System.out.printf("Virtual base: 0x%08X\n", virtualBaseAddr);
-        System.out.printf("Virtual address (base+4): 0x%08X\n", virtualBaseAddr + 4);
-        System.out.printf("Mapped physical address: 0x%08X\n", mappedAddr);
-        System.out.printf("Value at physical address: %d\n", memory.readWord(mappedAddr));
+        // Write test value directly to the address using the memory manager
+        memory.writeByteToVirtualAddress(testAddr, (byte) 42);
+        memory.writeByteToVirtualAddress(testAddr + 1, (byte) 0);
+        memory.writeByteToVirtualAddress(testAddr + 2, (byte) 0);
+        memory.writeByteToVirtualAddress(testAddr + 3, (byte) 0);
 
         cpu.executeTest(inst);
         assertEquals(42, cpu.getRegister(1), "LW failed");
@@ -106,7 +100,7 @@ public class RV32iCpuTest {
     // Store instruction tests
     @Test
     void testSw() throws MemoryAccessException {
-        // SW x1, 4(x2)
+        // SW x1, 0(x2)
         InstructionDecoded inst = new InstructionDecoded();
         inst.setOpcode(0b0100011);
         inst.setRs2(1);
@@ -114,26 +108,17 @@ public class RV32iCpuTest {
         inst.setRs1(2);
         inst.setImm_s(0);
 
-        // Use virtual address in data segment range
-        int virtualBaseAddr = 0x82010000;
-
-        // Calculate mapped physical address using CPU's mapping
-        int mappedAddr = cpu.mapAddressTest(virtualBaseAddr);
+        // Use a simple address that works with our dynamic memory system
+        int testAddr = 0x2000;
 
         // Set registers
         cpu.setRegister(1, 42); // Value to store
-        cpu.setRegister(2, mappedAddr); // Base address
-
-        // Debug output
-        System.out.printf("Virtual base: 0x%08X\n", virtualBaseAddr);
-        System.out.printf("Virtual address (base+4): 0x%08X\n", virtualBaseAddr + 4);
-        System.out.printf("Mapped physical address: 0x%08X\n", mappedAddr);
+        cpu.setRegister(2, testAddr); // Base address
 
         cpu.executeTest(inst);
 
-        // Verify stored value at mapped address
-        int storedValue = memory.readWord(mappedAddr);
-        System.out.printf("Value at physical address: %d\n", storedValue);
+        // Verify stored value at the address
+        int storedValue = memory.readWord(testAddr);
         assertEquals(42, storedValue, "SW failed");
     }
 
@@ -150,10 +135,10 @@ public class RV32iCpuTest {
 
         cpu.setRegister(1, 5);
         cpu.setRegister(2, 5);
-        int initialPc = cpu.getPc();
+        int initialPc = cpu.getProgramCounter();
 
         cpu.executeTest(inst);
-        assertEquals(initialPc + 8, cpu.getPc() + 4, "BEQ failed");
+        assertEquals(initialPc + 8, cpu.getProgramCounter() + 4, "BEQ failed");
     }
 
     // Jump instruction tests
@@ -165,11 +150,11 @@ public class RV32iCpuTest {
         inst.setRd(1);
         inst.setImm_j(16);
 
-        int initialPc = cpu.getPc();
+        int initialPc = cpu.getProgramCounter();
         cpu.executeTest(inst);
 
         assertEquals(initialPc, cpu.getRegister(1), "JAL return address failed");
-        assertEquals(initialPc + 16, cpu.getPc() + 4, "JAL target address failed");
+        assertEquals(initialPc + 16, cpu.getProgramCounter() + 4, "JAL target address failed");
     }
 
     // Upper immediate instruction tests
