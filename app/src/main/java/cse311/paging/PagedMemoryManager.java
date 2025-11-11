@@ -29,7 +29,7 @@ public class PagedMemoryManager extends MemoryManager {
     // Physical UART mapping
     private static final int UART_BASE = 0x10000000;
     private static final int UART_SIZE = 0x1000;
-    
+
     public static boolean isUart(int va) {
         return va >= UART_BASE && va < (UART_BASE + UART_SIZE);
     }
@@ -106,7 +106,8 @@ public class PagedMemoryManager extends MemoryManager {
         ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.READ);
-        if (frame == -2) return 0;
+        if (frame == -2)
+            return 0;
         int pa = (frame << 12) | (va & 0xFFF);
         return super.readHalfWord(pa);
     }
@@ -116,7 +117,8 @@ public class PagedMemoryManager extends MemoryManager {
         ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.READ);
-        if (frame == -2) return 0;
+        if (frame == -2)
+            return 0;
         int pa = (frame << 12) | (va & 0xFFF);
         return super.readWord(pa);
     }
@@ -131,7 +133,8 @@ public class PagedMemoryManager extends MemoryManager {
         ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.WRITE);
-        if (frame == -2) return;
+        if (frame == -2)
+            return;
         int pa = (frame << 12) | (va & 0xFFF);
         super.writeHalfWord(pa, v);
     }
@@ -141,7 +144,8 @@ public class PagedMemoryManager extends MemoryManager {
         ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.WRITE);
-        if (frame == -2) return;
+        if (frame == -2)
+            return;
         int pa = (frame << 12) | (va & 0xFFF);
         super.writeWord(pa, v);
     }
@@ -197,7 +201,7 @@ public class PagedMemoryManager extends MemoryManager {
         if (frame >= 0 && frame < totalFrames) {
             freeFrames.set(frame);
             reverseMap[frame] = null;
-            
+
             // Clean up page table mappings
             pageTableFrames.remove(frame);
             pageDirectoryFrames.remove(frame);
@@ -218,21 +222,21 @@ public class PagedMemoryManager extends MemoryManager {
         System.out.println("Memory: " + used + "/" + totalFrames + " frames used");
         System.out.println("Page tables: " + pageTableFrames.size() + " allocated");
     }
-    
+
     // Test 2-level page table structure
-    public void testTwoLevelStructure() {
+    public void testTwoLevelStructure() throws MemoryAccessException {
         AddressSpace as = createAddressSpace(1);
         int testVpn = 0x123; // Test VPN
         int frame = allocateFrame();
-        
+
         if (frame != -1) {
             boolean mapped = as.mapPage(testVpn, frame, true, true);
             System.out.println("Test: Mapped VPN " + testVpn + " to frame " + frame + ": " + mapped);
-            
+
             // Test address translation
-            int translated = as.translate(testVpn * 4096);
-            System.out.println("Test: Virtual 0x" + Integer.toHexString(testVpn * 4096) + 
-                             " -> Physical 0x" + Integer.toHexString(translated));
+            int translated = as.translateAddress(testVpn * 4096);
+            System.out.println("Test: Virtual 0x" + Integer.toHexString(testVpn * 4096) +
+                    " -> Physical 0x" + Integer.toHexString(translated));
         }
     }
 
@@ -254,15 +258,13 @@ public class PagedMemoryManager extends MemoryManager {
         return frame;
     }
 
-
-
     private void mapPage(AddressSpace as, int va, boolean R, boolean W, boolean X, boolean zero)
             throws MemoryAccessException {
         ensurePager();
-        
+
         int frame = pager.ensureResident(as, va, VmAccess.WRITE);
         int pa = frame * PAGE_SIZE;
-        
+
         if (zero) {
             for (int i = 0; i < PAGE_SIZE; i++) {
                 try {
@@ -272,10 +274,10 @@ public class PagedMemoryManager extends MemoryManager {
                 }
             }
         }
-        
+
         // Set permissions
         int vpn = AddressSpace.getVPN(va);
-        AddressSpace.PTE pte = as.getPTE(vpn);
+        AddressSpace.PageTableEntry pte = as.getPTEInternal(vpn);
         if (pte != null) {
             pte.R = R;
             pte.W = W;

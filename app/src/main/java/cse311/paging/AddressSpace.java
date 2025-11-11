@@ -1,5 +1,7 @@
 package cse311.paging;
 
+import cse311.MemoryAccessException;
+
 public final class AddressSpace {
     // Root of a 2-level page table (Sv32-like): 4KB pages
     final int pid;
@@ -8,6 +10,7 @@ public final class AddressSpace {
     AddressSpace(int pid) {
         this.pid = pid;
         this.root = new PageDirectory();
+        this.memoryManager = null;
     }
 
     static final class PageDirectory {
@@ -16,22 +19,22 @@ public final class AddressSpace {
 
     static final class PageTable {
         final PageTableEntry[] entries = new PageTableEntry[1024]; // L2 (Page Table)
-        
+
         PageTable() {
             // Initialize entries to null (not present)
         }
     }
 
     static final class PageTableEntry {
-        int ppn;      // physical page number (<<12 to make PA)
+        int ppn; // physical page number (<<12 to make PA)
         boolean V, R, W, X, U;
-        boolean D;    // Dirty bit (for Linux-like page management)
-        boolean A;    // Accessed bit (for page replacement)
-        
+        boolean D; // Dirty bit (for Linux-like page management)
+        boolean A; // Accessed bit (for page replacement)
+
         @Override
         public String toString() {
-            return String.format("PTE{ppn=0x%x, V=%b, R=%b, W=%b, X=%b, D=%b, A=%b}", 
-                                ppn, V, R, W, X, D, A);
+            return String.format("PTE{ppn=0x%x, V=%b, R=%b, W=%b, X=%b, D=%b, A=%b}",
+                    ppn, V, R, W, X, D, A);
         }
     }
 
@@ -82,7 +85,8 @@ public final class AddressSpace {
      */
     public PageStats getPageStats(int vpn) {
         PageTableEntry pte = getPTEInternal(vpn);
-        if (pte == null) return new PageStats(false, false);
+        if (pte == null)
+            return new PageStats(false, false);
         return new PageStats(pte.A, pte.D);
     }
 
@@ -93,44 +97,49 @@ public final class AddressSpace {
         PageTableEntry pte = getPTEInternal(vpn);
         if (pte != null) {
             pte.A = true;
-            if (wasWrite) pte.D = true;
+            if (wasWrite)
+                pte.D = true;
         }
     }
 
-    // Internal methods - hidden from policies
-    private PageTableEntry getPTEInternal(int vpn) {
+    public PageTableEntry getPTEInternal(int vpn) {
         int l1Index = (vpn >> 10) & 0x3FF;
         int l2Index = vpn & 0x3FF;
-        
+
         PageTableEntry l1Entry = root.entries[l1Index];
-        if (l1Entry == null || !l1Entry.V) return null;
-        
+        if (l1Entry == null || !l1Entry.V)
+            return null;
+
         PageTable l2Table = getPageTable(l1Entry.ppn);
-        if (l2Table == null) return null;
-        
+        if (l2Table == null)
+            return null;
+
         return l2Table.entries[l2Index];
     }
 
+    // Internal methods - hidden from policies
     private boolean mapPageInternal(int vpn, int frame, boolean write, boolean exec) {
         int l1Index = (vpn >> 10) & 0x3FF;
         int l2Index = vpn & 0x3FF;
-        
+
         // Ensure L2 table exists
         PageTableEntry l1Entry = root.entries[l1Index];
         if (l1Entry == null || !l1Entry.V) {
             int l2TableFrame = allocatePageTable();
-            if (l2TableFrame < 0) return false; // Out of memory
-            
+            if (l2TableFrame < 0)
+                return false; // Out of memory
+
             l1Entry = new PageTableEntry();
             l1Entry.ppn = l2TableFrame;
             l1Entry.V = true;
             l1Entry.R = l1Entry.W = l1Entry.X = true;
             root.entries[l1Index] = l1Entry;
         }
-        
+
         PageTable l2Table = getPageTable(l1Entry.ppn);
-        if (l2Table == null) return false;
-        
+        if (l2Table == null)
+            return false;
+
         PageTableEntry pte = new PageTableEntry();
         pte.ppn = frame;
         pte.V = true;
@@ -139,7 +148,7 @@ public final class AddressSpace {
         pte.X = exec;
         pte.A = false;
         pte.D = false;
-        
+
         l2Table.entries[l2Index] = pte;
         return true;
     }
@@ -148,7 +157,7 @@ public final class AddressSpace {
     public static class PageStats {
         public final boolean accessed;
         public final boolean dirty;
-        
+
         public PageStats(boolean accessed, boolean dirty) {
             this.accessed = accessed;
             this.dirty = dirty;
@@ -165,7 +174,7 @@ public final class AddressSpace {
 
     // Page table management - now handled by PagedMemoryManager
     private final PagedMemoryManager memoryManager;
-    
+
     AddressSpace(int pid, PagedMemoryManager memoryManager) {
         this.pid = pid;
         this.memoryManager = memoryManager;
@@ -184,12 +193,12 @@ public final class AddressSpace {
     public int translateAddress(int virtualAddress) throws MemoryAccessException {
         int vpn = getVPN(virtualAddress);
         int offset = getPageOffset(virtualAddress);
-        
-        PageTableEntry pte = getPTE(vpn);
+
+        PageTableEntry pte = getPTEInternal(vpn);
         if (pte == null || !pte.V) {
             throw new MemoryAccessException("Page fault: VPN " + vpn + " not present");
         }
-        
+
         return (pte.ppn << 12) | offset;
     }
 }

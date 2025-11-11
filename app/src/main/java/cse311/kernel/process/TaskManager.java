@@ -211,19 +211,19 @@ public class TaskManager {
      */
     public Task forkTask(int childPid, Task parent, String name) throws Exception {
         // Create new task as copy of parent
-        Task child = new Task(childPid, name, 
-                             parent.getProgramCounter(), 
-                             parent.getStackSize(), 
-                             parent.getStackBase());
-        
+        Task child = new Task(childPid, name,
+                parent.getProgramCounter(),
+                parent.getStackSize(),
+                parent.getStackBase());
+
         // Copy registers
         child.setProgramCounter(parent.getProgramCounter());
         System.arraycopy(parent.getRegisters(), 0, child.getRegisters(), 0, 32);
-        
+
         // Set up parent relationship
         child.setParent(parent);
         parent.addChild(child);
-        
+
         // Copy memory layout
         child.setTextStart(parent.getTextStart());
         child.setTextSize(parent.getTextSize());
@@ -231,10 +231,10 @@ public class TaskManager {
         child.setDataSize(parent.getDataSize());
         child.setHeapStart(parent.getHeapStart());
         child.setHeapSize(parent.getHeapSize());
-        
+
         return child;
     }
-    
+
     /**
      * Creates a new thread within an existing process
      * Threads share the same address space and TGID
@@ -243,22 +243,22 @@ public class TaskManager {
         if (!process.isThreadGroupLeader()) {
             throw new IllegalArgumentException("Process must be a thread group leader");
         }
-        
+
         Task thread = process.createThread(threadId, entryPoint, stackSize, stackBase);
-        
+
         // Register the thread with the kernel
-        tasks.put(threadId, thread);
-        
+        // process.put(threadId, thread); (unknown)
+
         return thread;
     }
-    
+
     /**
      * Gets all threads in a process's thread group
      */
     public List<Task> getThreads(Task process) {
         return process.getThreadGroup();
     }
-    
+
     /**
      * Checks if a task is part of a thread group (either leader or thread)
      */
@@ -285,7 +285,7 @@ public class TaskManager {
     /**
      * Clean up task resources and notify parent
      */
-    public void cleanupTask(Task task) {
+    public void cleanupTaskAndNotify(Task task) {
         int pid = task.getId();
 
         // Notify parent if exists
@@ -293,9 +293,9 @@ public class TaskManager {
         if (parent != null) {
             parent.removeChild(task);
             // Wake up parent if waiting for this child
-            if (parent.getState() == TaskState.WAITING && 
-                parent.getWaitReason() == WaitReason.PROCESS_EXIT &&
-                parent.getWaitingForPid() == pid) {
+            if (parent.getState() == TaskState.WAITING &&
+                    parent.getWaitReason() == WaitReason.PROCESS_EXIT &&
+                    parent.getWaitingForPid() == pid) {
                 parent.wakeup();
             }
         }

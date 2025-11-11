@@ -8,6 +8,9 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
+import cse311.paging.AddressSpace;
+import cse311.paging.PagedMemoryManager;
+
 public class ElfLoader {
     private byte[] elfData;
     private MemoryManager memory;
@@ -43,9 +46,9 @@ public class ElfLoader {
         public final boolean executable;
         public final int fileOffset;
 
-        public ElfSegment(int virtualAddr, int fileSize, int memorySize, 
-                         boolean readable, boolean writable, boolean executable,
-                         int fileOffset) {
+        public ElfSegment(int virtualAddr, int fileSize, int memorySize,
+                boolean readable, boolean writable, boolean executable,
+                int fileOffset) {
             this.virtualAddr = virtualAddr;
             this.fileSize = fileSize;
             this.memorySize = memorySize;
@@ -57,8 +60,8 @@ public class ElfLoader {
 
         @Override
         public String toString() {
-            return String.format("Segment[0x%08x-0x%08x] R=%b W=%b X=%b", 
-                virtualAddr, virtualAddr + memorySize, readable, writable, executable);
+            return String.format("Segment[0x%08x-0x%08x] R=%b W=%b X=%b",
+                    virtualAddr, virtualAddr + memorySize, readable, writable, executable);
         }
     }
 
@@ -143,7 +146,7 @@ public class ElfLoader {
 
             // Create segment info
             ElfSegment segment = new ElfSegment(virtual_addr, size_in_file, size_in_mem,
-                                            readable, writable, executable, offset_in_file);
+                    readable, writable, executable, offset_in_file);
             segments.add(segment);
 
             try {
@@ -193,9 +196,10 @@ public class ElfLoader {
      * Load ELF segments into an AddressSpace with proper memory permissions
      * like Linux does
      */
-    public void loadElfIntoAddressSpace(AddressSpace as, PagedMemoryManager mm, String elfFile) throws ElfException, MemoryAccessException {
+    public void loadElfIntoAddressSpace(AddressSpace as, PagedMemoryManager mm, String elfFile)
+            throws ElfException, MemoryAccessException, IOException {
         loadElf(elfFile);
-        
+
         // Map segments into address space with proper permissions
         for (ElfSegment segment : segments) {
             mapSegmentWithPermissions(as, segment, mm);
@@ -205,46 +209,47 @@ public class ElfLoader {
     /**
      * Map a segment into address space with Linux-like permission handling
      */
-    private void mapSegmentWithPermissions(AddressSpace as, ElfSegment segment, PagedMemoryManager mm) throws MemoryAccessException {
+    private void mapSegmentWithPermissions(AddressSpace as, ElfSegment segment, PagedMemoryManager mm)
+            throws MemoryAccessException {
         int startAddr = segment.virtualAddr;
         int endAddr = segment.virtualAddr + segment.memorySize;
-        
+
         // Align to page boundaries (Linux behavior)
         int pageSize = PagedMemoryManager.PAGE_SIZE;
         int startPage = startAddr / pageSize;
         int endPage = (endAddr + pageSize - 1) / pageSize;
-        
+
         // Map each page with appropriate permissions
         for (int page = startPage; page < endPage; page++) {
             int vpn = page;
             int pageAddr = page * pageSize;
-            
+
             // Determine permissions for this page based on segment permissions
             boolean read = segment.readable;
             boolean write = segment.writable;
             boolean exec = segment.executable;
-            
+
             // Linux security: stack should not be executable
             if (pageAddr >= 0x7FFFFFF0) { // High address for stack
                 exec = false;
             }
-            
+
             // Map the page with extracted permissions
             if (!as.isPagePresent(vpn)) {
                 // Allocate frame and map with permissions
                 int frame = mm.allocateFrame();
                 if (frame >= 0) {
                     as.mapPage(vpn, frame, write, exec);
-                    
+
                     // Zero-initialize pages (Linux behavior)
                     int frameStart = frame * pageSize;
                     for (int i = 0; i < pageSize; i++) {
-                        mm.getMemory().writeByte(frameStart + i, (byte) 0);
+                        mm.writeByte(frameStart + i, (byte) 0);
                     }
                 }
             }
         }
-        
+
         // Copy segment data into mapped pages
         copySegmentDataToPages(as, segment, mm);
     }
@@ -252,20 +257,21 @@ public class ElfLoader {
     /**
      * Copy segment data into properly mapped pages
      */
-    private void copySegmentDataToPages(AddressSpace as, ElfSegment segment, PagedMemoryManager mm) throws MemoryAccessException {
+    private void copySegmentDataToPages(AddressSpace as, ElfSegment segment, PagedMemoryManager mm)
+            throws MemoryAccessException {
         int pageSize = PagedMemoryManager.PAGE_SIZE;
-        
+
         for (int i = 0; i < segment.fileSize; i++) {
             int addr = segment.virtualAddr + i;
             int vpn = addr / pageSize;
             int offset = addr % pageSize;
-            
+
             if (as.isPagePresent(vpn)) {
                 int frame = as.getFrameNumber(vpn);
                 if (frame >= 0) {
                     int physicalAddr = frame * pageSize + offset;
                     byte data = elfData[segment.fileOffset + i];
-                    mm.getMemory().writeByte(physicalAddr, data);
+                    mm.writeByte(physicalAddr, data);
                 }
             }
         }
