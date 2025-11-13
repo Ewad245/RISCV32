@@ -10,9 +10,9 @@ public class PagingPolicyTest {
     public static void main(String[] args) {
         try {
             testPolicyAbstraction();
-            System.out.println("✅ All policy abstraction tests passed!");
+            System.out.println("All policy abstraction tests passed!");
         } catch (Exception e) {
-            System.err.println("❌ Test failed: " + e.getMessage());
+            System.err.println("Test failed: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -60,6 +60,6 @@ public class PagingPolicyTest {
             throw new RuntimeException("Page should be present with eager pager");
         }
 
-        System.out.println("✅ Policy abstraction working correctly with 2-level page tables");
+        System.out.println("Policy abstraction working correctly with 2-level page tables");
     }
 }

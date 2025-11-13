@@ -17,40 +17,41 @@ public class EagerPager implements Pager {
 
     @Override
     public int ensureResident(AddressSpace as, int va, VmAccess access) throws MemoryAccessException {
-        if (PagedMemoryManager.isUart(va)) return -2; // MMIO
-        
+        if (PagedMemoryManager.isUart(va))
+            return -2; // MMIO
+
         int vpn = AddressSpace.getVPN(va);
-        
+
         if (!as.isPagePresent(vpn)) {
             // Need to allocate a new page
             int frame = mm.allocateFrame();
             if (frame < 0) {
                 throw new MemoryAccessException("Out of physical memory");
             }
-            
+
             // Map the page with default permissions (read/write/execute)
             boolean mapped = as.mapPage(vpn, frame, true, true);
             if (!mapped) {
                 mm.freeFrame(frame);
                 throw new MemoryAccessException("Failed to map page");
             }
-            
+
             mm.setFrameOwner(frame, new FrameOwner(as.getPid(), vpn));
-            
+
             // Zero the frame
             int frameStart = frame * PagedMemoryManager.PAGE_SIZE;
             for (int i = 0; i < PagedMemoryManager.PAGE_SIZE; i++) {
-                mm.writeByte(frameStart + i, (byte) 0);
+                mm.writeByteToPhysicalAddress(frameStart + i, (byte) 0);
             }
-            
+
             repl.onMap(frame);
         }
-        
+
         int frame = as.getFrameNumber(vpn);
         if (frame < 0) {
             throw new MemoryAccessException("Page not found after mapping");
         }
-        
+
         as.updatePageAccess(vpn, false); // Update accessed bit
         repl.onAccess(frame);
         return frame;

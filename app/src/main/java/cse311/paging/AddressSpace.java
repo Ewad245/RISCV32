@@ -182,10 +182,10 @@ public final class AddressSpace {
     }
 
     private int allocatePageTable() {
-        return memoryManager.allocateFrameForPageTable();
+        return memoryManager.allocatePageTableFrame();
     }
 
-    private PageTable getPageTable(int ppn) {
+    public PageTable getPageTable(int ppn) {
         return memoryManager.getPageTableInstance(ppn);
     }
 

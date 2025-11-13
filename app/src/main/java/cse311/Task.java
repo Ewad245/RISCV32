@@ -10,17 +10,17 @@ import java.util.List;
  */
 public class Task {
     private int id;
-    private int pc;          // Program counter
+    private int pc; // Program counter
     private int[] registers; // Register state
-    private int stackBase;   // Base address of the task's stack
-    private int stackSize;   // Size of the stack in bytes
-    private boolean active;  // Whether the task is currently active
-    
+    private int stackBase; // Base address of the task's stack
+    private int stackSize; // Size of the stack in bytes
+    private boolean active; // Whether the task is currently active
+
     // Process hierarchy (parent/child relationships)
-    private Task parent;           // Parent process
+    private Task parent; // Parent process
     private final List<Task> children; // Child processes
-    private int tgid;             // Thread group ID (same as PID for single-threaded)
-    
+    private int tgid; // Thread group ID (same as PID for single-threaded)
+
     // Kernel management fields
     private TaskState state;
     private WaitReason waitReason;
@@ -30,7 +30,7 @@ public class Task {
     private int priority;
     private long creationTime;
     private long cpuTime;
-    
+
     // Process memory information
     private int textStart;
     private int textSize;
@@ -38,17 +38,17 @@ public class Task {
     private int dataSize;
     private int heapStart;
     private int heapSize;
-    
+
     // Paging support
     private transient cse311.paging.AddressSpace addressSpace;
 
     /**
      * Creates a new task with the specified ID and stack size.
      * 
-     * @param id The task ID
+     * @param id         The task ID
      * @param entryPoint The entry point (initial PC value)
-     * @param stackSize The size of the task's stack in bytes
-     * @param stackBase The base address of the task's stack
+     * @param stackSize  The size of the task's stack in bytes
+     * @param stackBase  The base address of the task's stack
      */
     public Task(int id, int entryPoint, int stackSize, int stackBase) {
         this.id = id;
@@ -57,12 +57,12 @@ public class Task {
         this.stackSize = stackSize;
         this.stackBase = stackBase;
         this.active = false;
-        
+
         // Initialize process hierarchy
         this.parent = null;
         this.children = new ArrayList<>();
         this.tgid = id; // Thread group ID = PID for single-threaded
-        
+
         // Initialize kernel management fields
         this.name = "Task-" + id;
         this.state = TaskState.READY;
@@ -72,11 +72,11 @@ public class Task {
         this.cpuTime = 0;
         this.wakeupTime = 0;
         this.waitingForPid = -1;
-        
+
         // Initialize stack pointer (x2) to the top of the stack
         this.registers[2] = stackBase + stackSize;
     }
-    
+
     /**
      * Creates a new task with a name
      */
@@ -122,12 +122,24 @@ public class Task {
         return registers;
     }
 
+    public void setRegisters(int[] registers) {
+        this.registers = registers;
+    }
+
     public int getStackBase() {
         return stackBase;
     }
 
+    public void setStackBase(int stackBase) {
+        this.stackBase = stackBase;
+    }
+
     public int getStackSize() {
         return stackSize;
+    }
+
+    public void setStackSize(int stackSize) {
+        this.stackSize = stackSize;
     }
 
     public boolean isActive() {
@@ -137,80 +149,164 @@ public class Task {
     public void setActive(boolean active) {
         this.active = active;
     }
-    
+
     // Kernel management methods
-    
+
     // State management
-    public TaskState getState() { return state; }
-    public void setState(TaskState state) { this.state = state; }
-    
+    public TaskState getState() {
+        return state;
+    }
+
+    public void setState(TaskState state) {
+        this.state = state;
+    }
+
     // Wait management
-    public WaitReason getWaitReason() { return waitReason; }
-    public void setWaitReason(WaitReason waitReason) { this.waitReason = waitReason; }
-    
-    public long getWakeupTime() { return wakeupTime; }
-    public void setWakeupTime(long wakeupTime) { this.wakeupTime = wakeupTime; }
-    
-    public int getWaitingForPid() { return waitingForPid; }
-    public void setWaitingForPid(int waitingForPid) { this.waitingForPid = waitingForPid; }
-    
+    public WaitReason getWaitReason() {
+        return waitReason;
+    }
+
+    public void setWaitReason(WaitReason waitReason) {
+        this.waitReason = waitReason;
+    }
+
+    public long getWakeupTime() {
+        return wakeupTime;
+    }
+
+    public void setWakeupTime(long wakeupTime) {
+        this.wakeupTime = wakeupTime;
+    }
+
+    public int getWaitingForPid() {
+        return waitingForPid;
+    }
+
+    public void setWaitingForPid(int waitingForPid) {
+        this.waitingForPid = waitingForPid;
+    }
+
     // Task information
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
-    
-    public int getPriority() { return priority; }
-    public void setPriority(int priority) { this.priority = priority; }
-    
-    public long getCreationTime() { return creationTime; }
-    public long getCpuTime() { return cpuTime; }
-    public void addCpuTime(long time) { this.cpuTime += time; }
-    
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public int getPriority() {
+        return priority;
+    }
+
+    public void setPriority(int priority) {
+        this.priority = priority;
+    }
+
+    public long getCreationTime() {
+        return creationTime;
+    }
+
+    public long getCpuTime() {
+        return cpuTime;
+    }
+
+    public void addCpuTime(long time) {
+        this.cpuTime += time;
+    }
+
     // Memory layout
-    public int getTextStart() { return textStart; }
-    public void setTextStart(int textStart) { this.textStart = textStart; }
-    
-    public int getTextSize() { return textSize; }
-    public void setTextSize(int textSize) { this.textSize = textSize; }
-    
-    public int getDataStart() { return dataStart; }
-    public void setDataStart(int dataStart) { this.dataStart = dataStart; }
-    
-    public int getDataSize() { return dataSize; }
-    public void setDataSize(int dataSize) { this.dataSize = dataSize; }
-    
-    public int getHeapStart() { return heapStart; }
-    public void setHeapStart(int heapStart) { this.heapStart = heapStart; }
-    
+    public int getTextStart() {
+        return textStart;
+    }
+
+    public void setTextStart(int textStart) {
+        this.textStart = textStart;
+    }
+
+    public int getTextSize() {
+        return textSize;
+    }
+
+    public void setTextSize(int textSize) {
+        this.textSize = textSize;
+    }
+
+    public int getDataStart() {
+        return dataStart;
+    }
+
+    public void setDataStart(int dataStart) {
+        this.dataStart = dataStart;
+    }
+
+    public int getDataSize() {
+        return dataSize;
+    }
+
+    public void setDataSize(int dataSize) {
+        this.dataSize = dataSize;
+    }
+
+    public int getHeapStart() {
+        return heapStart;
+    }
+
+    public void setHeapStart(int heapStart) {
+        this.heapStart = heapStart;
+    }
+
     public int getHeapSize() {
         return heapSize;
     }
+
     public void setHeapSize(int heapSize) {
         this.heapSize = heapSize;
     }
-    
-    public void setAddressSpace(cse311.paging.AddressSpace as) { this.addressSpace = as; }
-    public cse311.paging.AddressSpace getAddressSpace() { return addressSpace; }
-    
+
+    public void setAddressSpace(cse311.paging.AddressSpace as) {
+        this.addressSpace = as;
+    }
+
+    public cse311.paging.AddressSpace getAddressSpace() {
+        return addressSpace;
+    }
+
     // Process hierarchy methods
-    public Task getParent() { return parent; }
-    public void setParent(Task parent) { this.parent = parent; }
-    
-    public List<Task> getChildren() { return new ArrayList<>(children); }
+    public Task getParent() {
+        return parent;
+    }
+
+    public void setParent(Task parent) {
+        this.parent = parent;
+    }
+
+    public List<Task> getChildren() {
+        return new ArrayList<>(children);
+    }
+
     public void addChild(Task child) {
         children.add(child);
         child.setParent(this);
     }
-    
+
     public void removeChild(Task child) {
         children.remove(child);
         child.setParent(null);
     }
-    
-    public int getTgid() { return tgid; }
-    public void setTgid(int tgid) { this.tgid = tgid; }
-    
-    public boolean isThread() { return tgid != id; }
-    
+
+    public int getTgid() {
+        return tgid;
+    }
+
+    public void setTgid(int tgid) {
+        this.tgid = tgid;
+    }
+
+    public boolean isThread() {
+        return tgid != id;
+    }
+
     /**
      * Creates a new thread within this process's thread group
      * Threads share the same address space and TGID but have separate stacks
@@ -223,7 +319,7 @@ public class Task {
         thread.setName(this.name + ":" + threadId);
         return thread;
     }
-    
+
     /**
      * Gets all threads in this thread group (including self if leader)
      */
@@ -246,21 +342,21 @@ public class Task {
         }
         return threads;
     }
-    
+
     /**
      * Checks if this task is a thread group leader (main process)
      */
     public boolean isThreadGroupLeader() {
         return tgid == id;
     }
-    
+
     /**
      * Get process group leader (self for single-threaded)
      */
     public Task getGroupLeader() {
         return isThread() ? getParent() : this;
     }
-    
+
     /**
      * Check if this task is a descendant of another task
      */
@@ -274,7 +370,7 @@ public class Task {
         }
         return false;
     }
-    
+
     /**
      * Get the process tree depth (0 for init process)
      */
@@ -287,7 +383,7 @@ public class Task {
         }
         return depth;
     }
-    
+
     /**
      * Wait for a specific condition
      */
@@ -295,7 +391,7 @@ public class Task {
         this.state = TaskState.WAITING;
         this.waitReason = reason;
     }
-    
+
     /**
      * Wait for a specific time
      */
@@ -304,7 +400,7 @@ public class Task {
         this.waitReason = reason;
         this.wakeupTime = wakeupTime;
     }
-    
+
     /**
      * Wait for another task to exit
      */
@@ -313,7 +409,7 @@ public class Task {
         this.waitReason = WaitReason.PROCESS_EXIT;
         this.waitingForPid = pid;
     }
-    
+
     /**
      * Wake up the task
      */
@@ -325,14 +421,14 @@ public class Task {
             waitingForPid = -1;
         }
     }
-    
+
     /**
      * Check if task can be scheduled
      */
     public boolean isSchedulable() {
         return state == TaskState.READY;
     }
-    
+
     /**
      * Get task status string
      */
@@ -347,17 +443,17 @@ public class Task {
         }
         sb.append(", Priority: ").append(priority);
         sb.append(", CPU Time: ").append(cpuTime).append("ms");
-        
+
         // Process hierarchy info
         if (parent != null) {
             sb.append(", Parent: ").append(parent.getId());
         }
         sb.append(", Children: ").append(children.size());
         sb.append(", Depth: ").append(getProcessDepth());
-        
+
         return sb.toString();
     }
-    
+
     @Override
     public String toString() {
         return String.format("Task[pid=%d, name=%s, state=%s]", getId(), name, state);

@@ -284,4 +284,98 @@ public class PagedMemoryManager extends MemoryManager {
             pte.X = X;
         }
     }
+
+    /**
+     * Copies the memory content and page table structure from an old address space
+     * to a new one. This is the core logic for fork().
+     *
+     * @param oldAS The parent's address space to copy from.
+     * @param newAS The new, empty child's address space to copy to.
+     * @throws MemoryAccessException if out of memory or a mapping fails.
+     */
+    public void copyAddressSpace(AddressSpace oldAS, AddressSpace newAS) throws MemoryAccessException {
+        System.out.println(
+                "PagedMemoryManager: Copying address space from PID " + oldAS.getPid() + " to " + newAS.getPid());
+
+        // We iterate through the parent's (oldAS) page table structure
+        for (int l1Index = 0; l1Index < 1024; l1Index++) {
+            AddressSpace.PageTableEntry l1Entry = oldAS.root.entries[l1Index];
+
+            // If this L1 entry (Page Directory Entry) isn't valid, skip it.
+            if (l1Entry == null || !l1Entry.V) {
+                continue;
+            }
+
+            // Get the L2 page table
+            AddressSpace.PageTable l2Table = getPageTableInstance(l1Entry.ppn);
+            if (l2Table == null) {
+                // This shouldn't happen if l1Entry is valid, but good to check.
+                continue;
+            }
+
+            // Now iterate through all L2 entries (Page Table Entries)
+            for (int l2Index = 0; l2Index < 1024; l2Index++) {
+                AddressSpace.PageTableEntry pte = l2Table.entries[l2Index];
+
+                // If this page isn't valid, skip it.
+                if (pte == null || !pte.V) {
+                    continue;
+                }
+
+                // This is a valid, mapped user page. We must copy it.
+
+                // 1. Allocate a new physical frame for the child
+                int newFrame = allocateFrame();
+                if (newFrame < 0) {
+                    // TODO: A real kernel would unmap all previously-copied
+                    // pages for newAS before throwing this error.
+                    throw new MemoryAccessException("copyAddressSpace: out of physical memory");
+                }
+
+                int oldFrame = pte.ppn;
+                int oldPa = oldFrame << 12; // Old physical address
+                int newPa = newFrame << 12; // New physical address
+
+                // 2. Copy the memory content from the old frame to the new frame.
+                // We use super.readByte/writeByte to access raw physical memory,
+                // bypassing the current (parent's) page table.
+                try {
+                    for (int i = 0; i < PAGE_SIZE; i++) {
+                        byte b = super.readByte(oldPa + i);
+                        super.writeByte(newPa + i, b);
+                    }
+                } catch (MemoryAccessException e) {
+                    // This would be a critical kernel error
+                    freeFrame(newFrame); // Clean up the frame we just allocated
+                    throw new MemoryAccessException("copyAddressSpace: failed to copy frame data: " + e.getMessage());
+                }
+
+                // 3. Map the *new* frame into the *child's* address space
+                // at the *same* virtual address.
+                int vpn = (l1Index << 10) | l2Index;
+                boolean mapped = newAS.mapPage(vpn, newFrame, pte.W, pte.X);
+
+                if (!mapped) {
+                    freeFrame(newFrame); // Clean up
+                    throw new MemoryAccessException("copyAddressSpace: mapPage failed for child");
+                }
+
+                // 4. Set the new frame's owner
+                setFrameOwner(newFrame, new FrameOwner(newAS.getPid(), vpn));
+            }
+        }
+        System.out.println("PagedMemoryManager: Finished copying address space.");
+    }
+
+    /**
+     * Write a byte directly to physical memory, bypassing virtual memory
+     * translation.
+     * This is used by pager implementations when zeroing newly allocated frames.
+     * 
+     * @param physicalAddress The physical address to write to
+     * @param value           The byte value to write
+     */
+    public void writeByteToPhysicalAddress(int physicalAddress, byte value) throws MemoryAccessException {
+        super.writeByte(physicalAddress, value);
+    }
 }
