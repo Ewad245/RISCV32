@@ -188,7 +188,7 @@ public class TaskManager {
     }
 
     /**
-     * Create the init process (PID 1)
+     * Create the init process (PID 1) (ELF Version)
      */
     public Task createInitTask(String elfPath) throws Exception {
         if (initTask != null) {
@@ -197,6 +197,13 @@ public class TaskManager {
         initTask = createTask(1, elfPath);
         initTask.setName("init");
         return initTask;
+    }
+
+    /**
+     * Set the init process
+     */
+    public void setInitTask(Task initTask) {
+        this.initTask = initTask;
     }
 
     /**

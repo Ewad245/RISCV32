@@ -124,48 +124,67 @@ public class Kernel {
             return;
         }
 
-        // Switch to the task's address space
-        switchToTaskAddressSpace(task);
-
-        // Switch to the task
-        task.setState(TaskState.RUNNING);
-        task.restoreState(cpu);
-
-        int instructionsExecuted = 0;
-        int maxInstructions = scheduler.getTimeSlice();
-
-        // Execute instructions until time slice expires or task yields
-        while (instructionsExecuted < maxInstructions && task.getState() == TaskState.RUNNING) {
+        if (task instanceof cse311.JavaTask) {
+            // This is a Java-based task
             try {
-                // Execute one instruction
-                cpu.step();
-                instructionsExecuted++;
+                task.setState(TaskState.RUNNING);
+                ((cse311.JavaTask) task).runLogic(); // Call its Java logic
 
-                // Check if task made a system call
-                if (cpu.isEcall()) {
-                    handleSystemCall(task);
-                    break;
+                // If the task logic didn't block or terminate itself,
+                // set it back to READY for the next schedule.
+                if (task.getState() == TaskState.RUNNING) {
+                    task.setState(TaskState.READY);
                 }
-
-                // Check if task hit a breakpoint or exception
-                if (cpu.isException()) {
-                    handleException(task);
-                    break;
-                }
-
             } catch (Exception e) {
-                System.err.println("Task " + task.getId() + " error: " + e.getMessage());
+                System.err.println("JavaTask " + task.getId() + " error: " + e.getMessage());
+                e.printStackTrace();
                 task.setState(TaskState.TERMINATED);
-                break;
             }
-        }
 
-        // Save task state
-        task.saveState(cpu);
+        } else {
+            // Switch to the task's address space
+            switchToTaskAddressSpace(task);
 
-        // If task is still running, it used up its time slice
-        if (task.getState() == TaskState.RUNNING) {
-            task.setState(TaskState.READY);
+            // Switch to the task
+            task.setState(TaskState.RUNNING);
+            task.restoreState(cpu);
+
+            int instructionsExecuted = 0;
+            int maxInstructions = scheduler.getTimeSlice();
+
+            // Execute instructions until time slice expires or task yields
+            while (instructionsExecuted < maxInstructions && task.getState() == TaskState.RUNNING) {
+                try {
+                    // Execute one instruction
+                    cpu.step();
+                    instructionsExecuted++;
+
+                    // Check if task made a system call
+                    if (cpu.isEcall()) {
+                        handleSystemCall(task);
+                        break;
+                    }
+
+                    // Check if task hit a breakpoint or exception
+                    if (cpu.isException()) {
+                        handleException(task);
+                        break;
+                    }
+
+                } catch (Exception e) {
+                    System.err.println("Task " + task.getId() + " error: " + e.getMessage());
+                    task.setState(TaskState.TERMINATED);
+                    break;
+                }
+            }
+
+            // Save task state
+            task.saveState(cpu);
+
+            // If task is still running, it used up its time slice
+            if (task.getState() == TaskState.RUNNING) {
+                task.setState(TaskState.READY);
+            }
         }
     }
 
