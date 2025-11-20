@@ -30,6 +30,7 @@ public class Task {
     private int priority;
     private long creationTime;
     private long cpuTime;
+    private int exitCode;
 
     // Process memory information
     private int textStart;
@@ -72,6 +73,7 @@ public class Task {
         this.cpuTime = 0;
         this.wakeupTime = 0;
         this.waitingForPid = -1;
+        this.exitCode = 0;
 
         // Initialize stack pointer (x2) to the top of the stack
         this.registers[2] = stackBase + stackSize;
@@ -83,6 +85,7 @@ public class Task {
     public Task(int id, String name, int entryPoint, int stackSize, int stackBase) {
         this(id, entryPoint, stackSize, stackBase);
         this.name = name;
+        this.exitCode = 0;
     }
 
     /**
@@ -305,6 +308,14 @@ public class Task {
 
     public boolean isThread() {
         return tgid != id;
+    }
+
+    public int getExitCode() {
+        return exitCode;
+    }
+
+    public void setExitCode(int exitCode) {
+        this.exitCode = exitCode;
     }
 
     /**

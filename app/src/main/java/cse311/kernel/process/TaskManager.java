@@ -3,6 +3,9 @@ package cse311.kernel.process;
 import cse311.*;
 import cse311.kernel.Kernel;
 import cse311.kernel.memory.KernelMemoryManager;
+import cse311.paging.AddressSpace;
+import cse311.paging.PagedMemoryManager;
+
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.util.List;
@@ -239,6 +242,65 @@ public class TaskManager {
         child.setHeapStart(parent.getHeapStart());
         child.setHeapSize(parent.getHeapSize());
 
+        return child;
+    }
+
+    /**
+     * Forks a task to create a new process (child).
+     * This acts as a wrapper that generates the PID and Name automatically.
+     */
+    public Task forkTask(Task parent) throws Exception {
+        // 1. Get necessary components
+        if (!(kernel.getMemory() instanceof PagedMemoryManager)) {
+            throw new Exception("forkTask: PagedMemoryManager is required for fork.");
+        }
+        PagedMemoryManager pm = (PagedMemoryManager) kernel.getMemory();
+
+        // 2. Generate PID and Name
+        // Ensure you added getNextPid() to Kernel.java as discussed previously!
+        int childPid = kernel.getNextPid();
+        String childName = parent.getName() + "_child";
+
+        // 3. Create a new, empty address space for the child
+        AddressSpace parentAS = parent.getAddressSpace();
+        AddressSpace childAS = pm.createAddressSpace(childPid);
+
+        // 4. Copy the parent's memory (TEXT, DATA, HEAP, STACK) into the child's
+        // address space
+        // This requires the copyAddressSpace method in PagedMemoryManager
+        try {
+            pm.copyAddressSpace(parentAS, childAS);
+        } catch (MemoryAccessException e) {
+            pm.destroyAddressSpace(childPid); // Cleanup on failure
+            throw new Exception("forkTask: Failed to copy memory: " + e.getMessage());
+        }
+
+        // 5. Create the new Task object
+        // Child starts with identical state to parent (PC, stack, etc.)
+        Task child = new Task(childPid, childName,
+                parent.getProgramCounter(),
+                parent.getStackSize(),
+                parent.getStackBase());
+
+        // 6. Assign the new address space to the child
+        child.setAddressSpace(childAS);
+
+        // 7. Copy parent's registers to child
+        child.setRegisters(parent.getRegisters().clone());
+
+        // 8. **CRITICAL:** Set the return value (a0) for the child to 0
+        // This is how the child process knows it is the child.
+        child.getRegisters()[10] = 0; // a0 register (x10)
+
+        // 9. Set parent-child relationship
+        child.setParent(parent);
+        parent.addChild(child);
+
+        // 10. Mark child as READY and add to scheduler
+        child.setState(TaskState.READY);
+        kernel.addTaskToScheduler(child);
+
+        System.out.println("TaskManager: Forked task " + parent.getId() + " -> " + childPid);
         return child;
     }
 

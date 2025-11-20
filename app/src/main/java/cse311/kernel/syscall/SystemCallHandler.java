@@ -192,15 +192,73 @@ public class SystemCallHandler {
     }
 
     private int handleFork(Task task) {
-        // Fork is complex - for now, return -1 (not implemented)
-        System.out.println("Fork not implemented yet");
-        return -1;
+        System.out.println("SYS_FORK: Task " + task.getId() + " (" + task.getName() + ") requesting fork.");
+
+        try {
+            // The heavy lifting of copying memory and state is done by TaskManager
+            Task child = kernel.getTaskManager().forkTask(task);
+
+            // To the PARENT, fork returns the child's PID
+            System.out.println("SYS_FORK: Parent " + task.getId() + " received child PID " + child.getId());
+            return child.getId();
+
+        } catch (Exception e) {
+            System.err.println("SYS_FORK: Failed: " + e.getMessage());
+            e.printStackTrace();
+            return -1; // Return error code to parent
+        }
     }
 
-    private int handleWait(Task task, int pidPtr) {
-        // Wait for child task - simplified implementation
-        System.out.println("Wait not fully implemented yet");
-        return -1;
+    // Replace your handleWait stub
+    private int handleWait(Task task, int statusAddr) {
+
+        boolean hasChildren = false;
+        for (Task child : task.getChildren()) {
+            if (child.getState() != TaskState.TERMINATED) {
+                hasChildren = true;
+            }
+
+            // Found a ZOMBIE child (it exited, but we haven't cleaned it up yet)
+            if (child.getState() == TaskState.TERMINATED) {
+                int childPid = child.getId();
+
+                // 1. Retrieve the exit code the child passed to exit()
+                // (You need to add a getExitCode() method to your Task class)
+                int exitCode = child.getExitCode();
+
+                // 2. If the parent provided a valid pointer (not NULL/0), write the code there
+                if (statusAddr != 0) {
+                    try {
+                        // Get the memory manager
+                        if (kernel.getMemory() instanceof PagedMemoryManager) {
+                            PagedMemoryManager pm = (PagedMemoryManager) kernel.getMemory();
+
+                            // WRITE to the parent's memory space at address 'statusAddr'
+                            pm.writeWord(statusAddr, exitCode);
+                        }
+                    } catch (Exception e) {
+                        System.err.println("SYS_WAIT: Failed to write exit code to user memory.");
+                        return -1;
+                    }
+                }
+
+                // 3. Cleanup: Remove child from parent's list and kernel list
+                task.removeChild(child);
+                kernel.getTaskManager().cleanupTask(child);
+                kernel.getAllTasks().remove(child);
+
+                System.out.println("SYS_WAIT: Cleaned up child " + childPid + " with exit code " + exitCode);
+                return childPid; // Return the PID of the child we just cleaned up
+            }
+        }
+
+        if (!hasChildren) {
+            return -1; // Error: No children to wait for
+        }
+
+        // Children exist, but none are dead yet. Block the parent.
+        task.waitFor(WaitReason.PROCESS_EXIT);
+        return 0; // Parent will retry this syscall when it wakes up
     }
 
     private int handleExec(Task task, int pathPtr, int argvPtr) {
