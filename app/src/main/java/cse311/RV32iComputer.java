@@ -1,6 +1,7 @@
 package cse311;
 
 import cse311.kernel.Kernel;
+import cse311.paging.*;
 
 public class RV32iComputer {
     private RV32iCpu cpu;
@@ -10,23 +11,23 @@ public class RV32iComputer {
     public RV32iComputer(int memSize) {
         this(memSize, 16); // Default to 16 max tasks
     }
-    
+
     public RV32iComputer(int memSize, int maxTasks) {
         // Use PagedMemoryManager for paging support
-        memory = new cse311.paging.PagedMemoryManager(memSize);
+        memory = new PagedMemoryManager(memSize);
         this.cpu = new RV32iCpu(memory);
         this.kernel = new Kernel(cpu, memory);
-        
+
         // Configure paging policies as per AbstractPagingGuide.md
-        if (memory instanceof cse311.paging.PagedMemoryManager) {
-            cse311.paging.PagedMemoryManager pagedMemory = (cse311.paging.PagedMemoryManager) memory;
-            cse311.paging.PagingConfiguration.configure(
-                pagedMemory, 
-                cse311.paging.PagingConfiguration.Policy.DEMAND,  // Use demand paging
-                cse311.paging.PagingConfiguration.Policy.CLOCK     // Use clock replacement
+        if (memory instanceof PagedMemoryManager) {
+            PagedMemoryManager pagedMemory = (PagedMemoryManager) memory;
+            PagingConfiguration.configure(
+                    pagedMemory,
+                    PagingConfiguration.Policy.DEMAND, // Use demand paging
+                    PagingConfiguration.Policy.CLOCK // Use clock replacement
             );
         }
-        
+
         System.out.println("RV32iComputer initialized with policy-based paging");
         System.out.println("Total memory: " + (memSize / (1024 * 1024)) + "MB");
         System.out.println("Pager: Demand Paging with Clock Replacement");
@@ -100,7 +101,7 @@ public class RV32iComputer {
     public MemoryManager getMemoryManager() {
         return memory;
     }
-    
+
     /**
      * Gets the task-aware memory manager (if available).
      * 

@@ -3,57 +3,74 @@
  */
 package cse311;
 
-import java.io.IOException;
-import java.io.PrintStream;
+import cse311.kernel.Kernel;
+import cse311.kernel.KernelConfig;
+import cse311.programs.InitTask;
+import java.io.File;
 
 public class App {
-    public String getGreeting() {
-        return "Hello World!";
-    }
 
     public static void main(String[] args) {
-        // Create a computer with 128MB of memory
-        RV32iComputer computer = new RV32iComputer(128 * 1024 * 1024);
-        RV32iCpu cpu = computer.getCpu();
-        MemoryManager memoryManager = computer.getMemoryManager();
-        ElfLoader elfLoader = new ElfLoader(memoryManager);
+        System.out.println("==========================================");
+        System.out.println("      RISC-V Java Kernel Bootloader       ");
+        System.out.println("==========================================");
 
         try {
-            // Load ELF file
-            args = new String[] { "app/build/resources/main/hello_os.elf" };
+            // --------------------------------------------------------
+            // 1. HARDWARE INIT
+            // --------------------------------------------------------
+            // Initialize 128MB RAM, CPU, and Paged Memory Manager
+            RV32iComputer computer = new RV32iComputer(128 * 1024 * 1024, 100);
+            Kernel kernel = computer.getKernel();
+
+            // --------------------------------------------------------
+            // 2. KERNEL CONFIGURATION
+            // --------------------------------------------------------
+            // Use Round Robin to allow Init, Shell, and User apps to share CPU
+            kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.ROUND_ROBIN);
+            // 2000 instructions per slice gives the feeling of responsiveness
+            kernel.getConfig().setTimeSlice(2000);
+
+            // --------------------------------------------------------
+            // 3. LAUNCH INIT PROCESS (PID 1)
+            // --------------------------------------------------------
+            System.out.println("Bootloader: Spawning Init process (PID 1)...");
+
+            // We only need to create InitTask manually.
+            // The InitTask code (InitTask.java) will automatically detect
+            // that the Shell is missing and spawn ShellTask for us.
+            InitTask initTask = new InitTask(1, kernel);
+            kernel.addTaskToScheduler(initTask);
+
+            // --------------------------------------------------------
+            // 4. (OPTIONAL) PRE-LOAD ELF
+            // --------------------------------------------------------
+            // If you pass a filename (e.g., "program.elf"), we load it now.
+            // This is like adding a service to startup scripts.
             if (args.length > 0) {
-                elfLoader.loadElf(args[0]);
-                int entryPoint = elfLoader.getEntryPoint();
-
-                PrintStream output = new PrintStream(System.out, false);
-                output.println("Entry Point: " + entryPoint);
-                // Print memory map for debugging
-                output.println(memoryManager.getMemoryMap());
-                output.flush();
-
-                // Create a task for the main program
-                Task mainTask = computer.createTask(entryPoint);
-                if (mainTask != null) {
-                    output.println("Created main task with ID: " + mainTask.getId());
-                } else {
-                    output.println("Failed to create main task");
+                String elfPath = args[0];
+                File f = new File(elfPath);
+                if (f.exists()) {
+                    System.out.println("Bootloader: Pre-loading user ELF: " + elfPath);
+                    kernel.createTask(elfPath);
                 }
-
-                // Start the CPU
-                cpu.setProgramCounterEntryPoint(entryPoint);
-                cpu.turnOn();
-
-                // The program will run and use syscalls for I/O and task management
-                // - Syscall 64 (write) for console output
-                // - Syscall 63 (read) for console input
-                // - Syscall 24 (yield) for cooperative multitasking
-                // - Syscall 93 (exit) to terminate
-            } else {
-                System.err.println("Error: No ELF file specified. Please provide an ELF file path as an argument.");
             }
+
+            // --------------------------------------------------------
+            // 5. START KERNEL
+            // --------------------------------------------------------
+            // This blocks forever in the mainLoop().
+            // 1. Scheduler picks InitTask -> InitTask spawns ShellTask
+            // 2. Scheduler picks ShellTask -> ShellTask prints "$" and waits for input
+            System.out.println("Bootloader: Starting Kernel scheduler...");
+            System.out.println("------------------------------------------");
+            kernel.start();
+
         } catch (Exception e) {
-            System.err.println("Error running program: " + e.getMessage());
+            System.err.println("\nKERNEL PANIC: " + e.getMessage());
             e.printStackTrace();
+        } finally {
+            System.out.println("\nSystem Halted.");
         }
     }
 }

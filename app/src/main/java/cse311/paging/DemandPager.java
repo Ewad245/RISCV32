@@ -25,27 +25,42 @@ public class DemandPager implements Pager {
         if (!as.isPagePresent(vpn)) {
             // Page fault - need to allocate a frame
             int frame = mm.allocateFrame();
+
+            // If Out Of Memory (OOM), we must evict a victim frame
             if (frame < 0) {
-                // Need to evict a page
+                // 1. Pick a victim frame from ANY process (Global replacement)
                 frame = repl.pickVictim(i -> true);
+
                 if (frame >= 0) {
+                    // 2. Identify the owner of this victim frame
                     FrameOwner owner = mm.getFrameOwner(frame);
-                    if (owner != null) {
-                        // Find which VPN this frame belongs to and unmap it
-                        int victimVpn = findVpnForFrame(as, frame);
-                        if (victimVpn >= 0) {
-                            as.unmapPage(victimVpn);
+
+                    if (owner != null && owner.pid != -1) {
+                        // 3. Retrieve the VICTIM'S address space (this fixes the cross-process
+                        // corruption)
+                        AddressSpace victimAS = mm.getAddressSpace(owner.pid);
+
+                        if (victimAS != null) {
+                            // 4. Unmap the page from the VICTIM'S page table
+                            // We use the VPN stored in the FrameOwner record
+                            victimAS.unmapPage(owner.vpn);
                         }
+
+                        // 5. Clear ownership and notify the replacement policy
                         mm.setFrameOwner(frame, null);
                         repl.onUnmap(frame);
                     }
+
+                    // 6. Mark the frame as free so we can immediately re-allocate it below
                     mm.freeFrame(frame);
+
+                    // 7. Allocate the frame we just freed
                     frame = mm.allocateFrame();
                 }
             }
 
             if (frame < 0) {
-                throw new MemoryAccessException("Out of physical memory");
+                throw new MemoryAccessException("Out of physical memory - Thrashing detected or Swap unavailable");
             }
 
             // Map the page with appropriate permissions
@@ -58,9 +73,10 @@ public class DemandPager implements Pager {
                 throw new MemoryAccessException("Failed to map page");
             }
 
+            // Register new ownership for the current process
             mm.setFrameOwner(frame, new FrameOwner(as.getPid(), vpn));
 
-            // Zero the frame
+            // Zero the frame (Security: prevent reading old data from previous process)
             int frameStart = frame * PagedMemoryManager.PAGE_SIZE;
             for (int i = 0; i < PagedMemoryManager.PAGE_SIZE; i++) {
                 mm.writeByteToPhysicalAddress(frameStart + i, (byte) 0);
@@ -70,7 +86,6 @@ public class DemandPager implements Pager {
         }
 
         // Check permissions and update access bits
-        AddressSpace.PageStats stats = as.getPageStats(vpn);
         int frame = as.getFrameNumber(vpn);
 
         if (frame < 0) {
@@ -82,39 +97,5 @@ public class DemandPager implements Pager {
         repl.onAccess(frame);
 
         return frame;
-    }
-
-    // Helper method to find VPN for a given frame by searching through page tables
-    private int findVpnForFrame(AddressSpace as, int frame) {
-        // Search through the 2-level page table structure
-        for (int l1Index = 0; l1Index < 1024; l1Index++) {
-            AddressSpace.PageTableEntry l1Entry = as.root.entries[l1Index];
-
-            // Skip invalid L1 entries
-            if (l1Entry == null || !l1Entry.V) {
-                continue;
-            }
-
-            // Get the L2 page table
-            AddressSpace.PageTable l2Table = as.getPageTable(l1Entry.ppn);
-            if (l2Table == null) {
-                continue;
-            }
-
-            // Search through L2 entries
-            for (int l2Index = 0; l2Index < 1024; l2Index++) {
-                AddressSpace.PageTableEntry pte = l2Table.entries[l2Index];
-
-                // Check if this PTE is valid and maps to our target frame
-                if (pte != null && pte.V && pte.ppn == frame) {
-                    // Found it! Reconstruct the VPN
-                    int vpn = (l1Index << 10) | l2Index;
-                    return vpn;
-                }
-            }
-        }
-
-        // Not found
-        return -1;
     }
 }
