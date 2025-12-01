@@ -39,22 +39,28 @@ public class App {
             // We only need to create InitTask manually.
             // The InitTask code (InitTask.java) will automatically detect
             // that the Shell is missing and spawn ShellTask for us.
-            InitTask initTask = new InitTask(1, kernel);
-            kernel.addTaskToScheduler(initTask);
+            // InitTask initTask = new InitTask(1, kernel);
+            // kernel.addTaskToScheduler(initTask);
 
             // --------------------------------------------------------
             // 4. (OPTIONAL) PRE-LOAD ELF
             // --------------------------------------------------------
             // If you pass a filename (e.g., "program.elf"), we load it now.
             // This is like adding a service to startup scripts.
-            if (args.length > 0) {
-                String elfPath = args[0];
-                File f = new File(elfPath);
-                if (f.exists()) {
-                    System.out.println("Bootloader: Pre-loading user ELF: " + elfPath);
-                    kernel.createTask(elfPath);
-                }
+
+            // Test
+            // if (args.length > 0) {
+            String elfPath = "User_Program_ELF\\init.elf";
+            System.out.println("Current working directory: " + System.getProperty("user.dir"));
+            System.out.println("Looking for ELF at: " + elfPath);
+            File f = new File(elfPath);
+            System.out.println("File exists: " + f.exists());
+            System.out.println("Absolute path: " + f.getAbsolutePath());
+            if (f.exists()) {
+                System.out.println("Bootloader: Pre-loading user ELF: " + elfPath);
+                kernel.createTask(elfPath);
             }
+            // }
 
             // --------------------------------------------------------
             // 5. START KERNEL
@@ -66,6 +72,9 @@ public class App {
             System.out.println("------------------------------------------");
             kernel.start();
 
+        } catch (NullPointerException e) {
+            System.err.println("Path invalid: " + e.getMessage());
+            e.printStackTrace();
         } catch (Exception e) {
             System.err.println("\nKERNEL PANIC: " + e.getMessage());
             e.printStackTrace();

@@ -17,14 +17,10 @@ public class CompilationTest {
         assertNotNull(computer.getMemoryManager());
         assertNotNull(computer.getKernel());
         
-        TaskAwareMemoryManager taskMemory = computer.getTaskAwareMemoryManager();
-        assertNotNull(taskMemory);
-        
         // Test constants are accessible
         assertTrue(VirtualMemoryManager.TEXT_START > 0);
         assertTrue(VirtualMemoryManager.DATA_START > 0);
         assertTrue(VirtualMemoryManager.HEAP_START > 0);
-        assertTrue(taskMemory.getStackStart() > 0);
         assertTrue(VirtualMemoryManager.STACK_SIZE > 0);
         assertTrue(VirtualMemoryManager.UART_BASE > 0);
         assertTrue(VirtualMemoryManager.UART_SIZE > 0);

@@ -15,6 +15,7 @@ import cse311.paging.PagedMemoryManager;
  */
 public class SystemCallHandler {
     private final Kernel kernel;
+    private RV32iCpu cpu;
 
     // System call numbers (following Linux RISC-V convention)
     public static final int SYS_EXIT = 93;
@@ -31,14 +32,15 @@ public class SystemCallHandler {
     public static final int SYS_GET_TIME = 1001;
     public static final int SYS_SLEEP = 1002;
 
-    public SystemCallHandler(Kernel kernel) {
+    public SystemCallHandler(Kernel kernel, RV32iCpu cpu) {
         this.kernel = kernel;
+        this.cpu = cpu;
     }
 
     /**
      * Handle a system call from a task
      */
-    public void handleSystemCall(Task task, RV32iCpu cpu) {
+    public void handleSystemCall(Task task) {
         int[] registers = cpu.getRegisters();
         int syscallNumber = registers[17]; // a7
 
@@ -200,6 +202,7 @@ public class SystemCallHandler {
 
             // To the PARENT, fork returns the child's PID
             System.out.println("SYS_FORK: Parent " + task.getId() + " received child PID " + child.getId());
+            cpu.setRegister(10, child.getId());
             return child.getId();
 
         } catch (Exception e) {
@@ -262,6 +265,8 @@ public class SystemCallHandler {
     }
 
     private int handleExec(Task task, int pathPtr, int argvPtr) {
+        System.out.println("SYS_EXEC: Task " + task.getId() + " requesting exec");
+
         // We must be using the PagedMemoryManager for exec to work
         if (!(kernel.getMemory() instanceof cse311.paging.PagedMemoryManager)) {
             System.err.println("SYS_EXEC: PagedMemoryManager is required for exec.");

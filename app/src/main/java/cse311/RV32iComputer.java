@@ -27,6 +27,7 @@ public class RV32iComputer {
                     PagingConfiguration.Policy.CLOCK // Use clock replacement
             );
         }
+        this.cpu.turnOn();
 
         System.out.println("RV32iComputer initialized with policy-based paging");
         System.out.println("Total memory: " + (memSize / (1024 * 1024)) + "MB");

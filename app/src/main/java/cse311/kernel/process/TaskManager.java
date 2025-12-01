@@ -36,19 +36,30 @@ public class TaskManager {
      * Create a new process from an ELF file with a parent
      */
     public Task createTask(int pid, String elfPath, Task parent) throws Exception {
+        // Create address space for the task
+        PagedMemoryManager pm = (PagedMemoryManager) kernel.getMemory();
+        AddressSpace addressSpace = pm.createAddressSpace(pid);
+
+        // Switch to the new address space for loading
+        pm.switchTo(addressSpace);
+
         // Load ELF file
-        ElfLoader elfLoader = new ElfLoader(kernel.getMemory());
+        ElfLoader elfLoader = new ElfLoader(pm);
         elfLoader.loadElf(elfPath);
 
         // Get entry point
         int entryPoint = elfLoader.getEntryPoint();
 
-        // Allocate stack
+        // Allocate stack for PagedMemoryManager
         int stackSize = kernel.getConfig().getStackSize();
-        int stackBase = kernelMemory.allocateStack(pid, stackSize);
+        final int STACK_TOP = 0x7FFF_F000; // 4KB below 2GB, page-aligned
+        int stackBase = STACK_TOP - stackSize;
+        pm.mapRegion(addressSpace, stackBase, stackSize, /* R= */true, /* W= */true, /* X= */false);
 
         // Create task
         Task task = new Task(pid, elfPath, entryPoint, stackSize, stackBase);
+        task.setAddressSpace(addressSpace);
+
         if (parent != null) {
             task.setParent(parent);
             parent.addChild(task);
@@ -291,6 +302,9 @@ public class TaskManager {
         // 8. **CRITICAL:** Set the return value (a0) for the child to 0
         // This is how the child process knows it is the child.
         child.getRegisters()[10] = 0; // a0 register (x10)
+        System.out.println("DEBUG: Child " + childPid + " a0 register set to: " + child.getRegisters()[10]);
+
+        System.out.println("DEBUG: Child " + childPid + " PC set to " + child.getProgramCounter());
 
         // 9. Set parent-child relationship
         child.setParent(parent);

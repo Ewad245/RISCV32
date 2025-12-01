@@ -37,7 +37,7 @@ public class Kernel {
         this.kernelMemory = new KernelMemoryManager(memory);
         this.taskManager = new TaskManager(this, kernelMemory);
         this.scheduler = createScheduler();
-        this.syscallHandler = new SystemCallHandler(this);
+        this.syscallHandler = new SystemCallHandler(this, cpu);
 
         System.out.println("RV32IM Java Kernel initialized");
         System.out.println("Scheduler: " + scheduler.getClass().getSimpleName());
@@ -161,6 +161,7 @@ public class Kernel {
 
                     // Check if task made a system call
                     if (cpu.isEcall()) {
+                        task.saveState(cpu);
                         handleSystemCall(task);
                         break;
                     }
@@ -206,7 +207,7 @@ public class Kernel {
      */
     private void handleSystemCall(Task task) {
         try {
-            syscallHandler.handleSystemCall(task, cpu);
+            syscallHandler.handleSystemCall(task);
         } catch (Exception e) {
             System.err.println("System call error for task " + task.getId() + ": " + e.getMessage());
             task.setState(TaskState.TERMINATED);

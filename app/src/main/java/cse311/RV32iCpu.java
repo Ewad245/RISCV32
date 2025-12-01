@@ -16,51 +16,51 @@ public class RV32iCpu {
     private static final int INSTRUCTION_SIZE = 4; // 32-bit instructions
 
     // Privilege levels
-    public static final int PRIVILEGE_USER = 0;       // U-mode
+    public static final int PRIVILEGE_USER = 0; // U-mode
     public static final int PRIVILEGE_SUPERVISOR = 1; // S-mode
-    public static final int PRIVILEGE_MACHINE = 3;    // M-mode
-    
+    public static final int PRIVILEGE_MACHINE = 3; // M-mode
+
     // Current privilege level
     private int privilegeMode = PRIVILEGE_MACHINE; // Start in M-mode
-    
+
     // CSR addresses
     // Machine-level CSRs
-    public static final int MSTATUS = 0x300;    // Machine status register
-    public static final int MISA = 0x301;       // Machine ISA register
-    public static final int MEDELEG = 0x302;    // Machine exception delegation register
-    public static final int MIDELEG = 0x303;    // Machine interrupt delegation register
-    public static final int MIE = 0x304;        // Machine interrupt enable register
-    public static final int MTVEC = 0x305;      // Machine trap handler base address
-    public static final int MEPC = 0x341;       // Machine exception program counter
-    public static final int MCAUSE = 0x342;     // Machine trap cause
-    public static final int MTVAL = 0x343;      // Machine trap value
-    public static final int MIP = 0x344;        // Machine interrupt pending
-    
+    public static final int MSTATUS = 0x300; // Machine status register
+    public static final int MISA = 0x301; // Machine ISA register
+    public static final int MEDELEG = 0x302; // Machine exception delegation register
+    public static final int MIDELEG = 0x303; // Machine interrupt delegation register
+    public static final int MIE = 0x304; // Machine interrupt enable register
+    public static final int MTVEC = 0x305; // Machine trap handler base address
+    public static final int MEPC = 0x341; // Machine exception program counter
+    public static final int MCAUSE = 0x342; // Machine trap cause
+    public static final int MTVAL = 0x343; // Machine trap value
+    public static final int MIP = 0x344; // Machine interrupt pending
+
     // Supervisor-level CSRs
-    public static final int SSTATUS = 0x100;    // Supervisor status register
-    public static final int SIE = 0x104;        // Supervisor interrupt enable register
-    public static final int STVEC = 0x105;      // Supervisor trap handler base address
-    public static final int SEPC = 0x141;       // Supervisor exception program counter
-    public static final int SCAUSE = 0x142;     // Supervisor trap cause
-    public static final int STVAL = 0x143;      // Supervisor trap value
-    public static final int SIP = 0x144;        // Supervisor interrupt pending
-    public static final int SATP = 0x180;       // Supervisor address translation and protection
-    
+    public static final int SSTATUS = 0x100; // Supervisor status register
+    public static final int SIE = 0x104; // Supervisor interrupt enable register
+    public static final int STVEC = 0x105; // Supervisor trap handler base address
+    public static final int SEPC = 0x141; // Supervisor exception program counter
+    public static final int SCAUSE = 0x142; // Supervisor trap cause
+    public static final int STVAL = 0x143; // Supervisor trap value
+    public static final int SIP = 0x144; // Supervisor interrupt pending
+    public static final int SATP = 0x180; // Supervisor address translation and protection
+
     // CSR access types
     private static final int CSR_READ_WRITE = 0b01;
     private static final int CSR_READ_SET = 0b10;
     private static final int CSR_READ_CLEAR = 0b11;
-    
+
     // CSR registers map
     private Map<Integer, Integer> csrRegisters = new HashMap<>();
-    
+
     private MemoryManager memory;
     private Scanner reader;
     private Thread cpuThread;
     private boolean running = false;
     private static final int LOOP_THRESHOLD = 1000; // Maximum times to execute same instruction
     private InputThread input;
-    
+
     // Fields to track system calls and exceptions for kernel integration
     private boolean lastInstructionWasEcall = false;
     private boolean exceptionOccurred = false;
@@ -68,43 +68,44 @@ public class RV32iCpu {
     public RV32iCpu(MemoryManager memory) {
         this.memory = memory;
         input = new InputThread();
-        
+
         // Initialize CSR registers
         initializeCSRs();
     }
-    
+
     /**
      * Initialize Control and Status Registers (CSRs) with default values
      */
     private void initializeCSRs() {
         // Machine-level CSRs
-        csrRegisters.put(MISA, 0x40001108);      // RV32I base ISA with M-mode, M-extension, and Zicsr
-        csrRegisters.put(MSTATUS, 0x1800);       // MPP (Machine Previous Privilege) set to M-mode
-        csrRegisters.put(MEDELEG, 0x0);          // No exception delegation
-        csrRegisters.put(MIDELEG, 0x0);          // No interrupt delegation
-        csrRegisters.put(MIE, 0x0);              // No interrupts enabled
-        csrRegisters.put(MTVEC, 0x0);            // Trap vector base address
-        csrRegisters.put(MEPC, 0x0);             // Exception program counter
-        csrRegisters.put(MCAUSE, 0x0);           // Trap cause
-        csrRegisters.put(MTVAL, 0x0);            // Trap value
-        csrRegisters.put(MIP, 0x0);              // No interrupts pending
-        
+        csrRegisters.put(MISA, 0x40001108); // RV32I base ISA with M-mode, M-extension, and Zicsr
+        csrRegisters.put(MSTATUS, 0x1800); // MPP (Machine Previous Privilege) set to M-mode
+        csrRegisters.put(MEDELEG, 0x0); // No exception delegation
+        csrRegisters.put(MIDELEG, 0x0); // No interrupt delegation
+        csrRegisters.put(MIE, 0x0); // No interrupts enabled
+        csrRegisters.put(MTVEC, 0x0); // Trap vector base address
+        csrRegisters.put(MEPC, 0x0); // Exception program counter
+        csrRegisters.put(MCAUSE, 0x0); // Trap cause
+        csrRegisters.put(MTVAL, 0x0); // Trap value
+        csrRegisters.put(MIP, 0x0); // No interrupts pending
+
         // Supervisor-level CSRs
-        csrRegisters.put(SSTATUS, 0x0);          // Supervisor status
-        csrRegisters.put(SIE, 0x0);              // No supervisor interrupts enabled
-        csrRegisters.put(STVEC, 0x0);            // Supervisor trap vector base address
-        csrRegisters.put(SEPC, 0x0);             // Supervisor exception program counter
-        csrRegisters.put(SCAUSE, 0x0);           // Supervisor trap cause
-        csrRegisters.put(STVAL, 0x0);            // Supervisor trap value
-        csrRegisters.put(SIP, 0x0);              // No supervisor interrupts pending
-        csrRegisters.put(SATP, 0x0);             // No address translation (bare mode)
+        csrRegisters.put(SSTATUS, 0x0); // Supervisor status
+        csrRegisters.put(SIE, 0x0); // No supervisor interrupts enabled
+        csrRegisters.put(STVEC, 0x0); // Supervisor trap vector base address
+        csrRegisters.put(SEPC, 0x0); // Supervisor exception program counter
+        csrRegisters.put(SCAUSE, 0x0); // Supervisor trap cause
+        csrRegisters.put(STVAL, 0x0); // Supervisor trap value
+        csrRegisters.put(SIP, 0x0); // No supervisor interrupts pending
+        csrRegisters.put(SATP, 0x0); // No address translation (bare mode)
     }
-    
+
     /**
      * Read a CSR register value
      * 
      * @param csrAddress The CSR address
-     * @return The CSR value, or 0 if the CSR is not accessible in the current privilege mode
+     * @return The CSR value, or 0 if the CSR is not accessible in the current
+     *         privilege mode
      */
     private int readCSR(int csrAddress) {
         // Check if the CSR is accessible in the current privilege mode
@@ -113,18 +114,20 @@ public class RV32iCpu {
             // In a real implementation, this would trigger an illegal instruction exception
             return 0;
         }
-        
+
         // Return the CSR value, or 0 if not initialized
         return csrRegisters.getOrDefault(csrAddress, 0);
     }
-    
+
     /**
      * Write a value to a CSR register
      * 
      * @param csrAddress The CSR address
-     * @param value The value to write
-     * @param accessType The access type (CSR_READ_WRITE, CSR_READ_SET, CSR_READ_CLEAR)
-     * @return The previous CSR value, or 0 if the CSR is not accessible in the current privilege mode
+     * @param value      The value to write
+     * @param accessType The access type (CSR_READ_WRITE, CSR_READ_SET,
+     *                   CSR_READ_CLEAR)
+     * @return The previous CSR value, or 0 if the CSR is not accessible in the
+     *         current privilege mode
      */
     private int writeCSR(int csrAddress, int value, int accessType) {
         // Check if the CSR is accessible in the current privilege mode
@@ -133,10 +136,10 @@ public class RV32iCpu {
             // In a real implementation, this would trigger an illegal instruction exception
             return 0;
         }
-        
+
         // Get the current value
         int currentValue = csrRegisters.getOrDefault(csrAddress, 0);
-        
+
         // Calculate the new value based on the access type
         int newValue;
         switch (accessType) {
@@ -152,16 +155,16 @@ public class RV32iCpu {
             default:
                 newValue = value;
         }
-        
+
         // Update the CSR value
         csrRegisters.put(csrAddress, newValue);
-        
+
         // Handle side effects of writing to certain CSRs
         handleCSRSideEffects(csrAddress, newValue, currentValue);
-        
+
         return currentValue;
     }
-    
+
     /**
      * Check if a CSR is accessible in the current privilege mode
      * 
@@ -171,17 +174,18 @@ public class RV32iCpu {
     private boolean isCSRAccessible(int csrAddress) {
         // Extract the privilege level from the CSR address (bits 9:8)
         int csrPrivilege = (csrAddress >> 8) & 0x3;
-        
-        // CSR is accessible if the current privilege level is >= the CSR privilege level
+
+        // CSR is accessible if the current privilege level is >= the CSR privilege
+        // level
         return privilegeMode >= csrPrivilege;
     }
-    
+
     /**
      * Handle side effects of writing to certain CSRs
      * 
      * @param csrAddress The CSR address
-     * @param newValue The new CSR value
-     * @param oldValue The old CSR value
+     * @param newValue   The new CSR value
+     * @param oldValue   The old CSR value
      */
     private void handleCSRSideEffects(int csrAddress, int newValue, int oldValue) {
         switch (csrAddress) {
@@ -206,26 +210,26 @@ public class RV32iCpu {
     public void setProgramCounterEntryPoint(int entryPoint) {
         this.pc = entryPoint;
     }
-    
+
     // Methods needed by the kernel
     public void step() throws Exception {
         fetchExecuteCycle();
     }
-    
+
     public boolean isEcall() {
         // Check if the last instruction was an ecall
         boolean wasEcall = lastInstructionWasEcall;
         lastInstructionWasEcall = false; // Reset flag after checking
         return wasEcall;
     }
-    
+
     public boolean isException() {
         // Check if an exception occurred
         boolean hadException = exceptionOccurred;
         exceptionOccurred = false; // Reset flag after checking
         return hadException;
     }
-    
+
     /**
      * Reset system call and exception flags (useful for testing or initialization)
      */
@@ -233,44 +237,47 @@ public class RV32iCpu {
         lastInstructionWasEcall = false;
         exceptionOccurred = false;
     }
-    
+
     public int[] getRegisters() {
         return x.clone(); // Return a copy to prevent external modification
     }
-    
+
     public void setRegisters(int[] registers) {
         if (registers.length == 32) {
             System.arraycopy(registers, 0, this.x, 0, 32);
         }
     }
-    
+
     public int getProgramCounter() {
         return pc;
     }
-    
+
     public void setProgramCounter(int pc) {
         this.pc = pc;
     }
 
     public void turnOn() {
         Runnable task1 = () -> input.getInput(memory);
-        this.cpuThread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                while (RV32iCpu.this.running) {
-                    try {
-                        // find13And12(memory.getByteMemory());
-                        fetchExecuteCycle();
-                    } catch (Exception e) {
-                        // TODO Auto-generated catch block
-                        e.printStackTrace();
-                    }
-                }
-            }
-        });
+        /*
+         * this.cpuThread = new Thread(new Runnable() {
+         * 
+         * @Override
+         * public void run() {
+         * while (RV32iCpu.this.running) {
+         * try {
+         * // find13And12(memory.getByteMemory());
+         * fetchExecuteCycle();
+         * } catch (Exception e) {
+         * // TODO Auto-generated catch block
+         * e.printStackTrace();
+         * }
+         * }
+         * }
+         * });
+         */
         new Thread(task1).start();
         this.running = true;
-        this.cpuThread.start();
+        // this.cpuThread.start();
     }
 
     private void fetchExecuteCycle() throws Exception {
@@ -287,7 +294,7 @@ public class RV32iCpu {
             lastPC = pc;
             loopCount = 0;
         }
-        
+
         try {
             // Fetch the instruction from memory at the address in the pc register
             int instructionFetched = fetch();
@@ -304,19 +311,17 @@ public class RV32iCpu {
             e.printStackTrace(); // Log the exception for debugging
         }
     }
-    
 
-    
     /**
      * Expose the handleException method for testing
      * 
      * @param cause The exception cause
-     * @param tval The trap value
+     * @param tval  The trap value
      */
     public void handleException(int cause, int tval) {
         // Set exception flag for kernel integration
         exceptionOccurred = true;
-        
+
         // Directly implement exception handling here to avoid recursive call
         // Check if the exception should be delegated to S-mode
         boolean delegate = false;
@@ -324,56 +329,57 @@ public class RV32iCpu {
             int medeleg = csrRegisters.getOrDefault(MEDELEG, 0); // Direct access to avoid recursion
             delegate = ((medeleg >> cause) & 1) == 1;
         }
-        
+
         if (delegate && privilegeMode == PRIVILEGE_USER) {
             // Delegate to S-mode
             // Save current PC to SEPC
             csrRegisters.put(SEPC, pc);
-            
+
             // Set SCAUSE to the exception cause
             csrRegisters.put(SCAUSE, cause);
-            
+
             // Set STVAL to the trap value
             csrRegisters.put(STVAL, tval);
-            
+
             // Update SSTATUS SPP field to the current privilege mode
             int sstatus = csrRegisters.getOrDefault(SSTATUS, 0); // Direct access to avoid recursion
             sstatus = (sstatus & ~0x100) | ((privilegeMode & 0x1) << 8);
             csrRegisters.put(SSTATUS, sstatus);
-            
+
             // Set privilege mode to S-mode
             privilegeMode = PRIVILEGE_SUPERVISOR;
-            
+
             // Jump to the trap handler address in STVEC
             pc = csrRegisters.getOrDefault(STVEC, 0) & ~0x3; // Clear mode bits
         } else {
             // Handle in M-mode
             // Save current PC to MEPC
             csrRegisters.put(MEPC, pc);
-            
+
             // Set MCAUSE to the exception cause
             csrRegisters.put(MCAUSE, cause);
-            
+
             // Set MTVAL to the trap value
             csrRegisters.put(MTVAL, tval);
-            
+
             // Update MSTATUS MPP field to the current privilege mode
             int mstatus = csrRegisters.getOrDefault(MSTATUS, 0); // Direct access to avoid recursion
             mstatus = (mstatus & ~0x1800) | (privilegeMode << 11);
             csrRegisters.put(MSTATUS, mstatus);
-            
+
             // Set privilege mode to M-mode
             privilegeMode = PRIVILEGE_MACHINE;
-            
+
             // Jump to the trap handler address in MTVEC
             pc = csrRegisters.getOrDefault(MTVEC, 0) & ~0x3; // Clear mode bits
         }
     }
-    
+
     /**
      * Return from an exception/interrupt (MRET or SRET instruction)
      * 
-     * @param fromMode The privilege mode returning from (PRIVILEGE_MACHINE or PRIVILEGE_SUPERVISOR)
+     * @param fromMode The privilege mode returning from (PRIVILEGE_MACHINE or
+     *                 PRIVILEGE_SUPERVISOR)
      */
     private void returnFromException(int fromMode) {
         if (fromMode == PRIVILEGE_MACHINE) {
@@ -381,10 +387,10 @@ public class RV32iCpu {
             // Get the previous privilege mode from MSTATUS.MPP
             int mstatus = csrRegisters.getOrDefault(MSTATUS, 0); // Direct access to avoid recursion
             int prevMode = (mstatus >> 11) & 0x3;
-            
+
             // Set the privilege mode to the previous mode
             privilegeMode = prevMode;
-            
+
             // Update MSTATUS
             // Clear MPP (set it to U-mode)
             mstatus = mstatus & ~0x1800;
@@ -393,7 +399,7 @@ public class RV32iCpu {
             // Set MPIE to 1
             mstatus = mstatus | 0x80;
             csrRegisters.put(MSTATUS, mstatus);
-            
+
             // Set PC to the value in MEPC
             pc = csrRegisters.getOrDefault(MEPC, 0); // Direct access to avoid recursion
         } else if (fromMode == PRIVILEGE_SUPERVISOR) {
@@ -401,10 +407,10 @@ public class RV32iCpu {
             // Get the previous privilege mode from SSTATUS.SPP
             int sstatus = csrRegisters.getOrDefault(SSTATUS, 0); // Direct access to avoid recursion
             int prevMode = ((sstatus >> 8) & 0x1) == 1 ? PRIVILEGE_SUPERVISOR : PRIVILEGE_USER;
-            
+
             // Set the privilege mode to the previous mode
             privilegeMode = prevMode;
-            
+
             // Update SSTATUS
             // Clear SPP
             sstatus = sstatus & ~0x100;
@@ -413,7 +419,7 @@ public class RV32iCpu {
             // Set SPIE to 1
             sstatus = sstatus | 0x20;
             csrRegisters.put(SSTATUS, sstatus);
-            
+
             // Set PC to the value in SEPC
             pc = csrRegisters.getOrDefault(SEPC, 0); // Direct access to avoid recursion
         }
@@ -545,10 +551,12 @@ public class RV32iCpu {
                             long a = x[rs1];
                             long b = x[rs2];
                             // Sign extend to 64 bits
-                            if ((a & 0x80000000L) != 0) a |= 0xFFFFFFFF00000000L;
-                            if ((b & 0x80000000L) != 0) b |= 0xFFFFFFFF00000000L;
+                            if ((a & 0x80000000L) != 0)
+                                a |= 0xFFFFFFFF00000000L;
+                            if ((b & 0x80000000L) != 0)
+                                b |= 0xFFFFFFFF00000000L;
                             long result = a * b;
-                            x[rd] = (int)(result >> 32); // High 32 bits
+                            x[rd] = (int) (result >> 32); // High 32 bits
                         } else {
                             // Illegal instruction
                             handleException(2, pc - INSTRUCTION_SIZE);
@@ -562,9 +570,10 @@ public class RV32iCpu {
                             long a = x[rs1];
                             long b = Integer.toUnsignedLong(x[rs2]);
                             // Sign extend a to 64 bits
-                            if ((a & 0x80000000L) != 0) a |= 0xFFFFFFFF00000000L;
+                            if ((a & 0x80000000L) != 0)
+                                a |= 0xFFFFFFFF00000000L;
                             long result = a * b;
-                            x[rd] = (int)(result >> 32); // High 32 bits
+                            x[rd] = (int) (result >> 32); // High 32 bits
                         } else {
                             // Illegal instruction
                             handleException(2, pc - INSTRUCTION_SIZE);
@@ -578,7 +587,7 @@ public class RV32iCpu {
                             long a = Integer.toUnsignedLong(x[rs1]);
                             long b = Integer.toUnsignedLong(x[rs2]);
                             long result = a * b;
-                            x[rd] = (int)(result >> 32); // High 32 bits
+                            x[rd] = (int) (result >> 32); // High 32 bits
                         } else {
                             // Illegal instruction
                             handleException(2, pc - INSTRUCTION_SIZE);
@@ -842,7 +851,7 @@ public class RV32iCpu {
                     int csrAddr = imm_i & 0xFFF;
                     int oldCsrValue = readCSR(csrAddr);
                     int newValue;
-                    
+
                     switch (func3) {
                         case 0b001: // CSRRW
                             newValue = x[rs1];
@@ -866,15 +875,15 @@ public class RV32iCpu {
                             newValue = oldCsrValue; // No change for unknown func3
                             break;
                     }
-                    
+
                     // Update the CSR register directly
                     csrRegisters.put(csrAddr, newValue);
-                    
+
                     // Handle side effects if needed
                     if (csrAddr == MSTATUS || csrAddr == SSTATUS) {
                         handleCSRSideEffects(csrAddr, newValue, oldCsrValue);
                     }
-                    
+
                     if (rd != 0) {
                         x[rd] = oldCsrValue;
                     }
@@ -921,7 +930,7 @@ public class RV32iCpu {
         if (checkUARTAddress(virtualAddr)) {
             // UART access is only allowed in machine mode and supervisor mode
             if (privilegeMode == PRIVILEGE_USER) {
-                throw new RuntimeException("User mode cannot access UART at address: 0x" + 
+                throw new RuntimeException("User mode cannot access UART at address: 0x" +
                         Integer.toHexString(virtualAddr));
             }
             return virtualAddr;
@@ -944,9 +953,10 @@ public class RV32iCpu {
         // The SimpleMemory class will handle the translation to physical addresses
         return virtualAddr;
     }
-    
+
     /**
-     * Maps a virtual address to a physical address for write access and validates permissions
+     * Maps a virtual address to a physical address for write access and validates
+     * permissions
      * 
      * @param virtualAddr The virtual address to map
      * @return The physical address
@@ -970,7 +980,7 @@ public class RV32iCpu {
         }
         return 0;
     }
-    
+
     /**
      * Get the current privilege mode (for testing)
      * 
@@ -979,7 +989,7 @@ public class RV32iCpu {
     public int getPrivilegeMode() {
         return privilegeMode;
     }
-    
+
     /**
      * Set the program counter (for testing)
      * 
@@ -988,17 +998,17 @@ public class RV32iCpu {
     public void setPc(int value) {
         pc = value;
     }
-    
+
     /**
      * Write to a CSR register (for testing)
      * 
      * @param csrAddr The CSR address
-     * @param value The value to write
+     * @param value   The value to write
      */
     public void writeCSRTest(int csrAddr, int value) {
         csrRegisters.put(csrAddr, value);
     }
-    
+
     /**
      * Read from a CSR register (for testing)
      * 
@@ -1014,43 +1024,51 @@ public class RV32iCpu {
      * 
      * @return The current program counter
      */
-    /*public int getProgramCounter() {
-        return pc;
-    }*/
+    /*
+     * public int getProgramCounter() {
+     * return pc;
+     * }
+     */
 
     /**
      * Sets the program counter to a specific value.
      * 
      * @param pc The new program counter value
      */
-    /*public void setProgramCounter(int pc) {
-        this.pc = pc;
-    }*/
+    /*
+     * public void setProgramCounter(int pc) {
+     * this.pc = pc;
+     * }
+     */
 
     /**
      * Gets the current register values.
      * 
      * @return The current register values
      */
-    /*public int[] getRegisters() {
-        return x;
-    }*/
+    /*
+     * public int[] getRegisters() {
+     * return x;
+     * }
+     */
 
     /**
      * Sets the register values.
      * 
      * @param registers The new register values
      */
-    /*public void setRegisters(int[] registers) {
-        if (registers.length == 32) {
-            System.arraycopy(registers, 0, this.x, 0, 32);
-        }
-    }*/
+    /*
+     * public void setRegisters(int[] registers) {
+     * if (registers.length == 32) {
+     * System.arraycopy(registers, 0, this.x, 0, 32);
+     * }
+     * }
+     */
 
     public void executeTest(InstructionDecoded inst) {
         execute(inst);
     }
-    
+
     /**
      * Test method to execute a raw instruction
      * 
