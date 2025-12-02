@@ -151,6 +151,7 @@ public class Kernel {
 
             int instructionsExecuted = 0;
             int maxInstructions = scheduler.getTimeSlice();
+            boolean stateSavedBySyscall = false; // Flag to track if syscall saved state
 
             // Execute instructions until time slice expires or task yields
             while (instructionsExecuted < maxInstructions && task.getState() == TaskState.RUNNING) {
@@ -161,8 +162,16 @@ public class Kernel {
 
                     // Check if task made a system call
                     if (cpu.isEcall()) {
+                        // 1. Save state BEFORE handling syscall (Required for fork/wait to work)
                         task.saveState(cpu);
+
+                        // 2. Handle the syscall (which might change Task state, like exec)
                         handleSystemCall(task);
+
+                        // 3. Mark that we have already saved/handled the state.
+                        // This prevents the code below the loop from overwriting
+                        // changes made by 'exec' (like the new PC).
+                        stateSavedBySyscall = true;
                         break;
                     }
 
@@ -179,8 +188,9 @@ public class Kernel {
                 }
             }
 
-            // Save task state
-            task.saveState(cpu);
+            if (!stateSavedBySyscall) {
+                task.saveState(cpu);
+            }
 
             // If task is still running, it used up its time slice
             if (task.getState() == TaskState.RUNNING) {
@@ -326,7 +336,20 @@ public class Kernel {
                 return System.currentTimeMillis() > task.getWakeupTime();
             case PROCESS_EXIT:
                 // Check if child task has exited
-                return !tasks.containsKey(task.getWaitingForPid());
+                int pid = task.getWaitingForPid();
+                if (pid == -1) {
+                    // Waiting for ANY child to terminate: Look for a ZOMBIE child
+                    for (Task child : task.getChildren()) {
+                        if (child.getState() == TaskState.TERMINATED) {
+                            return true;
+                        }
+                    }
+                    return false; // No zombie children found yet
+                } else {
+                    // Waiting for a specific child
+                    Task child = tasks.get(pid);
+                    return child == null || child.getState() == TaskState.TERMINATED;
+                }
             default:
                 return false;
         }

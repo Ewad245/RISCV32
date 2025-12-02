@@ -111,9 +111,15 @@ public class SystemCallHandler {
                     result = -1; // ENOSYS
             }
 
-            if (handled) {
-                // Set return value in a0
-                cpu.setRegister(10, result); // Set a0 register directly in CPU
+            // Only update registers if the task is NOT waiting/blocked.
+            if (handled && task.getState() != TaskState.WAITING) {
+                // 1. Update the CPU (so immediate execution is correct)
+                cpu.setRegister(10, result);
+
+                // 2. CRITICAL: Update the Task object's register state as well.
+                // Since Kernel.java now skips the final saveState() to protect 'exec',
+                // we must manually ensure the return value is saved to the Task.
+                task.getRegisters()[10] = result;
                 System.out.println("Task " + task.getId() + " syscall " + syscallNumber + " -> " + result);
             }
 
@@ -164,10 +170,17 @@ public class SystemCallHandler {
             try {
                 // Check if UART has data
                 int status = kernel.getMemory().readByte(MemoryManager.UART_STATUS);
-                if (status == 0) {
-                    // No data available, block the task
+                if ((status & 1) == 0) {
+                    // No data available (RX_READY bit is 0)
+
+                    // Block the task
                     task.waitFor(WaitReason.UART_INPUT);
-                    return 0; // Will be resumed when data is available
+
+                    // Rewind PC so we retry the 'read' syscall when we wake up
+                    // This ensures we actually get the data when it arrives
+                    cpu.setProgramCounter(cpu.getProgramCounter() - 4);
+
+                    return 0;
                 }
 
                 // Read one character from UART
@@ -202,7 +215,6 @@ public class SystemCallHandler {
 
             // To the PARENT, fork returns the child's PID
             System.out.println("SYS_FORK: Parent " + task.getId() + " received child PID " + child.getId());
-            cpu.setRegister(10, child.getId());
             return child.getId();
 
         } catch (Exception e) {
@@ -261,10 +273,18 @@ public class SystemCallHandler {
 
         // Children exist, but none are dead yet. Block the parent.
         task.waitFor(WaitReason.PROCESS_EXIT);
+
+        // Rewind PC by 4 so the 'ecall' instruction is executed again when we wake up.
+        cpu.setProgramCounter(cpu.getProgramCounter() - 4);
+
         return 0; // Parent will retry this syscall when it wakes up
     }
 
     private int handleExec(Task task, int pathPtr, int argvPtr) {
+        // This is for optional path subfolders
+        StringBuilder pathBuilder = new StringBuilder();
+        pathBuilder.append("User_Program_ELF\\");
+
         System.out.println("SYS_EXEC: Task " + task.getId() + " requesting exec");
 
         // We must be using the PagedMemoryManager for exec to work
@@ -280,6 +300,8 @@ public class SystemCallHandler {
             System.err.println("SYS_EXEC: Invalid path pointer 0x" + Integer.toHexString(pathPtr));
             return -1;
         }
+        pathBuilder.append(path);
+        pathBuilder.append(".elf");
 
         List<String> argvList = new ArrayList<>();
         int currentArgPtrAddr = argvPtr;
@@ -328,11 +350,11 @@ public class SystemCallHandler {
             // address space (which we just set to newAS).
             // We use loadElf, not loadElfIntoAddressSpace, as the latter
             // seems to be for a different purpose in your test files.
-            elfLoader.loadElf(path);
+            elfLoader.loadElf(pathBuilder.toString());
             newEntryPoint = elfLoader.getEntryPoint();
 
         } catch (Exception e) {
-            System.err.println("SYS_EXEC: Failed to load ELF file '" + path + "': " + e.getMessage());
+            System.err.println("SYS_EXEC: Failed to load ELF file '" + pathBuilder + "': " + e.getMessage());
             pm.switchTo(task.getAddressSpace()); // Switch back to old AS
             pm.destroyAddressSpace(newAS.getPid()); // Clean up the failed AS
             return -1; // Return error
