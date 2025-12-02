@@ -327,7 +327,7 @@ public class Kernel {
             case UART_INPUT:
                 // Check if UART has data
                 try {
-                    return memory.readByte(MemoryManager.UART_STATUS) != 0;
+                    return (memory.readByte(MemoryManager.UART_STATUS) & 1) != 0;
                 } catch (Exception e) {
                     return false;
                 }

@@ -178,7 +178,11 @@ public class SystemCallHandler {
 
                     // Rewind PC so we retry the 'read' syscall when we wake up
                     // This ensures we actually get the data when it arrives
-                    cpu.setProgramCounter(cpu.getProgramCounter() - 4);
+                    int retryPC = cpu.getProgramCounter() - 4;
+                    cpu.setProgramCounter(retryPC);
+
+                    // Kernel.java will NOT save this change because we are inside a syscall.
+                    task.setProgramCounter(retryPC);
 
                     return 0;
                 }
@@ -275,7 +279,11 @@ public class SystemCallHandler {
         task.waitFor(WaitReason.PROCESS_EXIT);
 
         // Rewind PC by 4 so the 'ecall' instruction is executed again when we wake up.
-        cpu.setProgramCounter(cpu.getProgramCounter() - 4);
+        int retryPC = cpu.getProgramCounter() - 4;
+        cpu.setProgramCounter(retryPC);
+
+        // Manually sync the Task PC for the retry
+        task.setProgramCounter(retryPC);
 
         return 0; // Parent will retry this syscall when it wakes up
     }

@@ -56,10 +56,6 @@ public class PagedMemoryManager extends MemoryManager {
         return as;
     }
 
-    /**
-     * Retrieve an address space by PID.
-     * REQUIRED for DemandPager to perform cross-process eviction correctly.
-     */
     public AddressSpace getAddressSpace(int pid) {
         return spaces.get(pid);
     }
@@ -89,10 +85,15 @@ public class PagedMemoryManager extends MemoryManager {
         ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.WRITE);
+
+        // --- FIX START ---
         if (frame == -2) { // UART MMIO
-            super.getInput(String.valueOf((char) val));
+            // Delegate to parent MemoryManager to handle UART write
+            super.writeByte(va, val);
             return;
         }
+        // --- FIX END ---
+
         int pa = (frame << 12) | (va & 0xFFF);
         super.writeByte(pa, val);
     }
@@ -102,9 +103,14 @@ public class PagedMemoryManager extends MemoryManager {
         ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.READ);
+
+        // --- FIX START ---
         if (frame == -2) { // UART MMIO
-            return 0; // UART read placeholder
+            // Delegate to parent MemoryManager to handle UART read (Status/Data)
+            return super.readByte(va);
         }
+        // --- FIX END ---
+
         int pa = (frame << 12) | (va & 0xFFF);
         return super.readByte(pa);
     }
@@ -114,8 +120,12 @@ public class PagedMemoryManager extends MemoryManager {
         ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.READ);
+
+        // --- FIX START ---
         if (frame == -2)
-            return 0;
+            return super.readHalfWord(va);
+        // --- FIX END ---
+
         int pa = (frame << 12) | (va & 0xFFF);
         return super.readHalfWord(pa);
     }
@@ -125,8 +135,12 @@ public class PagedMemoryManager extends MemoryManager {
         ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.READ);
+
+        // --- FIX START ---
         if (frame == -2)
-            return 0;
+            return super.readWord(va);
+        // --- FIX END ---
+
         int pa = (frame << 12) | (va & 0xFFF);
         return super.readWord(pa);
     }
@@ -141,8 +155,14 @@ public class PagedMemoryManager extends MemoryManager {
         ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.WRITE);
-        if (frame == -2)
+
+        // --- FIX START ---
+        if (frame == -2) {
+            super.writeHalfWord(va, v);
             return;
+        }
+        // --- FIX END ---
+
         int pa = (frame << 12) | (va & 0xFFF);
         super.writeHalfWord(pa, v);
     }
@@ -152,8 +172,14 @@ public class PagedMemoryManager extends MemoryManager {
         ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.WRITE);
-        if (frame == -2)
+
+        // --- FIX START ---
+        if (frame == -2) {
+            super.writeWord(va, v);
             return;
+        }
+        // --- FIX END ---
+
         int pa = (frame << 12) | (va & 0xFFF);
         super.writeWord(pa, v);
     }
@@ -276,10 +302,6 @@ public class PagedMemoryManager extends MemoryManager {
         }
     }
 
-    /**
-     * Copies the memory content and page table structure from an old address space
-     * to a new one. This is the core logic for fork().
-     */
     public void copyAddressSpace(AddressSpace oldAS, AddressSpace newAS) throws MemoryAccessException {
         System.out.println(
                 "PagedMemoryManager: Copying address space from PID " + oldAS.getPid() + " to " + newAS.getPid());

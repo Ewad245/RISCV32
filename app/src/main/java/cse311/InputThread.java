@@ -9,7 +9,7 @@ public class InputThread {
         Scanner reader = new Scanner(System.in);
         while (true) {
             String input = reader.nextLine();
-            manager.getInput(input);
+            manager.getInput(input + "\n");
         }
     }
 
