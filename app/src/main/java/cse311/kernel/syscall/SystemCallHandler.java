@@ -1,11 +1,14 @@
 package cse311.kernel.syscall;
 
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
 import cse311.*;
 import cse311.kernel.Kernel;
-import cse311.paging.PagedMemoryManager;
+import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
+import cse311.kernel.memory.ProcessMemoryCoordinator;
 
 /**
  * Handles system calls from user tasks
@@ -131,6 +134,7 @@ public class SystemCallHandler {
 
     private int handleExit(Task task, int exitCode) {
         System.out.println("Task " + task.getId() + " exiting with code " + exitCode);
+        task.setExitCode(exitCode);
         task.setState(TaskState.TERMINATED);
         return exitCode;
     }
@@ -249,12 +253,10 @@ public class SystemCallHandler {
                 if (statusAddr != 0) {
                     try {
                         // Get the memory manager
-                        if (kernel.getMemory() instanceof PagedMemoryManager) {
-                            PagedMemoryManager pm = (PagedMemoryManager) kernel.getMemory();
+                        MemoryManager manager = kernel.getMemory();
 
-                            // WRITE to the parent's memory space at address 'statusAddr'
-                            pm.writeWord(statusAddr, exitCode);
-                        }
+                        // WRITE to the parent's memory space at address 'statusAddr'
+                        manager.writeWord(statusAddr, exitCode);
                     } catch (Exception e) {
                         System.err.println("SYS_WAIT: Failed to write exit code to user memory.");
                         return -1;
@@ -289,179 +291,87 @@ public class SystemCallHandler {
     }
 
     private int handleExec(Task task, int pathPtr, int argvPtr) {
-        // This is for optional path subfolders
-        StringBuilder pathBuilder = new StringBuilder();
-        pathBuilder.append("User_Program_ELF\\");
-
         System.out.println("SYS_EXEC: Task " + task.getId() + " requesting exec");
 
-        // We must be using the PagedMemoryManager for exec to work
-        if (!(kernel.getMemory() instanceof cse311.paging.PagedMemoryManager)) {
-            System.err.println("SYS_EXEC: PagedMemoryManager is required for exec.");
+        MemoryManager memory = kernel.getMemory();
+        ProcessMemoryCoordinator coordinator = kernel.getMemoryCoordinator();
+
+        if (coordinator == null) {
+            System.err.println("SYS_EXEC: Memory Coordinator not initialized.");
             return -1;
         }
-        cse311.paging.PagedMemoryManager pm = (cse311.paging.PagedMemoryManager) kernel.getMemory();
 
-        // --- 1. Read arguments (path and argv) from old address space ---
+        // 1. Read arguments from CURRENT memory
         String path = readStringFromTask(task, pathPtr);
-        if (path == null) {
-            System.err.println("SYS_EXEC: Invalid path pointer 0x" + Integer.toHexString(pathPtr));
+        if (path == null)
             return -1;
-        }
-        pathBuilder.append(path);
-        pathBuilder.append(".elf");
+        String fullPath = "User_Program_ELF\\" + path + ".elf";
 
+        // Read argv (Logic remains same, just using generic memory)
         List<String> argvList = new ArrayList<>();
         int currentArgPtrAddr = argvPtr;
         try {
             while (true) {
-                // Read the next pointer (which is a 4-byte int address)
-                int argPtr = pm.readWord(currentArgPtrAddr);
-                if (argPtr == 0) { // Null terminator for the array
+                // Read 4 bytes (pointer) from current memory
+                int argPtr = memory.readWord(currentArgPtrAddr);
+                if (argPtr == 0)
                     break;
-                }
 
-                // Read the string at that pointer
                 String arg = readStringFromTask(task, argPtr);
-                if (arg == null) {
-                    System.err.println("SYS_EXEC: Invalid argv string pointer at 0x" + Integer.toHexString(argPtr));
+                if (arg == null)
                     return -1;
-                }
-                argvList.add(arg);
-                currentArgPtrAddr += 4; // Move to the next pointer in the array
 
-                if (argvList.size() > 64) { // Safety break
-                    System.err.println("SYS_EXEC: Too many arguments.");
+                argvList.add(arg);
+                currentArgPtrAddr += 4;
+                if (argvList.size() > 64)
                     return -1;
-                }
             }
         } catch (MemoryAccessException e) {
-            System.err.println("SYS_EXEC: Error reading argv array: " + e.getMessage());
-            return -1;
-        }
-        int argc = argvList.size();
-
-        // --- 2. Create new address space and load ELF ---
-        // NOTE: This assumes 'path' is a path on the *HOST* file system,
-        // as your ElfLoader.java implementation reads from the host.
-        // A true xv6 `kexec` would read from its own emulated file system.
-
-        cse311.paging.AddressSpace newAS = pm.createAddressSpace(task.getId());
-        ElfLoader elfLoader = new ElfLoader(pm);
-        int newEntryPoint;
-
-        try {
-            // Temporarily switch to the new AddressSpace for loading
-            pm.switchTo(newAS);
-
-            // loadElf will parse the file and map segments into the *current*
-            // address space (which we just set to newAS).
-            // We use loadElf, not loadElfIntoAddressSpace, as the latter
-            // seems to be for a different purpose in your test files.
-            elfLoader.loadElf(pathBuilder.toString());
-            newEntryPoint = elfLoader.getEntryPoint();
-
-        } catch (Exception e) {
-            System.err.println("SYS_EXEC: Failed to load ELF file '" + pathBuilder + "': " + e.getMessage());
-            pm.switchTo(task.getAddressSpace()); // Switch back to old AS
-            pm.destroyAddressSpace(newAS.getPid()); // Clean up the failed AS
-            return -1; // Return error
-        }
-
-        // --- 3. Create new stack and copy arguments ---
-        // We are still switched to newAS
-        int newStackPointer;
-        int argvArrayAddr;
-        final int STACK_SIZE = kernel.getConfig().getStackSize(); // e.g., 8192 bytes
-        // Based on your TaskManager, stack is at a high address
-        final int STACK_TOP = 0x7FFF_F000;
-        final int STACK_BASE = STACK_TOP - STACK_SIZE;
-
-        try {
-            // Map the stack region
-            pm.mapRegion(newAS, STACK_BASE, STACK_SIZE, true, true, false);
-
-            int sp = STACK_TOP; // Stack pointer starts at the top
-
-            // Store string data
-            List<Integer> argvPtrsOnNewStack = new ArrayList<>();
-            for (String arg : argvList) {
-                byte[] argBytes = (arg + '\0').getBytes(); // Add null terminator
-                sp -= argBytes.length; // Make space
-
-                // Align stack pointer (16-byte alignment is good practice)
-                sp = sp & ~0xF;
-
-                if (sp < STACK_BASE) {
-                    throw new MemoryAccessException("Stack overflow during argv copy");
-                }
-
-                // Copy string data to new stack
-                for (int j = 0; j < argBytes.length; j++) {
-                    pm.writeByte(sp + j, argBytes[j]);
-                }
-                argvPtrsOnNewStack.add(sp); // Store the pointer
-            }
-
-            // Now copy the array of pointers (argv)
-            int argvArraySize = (argc + 1) * 4; // 4 bytes per pointer, +1 for null terminator
-            sp -= argvArraySize;
-            sp = sp & ~0xF; // Align again
-
-            if (sp < STACK_BASE) {
-                throw new MemoryAccessException("Stack overflow during argv pointer copy");
-            }
-
-            argvArrayAddr = sp; // This is the address that `a1` will point to
-
-            // Write the pointers
-            for (int i = 0; i < argc; i++) {
-                pm.writeWord(argvArrayAddr + (i * 4), argvPtrsOnNewStack.get(i));
-            }
-            // Write the null terminator pointer
-            pm.writeWord(argvArrayAddr + (argc * 4), 0);
-
-            newStackPointer = sp; // This is the final SP
-
-        } catch (Exception e) {
-            System.err.println("SYS_EXEC: Failed to create new stack: " + e.getMessage());
-            pm.switchTo(task.getAddressSpace()); // Switch back to old AS
-            pm.destroyAddressSpace(newAS.getPid()); // Clean up
             return -1;
         }
 
-        // --- 4. Atomic Swap and Cleanup ---
-
-        // Get old address space *before* overwriting it
-        cse311.paging.AddressSpace oldAS = task.getAddressSpace();
-
-        // Update the task object
-        task.setAddressSpace(newAS);
-        task.setProgramCounter(newEntryPoint);
-        task.setStackBase(STACK_BASE); // Update stack info
-        task.setStackSize(STACK_SIZE);
-        task.setName(path); // Set name to program path
-
-        // Update trapframe registers for return to user
-        int[] registers = task.getRegisters();
-        registers[2] = newStackPointer; // sp (x2)
-        registers[11] = argvArrayAddr; // a1 (x11) -> argv
-        // a0 (x10) -> argc, will be set by the return value of this function
-        task.setRegisters(registers);
-
-        // Clean up the old address space
-        if (oldAS != null) {
-            // We must destroy the old space, using its PID (which is the same as the
-            // task's)
-            pm.destroyAddressSpace(oldAS.getPid());
+        // 2. Load the file bytes
+        byte[] elfData;
+        try {
+            elfData = Files.readAllBytes(Paths.get(fullPath));
+        } catch (Exception e) {
+            System.err.println("SYS_EXEC: Failed to read file: " + fullPath);
+            return -1;
         }
 
-        // Switch the pager's context back to the (new) active address space
-        pm.switchTo(newAS);
+        try {
+            // 3. ATOMIC SWAP of Memory
+            // Free old resources
+            coordinator.freeMemory(task.getId());
 
-        // --- 5. Return argc ---
-        // This value will be placed in a0 by handleSystemCall
-        return argc;
+            // Allocate new resources
+            int requiredSize = elfData.length + kernel.getConfig().getStackSize() + 4096;
+            var layout = coordinator.allocateMemory(task.getId(), requiredSize);
+
+            // Load new program
+            int newEntryPoint = coordinator.loadProgram(task.getId(), elfData);
+
+            // 4. Setup Stack (Delegated!)
+            // This works for Paging AND Contiguous now
+            int newSp = coordinator.setupStack(task.getId(), argvList);
+
+            // 5. Update Task
+            task.setName(path);
+            task.setProgramCounter(newEntryPoint);
+            task.setStackBase(layout.stackBase);
+            task.setStackSize(layout.stackSize);
+
+            // Update SP (x2)
+            task.getRegisters()[2] = newSp;
+
+            // Return argc (Convention: a0 = argc)
+            return argvList.size();
+
+        } catch (Exception e) {
+            System.err.println("SYS_EXEC: Failed: " + e.getMessage());
+            task.setState(TaskState.TERMINATED);
+            return -1;
+        }
     }
 
     private int handleDebugPrint(Task task, int messagePtr, int length) {
@@ -500,20 +410,16 @@ public class SystemCallHandler {
      * Helper to read a null-terminated string from a task's address space.
      */
     private String readStringFromTask(Task task, int va) {
-        // This assumes the PagedMemoryManager is already switched to the task's
+        // This assumes the MemoryManager is already switched to the task's
         // context,
         // which it should be when handleSystemCall is called.
-        if (!(kernel.getMemory() instanceof PagedMemoryManager)) {
-            System.err.println("readStringFromTask: PagedMemoryManager is required.");
-            return null;
-        }
-        PagedMemoryManager pm = (PagedMemoryManager) kernel.getMemory();
+        MemoryManager mem = kernel.getMemory(); // Works for Paging AND Contiguous
 
         try {
             StringBuilder sb = new StringBuilder();
             while (true) {
                 // We must use pm.readByte() which goes through the pager
-                byte b = pm.readByte(va);
+                byte b = mem.readByte(va); // This is the magic!
                 if (b == 0) {
                     break; // End of string
                 }

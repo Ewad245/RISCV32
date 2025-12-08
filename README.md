@@ -1,120 +1,184 @@
-# RV32I Simulator in Java with OS Features
+# RV32IM Simulator Kernel Integrated
 
-This project is an **RV32I CPU simulator** written in **Java**, designed to execute **bare-metal ELF files** targeting the **RISC-V RV32I** architecture. It features memory-mapped I/O (MMIO) for UART communication, memory protection.
+A modular, extensible kernel implementation for the RV32IM CPU simulator, written in Java. This project emphasizes a **pluggable architecture**, allowing developers to swap out core OS subsystems (Scheduling, Memory Management) with a single line of configuration code.
 
-## Features
-- **RV32I Instruction Set**: Supports base integer instructions.
-- **Memory Layout**: Custom linker script with text, data, heap, and stack sections.
-- **UART Emulation**: Memory-mapped I/O for serial communication.
-- **ELF Execution**: Loads and executes ELF binaries.
-- **OS Feature (In Progress)s**:
-  - **Syscall Handling**: Support for exit, read, write, and yield syscalls
-  - **Memory Management**: Basic heap allocation and deallocation
-  - **Multitasking**: Cooperative task switching
-- **Java + Gradle**: Built using Java with the Gradle Groovy DSL.
-- **Networking Support** *(Planned)*: Connect to a Socket.io client via Netty.
-- **GUI Frontend** *(Planned)*: Graphical interface for debugging and execution monitoring.
+## Architecture Overview
 
-## Installation & Setup
+The kernel is designed around decoupled interfaces, preventing monolithic dependencies.
 
-### Prerequisites
-- **Java 17+** installed.
-- **Gradle** (comes with the project).
-- **Git** (for cloning the repository).
-- **RISC-V Toolchain** (for compiling example programs).
+```text
+[Hardware Layer]      [Kernel Layer]                  [Modules]
+RV32iCpu  <---------> Kernel (Coordinator)
+Memory    <---------> ├── TaskManager
+                      ├── SystemCallHandler
+                      │
+                      ├── IScheduler  <-------------> RoundRobin / Priority / Cooperative
+                      │
+                      └── MemoryCoordinator <-------> Contiguous (First-Fit, Best-Fit)
+                                             └____--> Paging (Demand, Eager)
+````
 
-### Steps to Build & Run
+## Key Features
 
-1. **Clone the repository**:
-   ```sh
-   git clone https://github.com/your-repo/rv32i-emulator.git
-   cd rv32i-emulator
-   ```
+### 1\. **Modular Memory Management**
 
-2. **Build the project using Gradle**:
-   ```sh
-   ./gradlew build
-   ```
+The system supports multiple memory models determined at boot time. You can switch between **Contiguous** and **Non-Contiguous** modes instantly.
 
-3. **Run the emulator**:
-   ```sh
-   java -cp app/build/libs/app.jar cse311.App "path/to/your/program.elf"
-   ```
+  - **Contiguous Allocation**: Supports pluggable allocation strategies (First-Fit, Best-Fit, etc.).
+  - **Paging (Virtual Memory)**: Supports pluggable paging policies (Demand Paging vs. Eager Paging) and replacement algorithms (Clock, LRU).
 
-### Running Tests
-To ensure everything works correctly, run:
-```sh
-./gradlew test
+### 2\. **Pluggable Scheduler System**
+
+The scheduler is defined by a simple abstract base class.
+
+  - **Round Robin**: Time-sliced scheduling.
+  - **Cooperative**: Tasks run until voluntary yield.
+  - **Priority**: Preemptive scheduling based on task priority.
+
+### 3\. **Process Hierarchy & Orphan Handling**
+
+  - Full parent-child relationship tracking.
+  - **Unix-style Reparenting**: Adopted by `Init` (PID 1) upon parent death.
+  - **Zombie Reaping**: Prevents resource leaks via `wait()`/`exit()` semantics.
+
+-----
+
+## Configuration & Quick Start
+
+You can select your kernel modules in `App.java` before booting:
+
+```java
+// 1. Choose Memory Mode (PAGING or CONTIGUOUS)
+RV32iComputer computer = new RV32iComputer(128 * 1024 * 1024, 16, MemoryMode.PAGING);
+
+// 2. Choose Scheduler
+Kernel kernel = computer.getKernel();
+kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.PRIORITY);
+kernel.getConfig().setTimeSlice(1000);
+
+// 3. Boot
+kernel.start();
 ```
 
-## Usage
-- Place your **RV32I ELF binaries** in the project directory.
-- Run the emulator with the ELF file as an argument.
-- View UART output from memory-mapped I/O.
-- Use syscalls in your programs to interact with the OS features.
+-----
 
-## OS Implementation
+## Extending the Kernel
 
-The OS implementation follows the roadmap outlined in the `OperatingSystemDevelopGuide.md` document and includes:
+Because the kernel uses interfaces and strategy patterns, implementing new algorithms is straightforward.
 
-1. **Syscall Handling**
-   - `exit` (93): Terminate the program
-   - `write` (64): Write to stdout/stderr
-   - `read` (63): Read from stdin
-   - `yield` (24): Cooperative multitasking
+### 1\. implementing a New Scheduler
 
-2. **Memory Management**
-   - Basic heap allocation with `allocateHeap`
-   - Placeholder for memory deallocation with `free`
+To add a new scheduling algorithm (e.g., "Lottery Scheduling"), simply extend the `Scheduler` class.
 
-3. **Multitasking**
-   - Task structure for maintaining process state
-   - Task manager for creating and scheduling tasks
-   - Cooperative multitasking via the `yield` syscall
+**Step A: Create the Class**
 
-### Example Program
+```java
+public class LotteryScheduler extends Scheduler {
+    private Random random = new Random();
 
-An example program `examples/hello_os.c` demonstrates the use of syscalls:
+    public LotteryScheduler(int timeSlice) {
+        super(timeSlice);
+    }
 
-```c
-// Define syscall numbers
-#define SYS_read  63
-#define SYS_write 64
-#define SYS_yield 24
-#define SYS_exit  93
-
-// Main function
-int main() {
-    print("Hello from our minimal OS!\n");
-    yield();
-    // Read input, process, and exit
-    exit(0);
-    return 0;
+    @Override
+    public Task schedule(Collection<Task> tasks) {
+        // Your custom logic to pick a 'winning' ticket
+        List<Task> readyTasks = tasks.stream()
+            .filter(t -> t.getState() == TaskState.READY)
+            .collect(Collectors.toList());
+            
+        if (readyTasks.isEmpty()) return null;
+        return readyTasks.get(random.nextInt(readyTasks.size()));
+    }
+    
+    // Implement addTask/removeTask...
 }
 ```
 
-### Compiling Example Programs
+**Step B: Register it in Kernel.java**
 
-To compile the example programs, use the RISC-V toolchain:
-
-```bash
-riscv32-unknown-elf-gcc -march=rv32i -mabi=ilp32 -nostdlib -static -T linker.ld examples/hello_os.c -o hello_os.elf
+```java
+// In Kernel.java -> createScheduler()
+case LOTTERY:
+    return new LotteryScheduler(config.getTimeSlice());
 ```
 
-## Roadmap
-- [X] Implement web version. (currently working on it using SocketIO and NextJS client) (In "Support SocketIO" Branch)
-- [ ] Implement basic OS features (syscalls, memory management, multitasking). (Pending)
-- [ ] Implement RV32M (Multiplication & Division).
-- [ ] Add CSR (Control and Status Registers).
-- [ ] Improve ELF loading and debugging support.
-- [ ] Implement file system support
-- [ ] Add user mode execution
-- [ ] Implement a simple shell
+### 2\. Implementing a New Memory Allocator
 
-## Contributing
-Pull requests are welcome! Open an issue for discussion before making major changes.
+If running in `CONTIGUOUS` mode, you can change how the kernel finds free memory holes by implementing the `AllocationStrategy` interface.
 
-## License
-This project is licensed under the **MIT License**.
+**Step A: Create the Strategy**
+
+```java
+public class WorstFitStrategy implements AllocationStrategy {
+    @Override
+    public int findRegion(List<MemoryBlock> holes, int requestSize) {
+        // Find the LARGEST hole to leave big chunks available
+        MemoryBlock worst = null;
+        for (MemoryBlock hole : holes) {
+            if (hole.size >= requestSize) {
+                if (worst == null || hole.size > worst.size)
+                    worst = hole;
+            }
+        }
+        return (worst != null) ? worst.start : -1;
+    }
+}
 ```
-Let me know if you want any modifications! 🚀
+
+**Step B: Plug it in (RV32iComputer.java)**
+
+```java
+// Swap 'BestFitStrategy' with your new class
+if (mode == MemoryMode.CONTIGUOUS) {
+    AllocationStrategy allocator = new WorstFitStrategy(); // <--- Swapped!
+    this.memory = new ContiguousMemoryManager(memSize, allocator);
+}
+```
+
+### 3\. Implementing a New Paging Policy
+
+If running in `PAGING` mode, you can change how pages are loaded (e.g., implementing `PredictivePager`) by implementing the `Pager` interface.
+
+```java
+public class PredictivePager implements Pager {
+    @Override
+    public int ensureResident(AddressSpace as, int va, VmAccess access) {
+        // Logic to bring in page 'va' AND 'va + 1' (prefetching)
+        // ...
+        return frameNumber;
+    }
+}
+```
+
+-----
+
+## System Calls
+
+The kernel exposes a standard UNIX-like system call interface to user programs:
+
+| Syscall | Code | Description |
+| :--- | :--- | :--- |
+| `SYS_EXIT` | 93 | Terminate process (become Zombie) |
+| `SYS_READ` | 63 | Read from file descriptor/UART |
+| `SYS_WRITE` | 64 | Write to file descriptor/UART |
+| `SYS_YIELD` | 124 | Voluntarily yield CPU time slice |
+| `SYS_FORK` | 220 | Copy current process (parent -\> child) |
+| `SYS_EXEC` | 221 | Load new executable image |
+| `SYS_WAIT` | 260 | Wait for child to change state |
+
+-----
+
+## Task States Lifecycle
+
+The kernel manages tasks through a rigorous state machine to ensure stability.
+
+```text
+[NEW] → [READY] ↔ [RUNNING]
+           ↑         ↓
+           └─── [WAITING]
+                 ↓
+            [TERMINATED] (Zombie)
+                 ↓
+             [REMOVED]
+```

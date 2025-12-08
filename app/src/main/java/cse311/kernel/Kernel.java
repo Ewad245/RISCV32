@@ -4,6 +4,11 @@ import cse311.*;
 import cse311.kernel.scheduler.*;
 import cse311.kernel.syscall.*;
 import cse311.kernel.process.*;
+import cse311.kernel.NonContiguous.NonContiguousMemoryCoordinator;
+import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
+import cse311.kernel.NonContiguous.paging.PagingMapper;
+import cse311.kernel.contiguous.ContiguousMemoryCoordinator;
+import cse311.kernel.contiguous.ContiguousMemoryManager;
 import cse311.kernel.memory.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -19,6 +24,7 @@ public class Kernel {
     private final Scheduler scheduler;
     private final SystemCallHandler syscallHandler;
     private final KernelMemoryManager kernelMemory;
+    private ProcessMemoryCoordinator memoryCoordinator;
 
     // Kernel state
     private boolean running = false;
@@ -38,6 +44,37 @@ public class Kernel {
         this.taskManager = new TaskManager(this, kernelMemory);
         this.scheduler = createScheduler();
         this.syscallHandler = new SystemCallHandler(this, cpu);
+
+        // --------------------------------------------------------
+        // 1. FACTORY: Initialize the correct Memory Coordinator
+        // --------------------------------------------------------
+        if (memory instanceof PagedMemoryManager) {
+            // --- PAGING MODE ---
+            System.out.println("Kernel: Detected Paging Mode.");
+
+            PagedMemoryManager pm = (PagedMemoryManager) memory;
+            PagingMapper mapper = new PagingMapper(pm);
+
+            this.memoryCoordinator = new NonContiguousMemoryCoordinator(
+                    mapper,
+                    config.getStackSize());
+
+        } else if (memory instanceof ContiguousMemoryManager) {
+            // --- CONTIGUOUS MODE ---
+            System.out.println("Kernel: Detected Contiguous Mode.");
+
+            ContiguousMemoryManager cmm = (ContiguousMemoryManager) memory;
+
+            this.memoryCoordinator = new ContiguousMemoryCoordinator(
+                    cmm, // The MMU for allocation/translation
+                    config.getStackSize());
+
+        } else {
+            // --- LEGACY MODE ---
+            System.out.println("Kernel: Warning - Legacy Memory Mode (No Coordinator).");
+            this.memoryCoordinator = null;
+        }
+        taskManager.setMemoryCoordinator(this.memoryCoordinator);
 
         System.out.println("RV32IM Java Kernel initialized");
         System.out.println("Scheduler: " + scheduler.getClass().getSimpleName());
@@ -203,12 +240,9 @@ public class Kernel {
      * Switch to a task's address space
      */
     private void switchToTaskAddressSpace(Task task) {
-        if (memory instanceof cse311.paging.PagedMemoryManager) {
-            cse311.paging.PagedMemoryManager pm = (cse311.paging.PagedMemoryManager) memory;
-            pm.switchTo(task.getAddressSpace());
-        } else if (memory instanceof TaskAwareMemoryManager) {
-            TaskAwareMemoryManager taskMemory = (TaskAwareMemoryManager) memory;
-            taskMemory.setCurrentTask(task.getId());
+        if (memoryCoordinator != null) {
+            // The coordinator knows whether to swap Page Tables or Base Registers
+            memoryCoordinator.switchContext(task.getId());
         }
     }
 
@@ -435,5 +469,14 @@ public class Kernel {
         scheduler.addTask(task);
 
         System.out.println("Kernel: Added task " + task.getId() + " (" + task.getName() + ") to scheduler.");
+    }
+
+    public ProcessMemoryCoordinator getMemoryCoordinator() {
+        return memoryCoordinator;
+    }
+
+    public void setMemoryCoordinator(ProcessMemoryCoordinator memoryCoordinator) {
+        this.memoryCoordinator = memoryCoordinator;
+        this.taskManager.setMemoryCoordinator(memoryCoordinator);
     }
 }

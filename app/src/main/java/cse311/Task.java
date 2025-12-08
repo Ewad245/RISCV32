@@ -40,8 +40,8 @@ public class Task {
     private int heapStart;
     private int heapSize;
 
-    // Paging support
-    private transient cse311.paging.AddressSpace addressSpace;
+    // Generic context (AddressSpace or SegmentTable)
+    private transient Object memoryContext;
 
     /**
      * Creates a new task with the specified ID and stack size.
@@ -270,12 +270,12 @@ public class Task {
         this.heapSize = heapSize;
     }
 
-    public void setAddressSpace(cse311.paging.AddressSpace as) {
-        this.addressSpace = as;
+    public void setMemoryContext(Object context) {
+        this.memoryContext = context;
     }
 
-    public cse311.paging.AddressSpace getAddressSpace() {
-        return addressSpace;
+    public Object getMemoryContext() {
+        return this.memoryContext;
     }
 
     // Process hierarchy methods
@@ -329,7 +329,7 @@ public class Task {
         Task thread = new Task(threadId, entryPoint, stackSize, stackBase);
         thread.setParent(this);
         thread.setTgid(this.tgid); // Same thread group
-        thread.setAddressSpace(this.addressSpace); // Share address space
+        thread.setMemoryContext(this.memoryContext); // Share address space
         thread.setName(this.name + ":" + threadId);
         return thread;
     }

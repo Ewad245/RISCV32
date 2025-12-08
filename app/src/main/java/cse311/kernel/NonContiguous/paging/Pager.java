@@ -1,4 +1,4 @@
-package cse311.paging;
+package cse311.kernel.NonContiguous.paging;
 
 import cse311.MemoryAccessException;
 

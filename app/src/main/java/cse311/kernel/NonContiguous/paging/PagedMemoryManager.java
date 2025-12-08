@@ -1,4 +1,4 @@
-package cse311.paging;
+package cse311.kernel.NonContiguous.paging;
 
 import cse311.MemoryManager;
 import cse311.MemoryAccessException;
@@ -61,7 +61,38 @@ public class PagedMemoryManager extends MemoryManager {
     }
 
     public void destroyAddressSpace(int pid) {
+        AddressSpace as = spaces.get(pid);
+        if (as == null)
+            return;
+
+        // 1. Iterate over the Page Directory (Level 1)
+        for (int i = 0; i < 1024; i++) {
+            AddressSpace.PageTableEntry l1Entry = as.root.entries[i];
+
+            // If there is a valid L2 Page Table here
+            if (l1Entry != null && l1Entry.V) {
+                int l2Frame = l1Entry.ppn;
+                AddressSpace.PageTable l2Table = getPageTableInstance(l2Frame);
+
+                if (l2Table != null) {
+                    // 2. Iterate over the Page Table (Level 2) to free DATA frames
+                    for (int j = 0; j < 1024; j++) {
+                        AddressSpace.PageTableEntry l2Entry = l2Table.entries[j];
+                        if (l2Entry != null && l2Entry.V) {
+                            // Free the actual data frame (User Memory)
+                            freeFrame(l2Entry.ppn);
+                        }
+                    }
+                }
+
+                // 3. Free the frame that held the L2 Page Table itself
+                freeFrame(l2Frame);
+            }
+        }
+
+        // 4. Remove the logical structure
         spaces.remove(pid);
+        System.out.println("PagedMemoryManager: Fully reclaimed memory for PID " + pid);
     }
 
     public void switchTo(AddressSpace as) {

@@ -3,6 +3,7 @@
  */
 package cse311;
 
+import cse311.Enum.MemoryMode;
 import cse311.kernel.Kernel;
 import cse311.kernel.KernelConfig;
 import cse311.programs.InitTask;
@@ -19,8 +20,8 @@ public class App {
             // --------------------------------------------------------
             // 1. HARDWARE INIT
             // --------------------------------------------------------
-            // Initialize 128MB RAM, CPU, and Paged Memory Manager
-            RV32iComputer computer = new RV32iComputer(128 * 1024 * 1024, 100);
+            // Initialize 128MB RAM, CPU, Memory Management Techniques
+            RV32iComputer computer = new RV32iComputer(128 * 1024 * 1024, 100, MemoryMode.PAGING);
             Kernel kernel = computer.getKernel();
 
             // --------------------------------------------------------

@@ -2,9 +2,13 @@ package cse311.kernel.process;
 
 import cse311.*;
 import cse311.kernel.Kernel;
+import cse311.kernel.NonContiguous.paging.AddressSpace;
+import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
+import cse311.kernel.contiguous.AllocationStrategy;
+import cse311.kernel.contiguous.ContiguousMemoryCoordinator;
+import cse311.kernel.contiguous.ContiguousMemoryManager;
 import cse311.kernel.memory.KernelMemoryManager;
-import cse311.paging.AddressSpace;
-import cse311.paging.PagedMemoryManager;
+import cse311.kernel.memory.ProcessMemoryCoordinator;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
@@ -18,11 +22,16 @@ public class TaskManager {
     private final Kernel kernel;
     private final KernelMemoryManager kernelMemory;
     private final Map<Integer, TaskMemoryInfo> taskMemory = new ConcurrentHashMap<>();
+    private ProcessMemoryCoordinator memoryCoordinator;
     private Task initTask; // The init process (PID 1)
 
     public TaskManager(Kernel kernel, KernelMemoryManager kernelMemory) {
         this.kernel = kernel;
         this.kernelMemory = kernelMemory;
+    }
+
+    public void setMemoryCoordinator(ProcessMemoryCoordinator mem) {
+        this.memoryCoordinator = mem;
     }
 
     /**
@@ -36,40 +45,18 @@ public class TaskManager {
      * Create a new process from an ELF file with a parent
      */
     public Task createTask(int pid, String elfPath, Task parent) throws Exception {
-        // Create address space for the task
-        PagedMemoryManager pm = (PagedMemoryManager) kernel.getMemory();
-        AddressSpace addressSpace = pm.createAddressSpace(pid);
-
-        // Switch to the new address space for loading
-        pm.switchTo(addressSpace);
-
-        // Load ELF file
-        ElfLoader elfLoader = new ElfLoader(pm);
-        elfLoader.loadElf(elfPath);
-
-        // Get entry point
-        int entryPoint = elfLoader.getEntryPoint();
-
-        // Allocate stack for PagedMemoryManager
-        int stackSize = kernel.getConfig().getStackSize();
-        final int STACK_TOP = 0x7FFF_F000; // 4KB below 2GB, page-aligned
-        int stackBase = STACK_TOP - stackSize;
-        pm.mapRegion(addressSpace, stackBase, stackSize, /* R= */true, /* W= */true, /* X= */false);
-
-        // Create task
-        Task task = new Task(pid, elfPath, entryPoint, stackSize, stackBase);
-        task.setAddressSpace(addressSpace);
-
-        if (parent != null) {
-            task.setParent(parent);
-            parent.addChild(task);
+        // 1. Read the file bytes (Simulating File System read)
+        byte[] elfData;
+        try {
+            elfData = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(elfPath));
+        } catch (java.io.IOException e) {
+            throw new Exception("Failed to read ELF file: " + elfPath);
         }
 
-        // Store memory information
-        TaskMemoryInfo memInfo = new TaskMemoryInfo(pid, entryPoint, stackBase, stackSize);
-        taskMemory.put(pid, memInfo);
-
-        return task;
+        // 2. Delegate to the main creation logic
+        // The name of the task defaults to the filename
+        String taskName = new java.io.File(elfPath).getName();
+        return createTask(pid, elfData, taskName, parent);
     }
 
     /**
@@ -83,91 +70,32 @@ public class TaskManager {
      * Create a new task from ELF data in memory with a parent
      */
     public Task createTask(int pid, byte[] elfData, String name, Task parent) throws Exception {
-        if (kernel.getMemory() instanceof cse311.paging.PagedMemoryManager) {
-            var pm = (cse311.paging.PagedMemoryManager) kernel.getMemory();
+        // 1. Calculate Requirements
+        int stackSize = kernel.getConfig().getStackSize();
+        int requiredSize = elfData.length + stackSize + (1024 * 1024);
 
-            // 1) Create address space and give it to the Task
-            var as = pm.createAddressSpace(pid);
+        // 2. Delegate Allocation
+        var layout = memoryCoordinator.allocateMemory(pid, requiredSize);
 
-            // 2) Map a user stack (grow-down). 1MB like before (you can tune).
-            final int STACK_SIZE = 0x0010_0000;
-            final int STACK_TOP = 0x7FFF_F000; // 4KB below 2GB, page-aligned
-            final int STACK_BASE = STACK_TOP - STACK_SIZE;
-            pm.mapRegion(as, STACK_BASE, STACK_SIZE, /* R= */true, /* W= */true, /* X= */false);
+        // 3. Delegate Loading
+        int entryPoint = memoryCoordinator.loadProgram(pid, elfData);
 
-            // 3) Switch to this AS for loading
-            pm.switchTo(as);
+        // 4. Create Task Object
+        Task task = new Task(pid, name, entryPoint, layout.stackSize, layout.stackBase);
 
-            // 4) Load ELF using existing loader (it calls writeByteToVirtualAddress)
-            MemoryElfLoader elfLoader = new MemoryElfLoader(pm, elfData);
-            elfLoader.load();
-            int entryPoint = elfLoader.getEntryPoint();
+        // REMOVED: if (instanceof PagedMemoryManager) task.setAddressSpace(...)
+        // Reason: The coordinator now handles context switching using PID lookup only.
+        // We do not need to attach the AddressSpace object to the Task anymore.
 
-            // 5) Create Task – store AS & stack top
-            Task task = new Task(pid, name, entryPoint, STACK_SIZE, STACK_BASE);
-            task.setAddressSpace(as);
-            if (parent != null) {
-                task.setParent(parent);
-                parent.addChild(task);
-            }
-
-            // 6) Persist memory info for debug views, etc.
-            TaskMemoryInfo memInfo = new TaskMemoryInfo(pid, entryPoint, STACK_TOP, STACK_SIZE);
-            taskMemory.put(pid, memInfo);
-
-            System.out.println("Created paged task " + pid + " (" + name + ")");
-            return task;
-        } else if (kernel.getMemory() instanceof TaskAwareMemoryManager) {
-            TaskAwareMemoryManager taskAwareMemory = (TaskAwareMemoryManager) kernel.getMemory();
-
-            // Allocate task's individual address space
-            if (!taskAwareMemory.allocateTaskMemory(pid)) {
-                throw new Exception("Failed to allocate memory space for task " + pid);
-            }
-
-            // Load program into task's memory space
-            int loadAddress = VirtualMemoryManager.TEXT_START;
-            taskAwareMemory.loadProgramForTask(pid, elfData, loadAddress);
-
-            // Set entry point to load address
-            int entryPoint = loadAddress;
-
-            // Calculate stack base (top of stack)
-            int stackStart = (kernel.getMemory() instanceof TaskAwareMemoryManager)
-                    ? ((TaskAwareMemoryManager) kernel.getMemory()).getStackStart()
-                    : 0x00800000; // fallback
-            int stackBase = stackStart + VirtualMemoryManager.STACK_SIZE;
-            int stackSize = VirtualMemoryManager.STACK_SIZE;
-
-            // Create task
-            Task task = new Task(pid, name, entryPoint, stackSize, stackBase);
-            if (parent != null) {
-                task.setParent(parent);
-                parent.addChild(task);
-            }
-
-            // Store memory information
-            TaskMemoryInfo memInfo = new TaskMemoryInfo(pid, entryPoint, stackBase, stackSize);
-            taskMemory.put(pid, memInfo);
-
-            System.out.println("Created task " + pid + " (" + name + ") with individual address space");
-            return task;
-
-        } else {
-            // Fallback to original implementation for backward compatibility
-            MemoryElfLoader elfLoader = new MemoryElfLoader(kernel.getMemory(), elfData);
-            elfLoader.load();
-
-            int entryPoint = elfLoader.getEntryPoint();
-            int stackSize = kernel.getConfig().getStackSize();
-            int stackBase = kernelMemory.allocateStack(pid, stackSize);
-
-            Task task = new Task(pid, name, entryPoint, stackSize, stackBase);
-            TaskMemoryInfo memInfo = new TaskMemoryInfo(pid, entryPoint, stackBase, stackSize);
-            taskMemory.put(pid, memInfo);
-
-            return task;
+        if (parent != null) {
+            task.setParent(parent);
+            parent.addChild(task);
         }
+
+        TaskMemoryInfo memInfo = new TaskMemoryInfo(pid, entryPoint, layout.stackBase, layout.stackSize);
+        taskMemory.put(pid, memInfo);
+
+        return task;
     }
 
     /**
@@ -176,14 +104,8 @@ public class TaskManager {
     public void cleanupTask(Task task) {
         int pid = task.getId();
 
-        // Free task memory
-        if (kernel.getMemory() instanceof cse311.paging.PagedMemoryManager) {
-            cse311.paging.PagedMemoryManager pm = (cse311.paging.PagedMemoryManager) kernel.getMemory();
-            pm.destroyAddressSpace(pid);
-        } else if (kernel.getMemory() instanceof TaskAwareMemoryManager) {
-            TaskAwareMemoryManager taskAwareMemory = (TaskAwareMemoryManager) kernel.getMemory();
-            taskAwareMemory.deallocateTaskMemory(pid);
-        }
+        reparentChildrenToInit(task);
+        memoryCoordinator.freeMemory(task.getId());
 
         TaskMemoryInfo memInfo = taskMemory.get(pid);
         if (memInfo != null) {
@@ -192,6 +114,50 @@ public class TaskManager {
         }
 
         System.out.println("Cleaned up task " + pid + " resources");
+    }
+
+    /**
+     * Moves all children of the dying task to the Init process (PID 1).
+     * This prevents orphans from being lost or becoming zombies forever.
+     */
+    public void reparentChildrenToInit(Task dyingTask) {
+        // 1. Find the Init Process (Always PID 1)
+        Task initTask = kernel.getTask(1);
+
+        if (initTask == null) {
+            System.err.println("CRITICAL: Init task (PID 1) not found during reparenting!");
+            return;
+        }
+
+        if (dyingTask.getId() == 1) {
+            System.err.println("CRITICAL: Init task is dying! System halt imminent.");
+            return;
+        }
+
+        // 2. Iterate safely over a copy of the children list
+        // (We use a copy because we will be modifying the original list inside the
+        // loop)
+        List<Task> children = new ArrayList<>(dyingTask.getChildren());
+
+        for (Task child : children) {
+            System.out.println("Reparenting child PID " + child.getId() +
+                    " from " + dyingTask.getId() + " to Init (PID 1)");
+
+            // A. Remove from dying parent
+            dyingTask.removeChild(child);
+
+            // B. Set new parent to Init
+            child.setParent(initTask);
+
+            // C. Add to Init's children list
+            initTask.addChild(child);
+
+            // D. Important: If the child was already ZOMBIE (TERMINATED),
+            // Init needs to know so it can reap it immediately.
+            // In a real OS, we might send a SIGCHLD signal here.
+            // For this simulator, if the child is already TERMINATED, Init will
+            // pick it up in its next wait() call naturally.
+        }
     }
 
     /**
@@ -261,57 +227,50 @@ public class TaskManager {
      * This acts as a wrapper that generates the PID and Name automatically.
      */
     public Task forkTask(Task parent) throws Exception {
-        // 1. Get necessary components
-        if (!(kernel.getMemory() instanceof PagedMemoryManager)) {
-            throw new Exception("forkTask: PagedMemoryManager is required for fork.");
+        if (memoryCoordinator == null) {
+            throw new Exception("Fork requires a valid Memory Coordinator.");
         }
-        PagedMemoryManager pm = (PagedMemoryManager) kernel.getMemory();
 
-        // 2. Generate PID and Name
-        // Ensure you added getNextPid() to Kernel.java as discussed previously!
+        // 1. Generate Identity
         int childPid = kernel.getNextPid();
         String childName = parent.getName() + "_child";
 
-        // 3. Create a new, empty address space for the child
-        AddressSpace parentAS = parent.getAddressSpace();
-        AddressSpace childAS = pm.createAddressSpace(childPid);
+        // 2. Allocate Memory for Child
+        // We assume the child needs the same memory footprint as the parent
+        // In paging, this is just a quota. In contiguous, this finds a hole of the same
+        // size.
+        int estimatedSize = parent.getStackSize() + (1024 * 1024); // Size calculation
 
-        // 4. Copy the parent's memory (TEXT, DATA, HEAP, STACK) into the child's
-        // address space
-        // This requires the copyAddressSpace method in PagedMemoryManager
+        // Strategy Pattern: Allocate based on mode (Paging or Contiguous)
+        ProcessMemoryCoordinator.MemoryLayout layout = memoryCoordinator.allocateMemory(childPid, estimatedSize);
+
+        // 3. Copy Memory Content
+        // Strategy Pattern: Copy Page Tables OR Copy Physical Bytes
         try {
-            pm.copyAddressSpace(parentAS, childAS);
+            memoryCoordinator.copyMemory(parent.getId(), childPid);
         } catch (MemoryAccessException e) {
-            pm.destroyAddressSpace(childPid); // Cleanup on failure
-            throw new Exception("forkTask: Failed to copy memory: " + e.getMessage());
+            // Cleanup if copy fails
+            memoryCoordinator.freeMemory(childPid);
+            throw new Exception("Fork failed during memory copy: " + e.getMessage());
         }
 
-        // 5. Create the new Task object
-        // Child starts with identical state to parent (PC, stack, etc.)
+        // 4. Create Task Object
         Task child = new Task(childPid, childName,
                 parent.getProgramCounter(),
                 parent.getStackSize(),
                 parent.getStackBase());
 
-        // 6. Assign the new address space to the child
-        child.setAddressSpace(childAS);
-
-        // 7. Copy parent's registers to child
+        // 5. Copy CPU State
         child.setRegisters(parent.getRegisters().clone());
 
-        // 8. **CRITICAL:** Set the return value (a0) for the child to 0
-        // This is how the child process knows it is the child.
-        child.getRegisters()[10] = 0; // a0 register (x10)
-        System.out.println("DEBUG: Child " + childPid + " a0 register set to: " + child.getRegisters()[10]);
+        // 6. Set Return Value (0 for child)
+        child.getRegisters()[10] = 0; // a0 = 0
 
-        System.out.println("DEBUG: Child " + childPid + " PC set to " + child.getProgramCounter());
-
-        // 9. Set parent-child relationship
+        // 7. Hierarchy & Scheduler
         child.setParent(parent);
         parent.addChild(child);
-
-        // 10. Mark child as READY and add to scheduler
         child.setState(TaskState.READY);
+
         kernel.addTaskToScheduler(child);
 
         System.out.println("TaskManager: Forked task " + parent.getId() + " -> " + childPid);
@@ -389,8 +348,9 @@ public class TaskManager {
         }
 
         // Free task memory
-        if (kernel.getMemory() instanceof cse311.paging.PagedMemoryManager) {
-            cse311.paging.PagedMemoryManager pm = (cse311.paging.PagedMemoryManager) kernel.getMemory();
+        if (kernel.getMemory() instanceof cse311.kernel.NonContiguous.paging.PagedMemoryManager) {
+            cse311.kernel.NonContiguous.paging.PagedMemoryManager pm = (cse311.kernel.NonContiguous.paging.PagedMemoryManager) kernel
+                    .getMemory();
             pm.destroyAddressSpace(pid);
         } else if (kernel.getMemory() instanceof TaskAwareMemoryManager) {
             TaskAwareMemoryManager taskAwareMemory = (TaskAwareMemoryManager) kernel.getMemory();
@@ -404,38 +364,6 @@ public class TaskManager {
         }
 
         System.out.println("Cleaned up task " + pid + " resources");
-    }
-
-    /**
-     * Simple in-memory ELF loader for byte arrays
-     */
-    private static class MemoryElfLoader {
-        private final MemoryManager memory;
-        private final byte[] elfData;
-        private int entryPoint;
-
-        public MemoryElfLoader(MemoryManager memory, byte[] elfData) {
-            this.memory = memory;
-            this.elfData = elfData;
-        }
-
-        public void load() throws Exception {
-            // Simple ELF loading - for now just copy to a fixed address
-            // In a real implementation, this would parse ELF headers properly
-
-            // Assume entry point is at the beginning of the loaded code
-            int loadAddress = 0x10000; // Fixed load address for simplicity
-            entryPoint = loadAddress;
-
-            // Copy ELF data to memory
-            for (int i = 0; i < elfData.length; i++) {
-                memory.writeByteToVirtualAddress(loadAddress + i, elfData[i]);
-            }
-        }
-
-        public int getEntryPoint() {
-            return entryPoint;
-        }
     }
 
     /**

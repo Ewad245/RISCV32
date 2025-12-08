@@ -1,7 +1,11 @@
 package cse311;
 
+import cse311.Enum.MemoryMode;
 import cse311.kernel.Kernel;
-import cse311.paging.*;
+import cse311.kernel.NonContiguous.paging.*;
+import cse311.kernel.contiguous.AllocationStrategy;
+import cse311.kernel.contiguous.BestFitStrategy;
+import cse311.kernel.contiguous.ContiguousMemoryManager;
 
 public class RV32iComputer {
     private RV32iCpu cpu;
@@ -9,29 +13,42 @@ public class RV32iComputer {
     private Kernel kernel;
 
     public RV32iComputer(int memSize) {
-        this(memSize, 16); // Default to 16 max tasks
+        this(memSize, 16, MemoryMode.PAGING); // Default to 16 max tasks
     }
 
-    public RV32iComputer(int memSize, int maxTasks) {
-        // Use PagedMemoryManager for paging support
-        memory = new PagedMemoryManager(memSize);
+    public RV32iComputer(int memSize, int maxTasks, MemoryMode mode) {
+        System.out.println("--- Booting RV32iComputer in " + mode + " Mode ---");
+
+        // 1. Initialize Memory Hardware & Logic
+        if (mode == MemoryMode.PAGING) {
+            // --- PAGING SETUP ---
+            PagedMemoryManager pmm = new PagedMemoryManager(memSize);
+
+            // Configure Policies (Demand Paging + Clock Replacement)
+            PagingConfiguration.configure(pmm,
+                    PagingConfiguration.Policy.DEMAND,
+                    PagingConfiguration.Policy.CLOCK);
+            this.memory = pmm;
+
+        } else {
+            // --- CONTIGUOUS SETUP ---
+            // 1. Choose an Allocation Strategy (First Fit / Best Fit)
+            AllocationStrategy allocator = new BestFitStrategy();
+            // AllocationStrategy allocator = new FirstFitStrategy();
+
+            // 2. Create the Memory Manager with this strategy
+            this.memory = new ContiguousMemoryManager(memSize, allocator);
+        }
+
+        // 2. Initialize CPU (Polymorphic: works with either memory)
         this.cpu = new RV32iCpu(memory);
+
+        // 3. Initialize Kernel (Kernel constructor detects memory type)
         this.kernel = new Kernel(cpu, memory);
 
-        // Configure paging policies as per AbstractPagingGuide.md
-        if (memory instanceof PagedMemoryManager) {
-            PagedMemoryManager pagedMemory = (PagedMemoryManager) memory;
-            PagingConfiguration.configure(
-                    pagedMemory,
-                    PagingConfiguration.Policy.DEMAND, // Use demand paging
-                    PagingConfiguration.Policy.CLOCK // Use clock replacement
-            );
-        }
         this.cpu.turnOn();
 
-        System.out.println("RV32iComputer initialized with policy-based paging");
-        System.out.println("Total memory: " + (memSize / (1024 * 1024)) + "MB");
-        System.out.println("Pager: Demand Paging with Clock Replacement");
+        System.out.println("System Initialized. Memory: " + (memSize / 1024 / 1024) + "MB");
     }
 
     /**
