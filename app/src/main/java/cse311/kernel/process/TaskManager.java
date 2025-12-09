@@ -119,7 +119,7 @@ public class TaskManager {
             taskMemory.remove(pid);
         }
 
-        System.out.println("Cleaned up task " + pid + " resources");
+        // System.out.println("Cleaned up task " + pid + " resources");
     }
 
     /**
@@ -146,8 +146,8 @@ public class TaskManager {
         List<Task> children = new ArrayList<>(dyingTask.getChildren());
 
         for (Task child : children) {
-            System.out.println("Reparenting child PID " + child.getId() +
-                    " from " + dyingTask.getId() + " to Init (PID 1)");
+            // System.out.println("Reparenting child PID " + child.getId() +
+            // " from " + dyingTask.getId() + " to Init (PID 1)");
 
             // A. Remove from dying parent
             dyingTask.removeChild(child);
@@ -285,7 +285,8 @@ public class TaskManager {
 
         kernel.addTaskToScheduler(child);
 
-        System.out.println("TaskManager: Forked task " + parent.getId() + " -> " + childPid);
+        // System.out.println("TaskManager: Forked task " + parent.getId() + " -> " +
+        // childPid);
         return child;
     }
 
@@ -375,7 +376,7 @@ public class TaskManager {
             taskMemory.remove(pid);
         }
 
-        System.out.println("Cleaned up task " + pid + " resources");
+        // System.out.println("Cleaned up task " + pid + " resources");
     }
 
     /**

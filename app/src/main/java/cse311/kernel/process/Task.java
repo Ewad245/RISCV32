@@ -98,8 +98,9 @@ public class Task {
      * @param cpu The CPU whose state should be saved
      */
     public void saveState(RV32iCpu cpu) {
-        System.out.println("DEBUG: Saving task " + id + " state, PC=" + cpu.getProgramCounter() + ", a0="
-                + cpu.getRegisters()[10]);
+        // System.out.println("DEBUG: Saving task " + id + " state, PC=" +
+        // cpu.getProgramCounter() + ", a0="
+        // + cpu.getRegisters()[10]);
         this.pc = cpu.getProgramCounter();
         System.arraycopy(cpu.getRegisters(), 0, this.registers, 0, 32);
     }
@@ -110,7 +111,8 @@ public class Task {
      * @param cpu The CPU to restore the state to
      */
     public void restoreState(RV32iCpu cpu) {
-        System.out.println("DEBUG: Restoring task " + id + " state, PC=" + this.pc + ", a0=" + this.registers[10]);
+        // System.out.println("DEBUG: Restoring task " + id + " state, PC=" + this.pc +
+        // ", a0=" + this.registers[10]);
         cpu.setProgramCounter(this.pc);
         cpu.setRegisters(this.registers);
     }

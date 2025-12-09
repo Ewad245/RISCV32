@@ -468,7 +468,8 @@ public class Kernel {
         tasks.put(task.getId(), task);
         scheduler.addTask(task);
 
-        System.out.println("Kernel: Added task " + task.getId() + " (" + task.getName() + ") to scheduler.");
+        // System.out.println("Kernel: Added task " + task.getId() + " (" +
+        // task.getName() + ") to scheduler.");
     }
 
     public ProcessMemoryCoordinator getMemoryCoordinator() {

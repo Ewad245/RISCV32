@@ -127,7 +127,8 @@ public class SystemCallHandler {
                 // Since Kernel.java now skips the final saveState() to protect 'exec',
                 // we must manually ensure the return value is saved to the Task.
                 task.getRegisters()[10] = result;
-                System.out.println("Task " + task.getId() + " syscall " + syscallNumber + " -> " + result);
+                // System.out.println("Task " + task.getId() + " syscall " + syscallNumber + "
+                // -> " + result);
             }
 
         } catch (Exception e) {
@@ -137,7 +138,8 @@ public class SystemCallHandler {
     }
 
     private int handleExit(Task task, int exitCode) {
-        System.out.println("Task " + task.getId() + " exiting with code " + exitCode);
+        // System.out.println("Task " + task.getId() + " exiting with code " +
+        // exitCode);
         task.setExitCode(exitCode);
         task.setState(TaskState.TERMINATED);
         return exitCode;
@@ -209,7 +211,7 @@ public class SystemCallHandler {
     }
 
     private int handleYield(Task task) {
-        System.out.println("Task " + task.getId() + " yielded");
+        // System.out.println("Task " + task.getId() + " yielded");
         task.setState(TaskState.READY);
         return 0;
     }
@@ -219,14 +221,16 @@ public class SystemCallHandler {
     }
 
     private int handleFork(Task task) {
-        System.out.println("SYS_FORK: Task " + task.getId() + " (" + task.getName() + ") requesting fork.");
+        // System.out.println("SYS_FORK: Task " + task.getId() + " (" + task.getName() +
+        // ") requesting fork.");
 
         try {
             // The heavy lifting of copying memory and state is done by TaskManager
             Task child = kernel.getTaskManager().forkTask(task);
 
             // To the PARENT, fork returns the child's PID
-            System.out.println("SYS_FORK: Parent " + task.getId() + " received child PID " + child.getId());
+            // System.out.println("SYS_FORK: Parent " + task.getId() + " received child PID
+            // " + child.getId());
             return child.getId();
 
         } catch (Exception e) {
@@ -295,7 +299,7 @@ public class SystemCallHandler {
     }
 
     private int handleExec(Task task, int pathPtr, int argvPtr) {
-        System.out.println("SYS_EXEC: Task " + task.getId() + " requesting exec");
+        // System.out.println("SYS_EXEC: Task " + task.getId() + " requesting exec");
 
         MemoryManager memory = kernel.getMemory();
         ProcessMemoryCoordinator coordinator = kernel.getMemoryCoordinator();
