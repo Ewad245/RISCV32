@@ -1,5 +1,7 @@
 package cse311;
 
+import cse311.Exception.MemoryAccessException;
+
 public class MemoryManager {
     private SimpleMemory memory;
     private Uart uart;
@@ -24,6 +26,7 @@ public class MemoryManager {
 
     // UART Memory-Mapped Registers
     public static final int UART_BASE = 0x10000000;
+    public static final int UART_SIZE = 0x1000;
     public static final int UART_TX_DATA = UART_BASE + 0x0; // Write data to transmit
     public static final int UART_RX_DATA = UART_BASE + 0x4; // Read received data
     public static final int UART_STATUS = UART_BASE + 0x8; // Status register

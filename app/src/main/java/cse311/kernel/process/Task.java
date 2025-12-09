@@ -1,7 +1,10 @@
-package cse311;
+package cse311.kernel.process;
 
 import java.util.ArrayList;
 import java.util.List;
+
+import cse311.RV32iCpu;
+import cse311.WaitReason;
 
 /**
  * Represents a task (process) in the simulated operating system.
@@ -39,6 +42,7 @@ public class Task {
     private int dataSize;
     private int heapStart;
     private int heapSize;
+    private int allocatedSize;
 
     // Generic context (AddressSpace or SegmentTable)
     private transient Object memoryContext;
@@ -319,6 +323,14 @@ public class Task {
 
     public void setExitCode(int exitCode) {
         this.exitCode = exitCode;
+    }
+
+    public int getAllocatedSize() {
+        return allocatedSize;
+    }
+
+    public void setAllocatedSize(int allocatedSize) {
+        this.allocatedSize = allocatedSize;
     }
 
     /**

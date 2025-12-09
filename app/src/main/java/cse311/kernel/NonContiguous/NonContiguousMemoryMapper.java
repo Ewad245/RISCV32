@@ -1,7 +1,7 @@
 package cse311.kernel.NonContiguous;
 
-import cse311.MemoryAccessException;
 import cse311.MemoryManager;
+import cse311.Exception.MemoryAccessException;
 
 public interface NonContiguousMemoryMapper {
     /** Creates the Page Table or Segment Table for a process */

@@ -8,6 +8,8 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
+import cse311.Exception.ElfException;
+import cse311.Exception.MemoryAccessException;
 import cse311.kernel.NonContiguous.paging.AddressSpace;
 import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
 
@@ -209,10 +211,46 @@ public class ElfLoader {
     public List<ElfSegment> getSegments() {
         return new ArrayList<>(segments);
     }
-}
 
-class ElfException extends Exception {
-    public ElfException(String message) {
-        super(message);
+    /**
+     * Static utility to calculate the total memory size required by an ELF file
+     * by inspecting its program headers.
+     * * @param elfData The ELF file bytes
+     * 
+     * @return The highest virtual address used by the program (plus alignment)
+     */
+    public static int calculateRequiredMemory(byte[] elfData) throws ElfException {
+        ByteBuffer buffer = ByteBuffer.wrap(elfData).order(ByteOrder.LITTLE_ENDIAN);
+
+        // Basic Header Validation
+        if (elfData.length < 52 || buffer.getInt(0) != 0x464C457F) { // 0x7F 'E' 'L' 'F'
+            throw new ElfException("Invalid ELF header");
+        }
+
+        int programHeaderOffset = buffer.getInt(28);
+        int programHeaderEntrySize = buffer.getShort(42);
+        int programHeaderEntryCount = buffer.getShort(44);
+
+        int maxVirtualAddress = 0;
+
+        for (int i = 0; i < programHeaderEntryCount; i++) {
+            int offset = programHeaderOffset + (i * programHeaderEntrySize);
+            int type = buffer.getInt(offset);
+
+            // PT_LOAD = 1
+            if (type == 1) {
+                int virtualAddr = buffer.getInt(offset + 8);
+                int memorySize = buffer.getInt(offset + 20);
+
+                int endAddress = virtualAddr + memorySize;
+
+                if (endAddress > maxVirtualAddress) {
+                    maxVirtualAddress = endAddress;
+                }
+            }
+        }
+
+        // Align to 4KB page boundary just to be safe/clean
+        return (maxVirtualAddress + 4095) & ~4095;
     }
 }

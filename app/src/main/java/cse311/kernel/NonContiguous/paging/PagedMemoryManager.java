@@ -1,7 +1,8 @@
 package cse311.kernel.NonContiguous.paging;
 
 import cse311.MemoryManager;
-import cse311.MemoryAccessException;
+import cse311.Exception.MemoryAccessException;
+
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.Map;

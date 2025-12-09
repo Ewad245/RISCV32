@@ -2,6 +2,9 @@ package cse311.programs; // You can create a new package
 
 import cse311.*;
 import cse311.kernel.Kernel;
+import cse311.kernel.process.Task;
+import cse311.kernel.process.TaskState;
+
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Scanner;

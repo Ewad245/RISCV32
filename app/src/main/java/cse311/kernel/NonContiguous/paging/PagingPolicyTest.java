@@ -1,6 +1,6 @@
 package cse311.kernel.NonContiguous.paging;
 
-import cse311.MemoryAccessException;
+import cse311.Exception.MemoryAccessException;
 
 /**
  * Test class to verify paging policy abstraction works correctly

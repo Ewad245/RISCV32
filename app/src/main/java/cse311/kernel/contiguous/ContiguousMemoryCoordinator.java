@@ -4,8 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import cse311.ElfLoader;
-import cse311.MemoryAccessException;
 import cse311.MemoryManager;
+import cse311.Exception.MemoryAccessException;
 import cse311.kernel.memory.ProcessMemoryCoordinator;
 
 public class ContiguousMemoryCoordinator implements ProcessMemoryCoordinator {
@@ -59,7 +59,14 @@ public class ContiguousMemoryCoordinator implements ProcessMemoryCoordinator {
 
     @Override
     public void copyMemory(int parentPid, int childPid) throws MemoryAccessException {
-        throw new MemoryAccessException("Fork not implemented for Contiguous yet");
+        // Delegate to the manager to physically copy bytes from Parent -> Child
+        // partition
+        boolean success = manager.copyMemory(parentPid, childPid);
+
+        if (!success) {
+            throw new MemoryAccessException(
+                    "Fork failed: Could not copy contiguous memory from PID " + parentPid + " to " + childPid);
+        }
     }
 
     @Override
@@ -68,7 +75,7 @@ public class ContiguousMemoryCoordinator implements ProcessMemoryCoordinator {
     }
 
     @Override
-    public int setupStack(int pid, List<String> args) throws MemoryAccessException {
+    public int setupStack(int pid, List<String> args, MemoryLayout layout) throws MemoryAccessException {
         manager.switchContext(pid);
 
         // Calculate Top of Stack relative to Base
@@ -85,7 +92,7 @@ public class ContiguousMemoryCoordinator implements ProcessMemoryCoordinator {
         // FIX: The caller (handleExec) should probably pass the layout or we store it.
         // However, standard Linux stack grows down from top of User Space.
         // In this sim, let's assume relative 0x00100000 (1MB) is the top for now.
-        int sp = 0x00100000;
+        int sp = layout.stackBase + layout.stackSize;
 
         // Reuse the exact same logic as NonContiguous, because
         // physMem.writeByteToVirtualAddress handles the Base Register addition!

@@ -1,6 +1,6 @@
 package cse311.kernel.NonContiguous.paging;
 
-import cse311.MemoryAccessException;
+import cse311.Exception.MemoryAccessException;
 
 /**
  * Demand pager implementation that allocates pages on demand and supports

@@ -3,9 +3,9 @@ package cse311.kernel.contiguous;
 import java.util.ArrayList;
 import java.util.List;
 
-import cse311.MemoryAccessException;
 import cse311.MemoryManager;
 import cse311.SimpleMemory;
+import cse311.Exception.MemoryAccessException;
 
 /**
  * Implements Contiguous Memory Allocation using Base/Limit registers.
@@ -32,6 +32,14 @@ public class ContiguousMemoryManager extends MemoryManager {
         this.allocator = allocator;
         // Initially one giant free block (hole)
         freeList.add(new MemoryBlock(0, totalMemory));
+    }
+
+    public int getLimitRegister() {
+        return this.limitRegister;
+    }
+
+    private boolean isMMIO(int address) {
+        return address >= UART_BASE && address < (UART_BASE + UART_SIZE);
     }
 
     /**
@@ -71,6 +79,10 @@ public class ContiguousMemoryManager extends MemoryManager {
 
     @Override
     public byte readByte(int va) throws MemoryAccessException {
+        // Allow direct access to UART without translation/limit check
+        if (isMMIO(va)) {
+            return super.readByte(va); // Pass directly to SimpleMemory (which handles UART)
+        }
         // 1. Translate
         int pa = translate(va);
         // 2. Access Physical RAM (via parent)
@@ -79,12 +91,19 @@ public class ContiguousMemoryManager extends MemoryManager {
 
     @Override
     public void writeByte(int va, byte value) throws MemoryAccessException {
+        if (isMMIO(va)) {
+            super.writeByte(va, value);
+            return;
+        }
         int pa = translate(va);
         super.writeByte(pa, value);
     }
 
     @Override
     public int readWord(int va) throws MemoryAccessException {
+        if (isMMIO(va)) {
+            return super.readWord(va);
+        }
         int pa = translate(va);
         // Note: super.readWord will check physical alignment
         return super.readWord(pa);
@@ -92,6 +111,10 @@ public class ContiguousMemoryManager extends MemoryManager {
 
     @Override
     public void writeWord(int va, int value) throws MemoryAccessException {
+        if (isMMIO(va)) {
+            super.writeWord(va, value);
+            return;
+        }
         int pa = translate(va);
         super.writeWord(pa, value);
     }
@@ -137,6 +160,44 @@ public class ContiguousMemoryManager extends MemoryManager {
             return true;
         }
         return false;
+    }
+
+    /**
+     * Copies the content of the parent's memory partition to the child's partition.
+     * Essential for fork() implementation.
+     */
+    public boolean copyMemory(int parentPid, int childPid) {
+        ProcessBlock parent = null;
+        ProcessBlock child = null;
+
+        // 1. Find the memory blocks for both processes
+        for (ProcessBlock pb : allocatedList) {
+            if (pb.pid == parentPid)
+                parent = pb;
+            if (pb.pid == childPid)
+                child = pb;
+        }
+
+        if (parent == null || child == null) {
+            System.err.println("Contiguous Copy Failed: PIDs not found (P:" + parentPid + ", C:" + childPid + ")");
+            return false;
+        }
+
+        // 2. Access the physical RAM
+        byte[] ram = this.getByteMemory();
+
+        // 3. Determine safe copy size (prevent overflow if child < parent)
+        // Note: Ideally child.size >= parent.size, but we use min() for safety.
+        int bytesToCopy = Math.min(parent.size, child.size);
+
+        // 4. Perform the physical copy
+        try {
+            System.arraycopy(ram, parent.start, ram, child.start, bytesToCopy);
+            return true;
+        } catch (Exception e) {
+            System.err.println("Contiguous Copy Error: " + e.getMessage());
+            return false;
+        }
     }
 
     public void freeMemory(int pid) {

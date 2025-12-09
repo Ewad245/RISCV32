@@ -2,6 +2,8 @@ package cse311;
 
 import java.util.Arrays;
 
+import cse311.Exception.MemoryAccessException;
+
 public class SimpleMemory {
     private byte[] memory;
     private int MEMORY_SIZE = 128 * 1024 * 1024; // 1KB of memory
@@ -32,7 +34,7 @@ public class SimpleMemory {
 
         int physicalAddress = translateAddress(address);
         if (physicalAddress < 0 || physicalAddress >= MEMORY_SIZE) {
-            throw new MemoryAccessException("Memory access out of bounds: 0x" + 
+            throw new MemoryAccessException("Memory access out of bounds: 0x" +
                     Integer.toHexString(address) + " -> 0x" + Integer.toHexString(physicalAddress));
         }
         return memory[physicalAddress];
@@ -47,7 +49,7 @@ public class SimpleMemory {
 
         int physicalAddress = translateAddress(address);
         if (physicalAddress < 0 || physicalAddress >= MEMORY_SIZE) {
-            throw new MemoryAccessException("Memory access out of bounds: 0x" + 
+            throw new MemoryAccessException("Memory access out of bounds: 0x" +
                     Integer.toHexString(address) + " -> 0x" + Integer.toHexString(physicalAddress));
         }
         memory[physicalAddress] = value;
@@ -98,7 +100,7 @@ public class SimpleMemory {
         int physicalAddress = translateAddress(address);
         if (physicalAddress < 0 || physicalAddress + accessSize > MEMORY_SIZE) {
             throw new MemoryAccessException(
-                    String.format("Memory access out of bounds: virtual=0x%08X, physical=0x%08X, size=%d", 
+                    String.format("Memory access out of bounds: virtual=0x%08X, physical=0x%08X, size=%d",
                             address, physicalAddress, accessSize));
         }
     }
@@ -112,16 +114,16 @@ public class SimpleMemory {
         if (virtualAddress < 0) {
             // Convert negative int to unsigned long
             long unsignedAddr = virtualAddress & 0xFFFFFFFFL;
-            
+
             // Map high addresses (0x80000000+) to lower memory region
             if (unsignedAddr >= 0x80000000L) {
-                return (int)(unsignedAddr - 0x80000000L);
+                return (int) (unsignedAddr - 0x80000000L);
             }
-            
+
             // For other negative addresses, use as-is (shouldn't happen in normal cases)
             return virtualAddress;
         }
-        
+
         // For positive addresses, use directly
         return virtualAddress;
     }

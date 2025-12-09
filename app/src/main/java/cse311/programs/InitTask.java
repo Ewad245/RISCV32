@@ -2,6 +2,8 @@ package cse311.programs; // You can create a new package
 
 import cse311.*;
 import cse311.kernel.Kernel;
+import cse311.kernel.process.Task;
+import cse311.kernel.process.TaskState;
 
 public class InitTask extends JavaTask {
 

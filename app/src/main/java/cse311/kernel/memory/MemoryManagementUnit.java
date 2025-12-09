@@ -1,6 +1,6 @@
 package cse311.kernel.memory;
 
-import cse311.MemoryAccessException;
+import cse311.Exception.MemoryAccessException;
 
 /**
  * Abstraction for the hardware/software MMU.

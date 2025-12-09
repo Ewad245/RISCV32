@@ -2,7 +2,7 @@ package cse311.kernel.NonContiguous;
 
 import cse311.kernel.memory.ProcessMemoryCoordinator;
 import cse311.MemoryManager;
-import cse311.MemoryAccessException;
+import cse311.Exception.MemoryAccessException;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -64,14 +64,14 @@ public class NonContiguousMemoryCoordinator implements ProcessMemoryCoordinator 
     }
 
     @Override
-    public int setupStack(int pid, List<String> args) throws MemoryAccessException {
+    public int setupStack(int pid, List<String> args, MemoryLayout layout) throws MemoryAccessException {
         // Switch context to ensure we write to the correct address space
         mapper.switchContext(pid);
         MemoryManager memory = mapper.getMemoryInterface();
 
         // Calculate Top of Stack (Virtual Address)
         // In Non-Contiguous, this is usually fixed at top of memory
-        int sp = 0x7FFF_F000;
+        int sp = layout.stackBase + layout.stackSize;
 
         // Write arguments to stack (Standard RISC-V convention)
         List<Integer> argvPtrs = new ArrayList<>();

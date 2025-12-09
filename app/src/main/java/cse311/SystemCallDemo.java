@@ -1,6 +1,8 @@
 package cse311;
 
 import cse311.kernel.*;
+import cse311.kernel.process.Task;
+import cse311.kernel.process.TaskState;
 import cse311.kernel.syscall.SystemCallHandler;
 
 /**

@@ -1,5 +1,7 @@
 package cse311;
 
+import cse311.kernel.process.Task;
+
 /**
  * Simple test to verify paging implementation
  */

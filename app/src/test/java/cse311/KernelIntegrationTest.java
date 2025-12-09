@@ -5,6 +5,8 @@ import cse311.kernel.KernelConfig;
 import cse311.kernel.KernelStats;
 import cse311.kernel.contiguous.BestFitStrategy;
 import cse311.kernel.contiguous.ContiguousMemoryManager;
+import cse311.kernel.process.Task;
+import cse311.kernel.process.TaskState;
 import cse311.kernel.scheduler.SchedulerStats;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -6,9 +6,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 import cse311.*;
+import cse311.Exception.ElfException;
+import cse311.Exception.MemoryAccessException;
 import cse311.kernel.Kernel;
 import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
 import cse311.kernel.memory.ProcessMemoryCoordinator;
+import cse311.kernel.process.Task;
+import cse311.kernel.process.TaskState;
 
 /**
  * Handles system calls from user tasks
@@ -344,8 +348,20 @@ public class SystemCallHandler {
             // Free old resources
             coordinator.freeMemory(task.getId());
 
-            // Allocate new resources
-            int requiredSize = elfData.length + kernel.getConfig().getStackSize() + 4096;
+            int elfEndAddress = 0;
+            try {
+                elfEndAddress = ElfLoader.calculateRequiredMemory(elfData);
+            } catch (ElfException e) {
+                System.err.println("SYS_EXEC: Bad ELF format: " + e.getMessage());
+                return -1;
+            }
+
+            // Define a reasonable Heap size (e.g., 64KB or config based)
+            int minHeapSize = 64 * 1024;
+            int stackSize = kernel.getConfig().getStackSize();
+
+            // Total = (End of Code/Data) + (Heap Space) + (Stack Space)
+            int requiredSize = elfEndAddress + minHeapSize + stackSize;
             var layout = coordinator.allocateMemory(task.getId(), requiredSize);
 
             // Load new program
@@ -353,13 +369,14 @@ public class SystemCallHandler {
 
             // 4. Setup Stack (Delegated!)
             // This works for Paging AND Contiguous now
-            int newSp = coordinator.setupStack(task.getId(), argvList);
+            int newSp = coordinator.setupStack(task.getId(), argvList, layout);
 
             // 5. Update Task
             task.setName(path);
             task.setProgramCounter(newEntryPoint);
             task.setStackBase(layout.stackBase);
             task.setStackSize(layout.stackSize);
+            task.setAllocatedSize(requiredSize);
 
             // Update SP (x2)
             task.getRegisters()[2] = newSp;

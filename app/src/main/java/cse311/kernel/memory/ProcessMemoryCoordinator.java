@@ -2,7 +2,7 @@ package cse311.kernel.memory;
 
 import java.util.List;
 
-import cse311.MemoryAccessException;
+import cse311.Exception.MemoryAccessException;
 
 /**
  * Strategy interface for managing process memory lifecycles.
@@ -48,7 +48,7 @@ public interface ProcessMemoryCoordinator {
      * NEW: Set up the stack with command line arguments.
      * Replaces manual stack manipulation in SystemCallHandler.
      */
-    int setupStack(int pid, List<String> args) throws MemoryAccessException;
+    int setupStack(int pid, List<String> args, MemoryLayout layout) throws MemoryAccessException;
 
     /**
      * Data Transfer Object (DTO) to return memory details to TaskManager.

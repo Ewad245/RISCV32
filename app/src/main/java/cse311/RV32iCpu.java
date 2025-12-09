@@ -1,6 +1,9 @@
 package cse311;
 
 import java.util.Scanner;
+
+import cse311.Exception.MemoryAccessException;
+
 import java.util.HashMap;
 import java.util.Map;
 

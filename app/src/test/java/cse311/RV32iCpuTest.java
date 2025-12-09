@@ -2,6 +2,9 @@ package cse311;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import cse311.Exception.MemoryAccessException;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 public class RV32iCpuTest {

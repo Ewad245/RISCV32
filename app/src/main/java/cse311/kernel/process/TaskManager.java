@@ -1,6 +1,7 @@
 package cse311.kernel.process;
 
 import cse311.*;
+import cse311.Exception.MemoryAccessException;
 import cse311.kernel.Kernel;
 import cse311.kernel.NonContiguous.paging.AddressSpace;
 import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
@@ -71,8 +72,11 @@ public class TaskManager {
      */
     public Task createTask(int pid, byte[] elfData, String name, Task parent) throws Exception {
         // 1. Calculate Requirements
+        int elfEndAddress = ElfLoader.calculateRequiredMemory(elfData);
         int stackSize = kernel.getConfig().getStackSize();
-        int requiredSize = elfData.length + stackSize + (1024 * 1024);
+        int minHeapSize = 64 * 1024; // 64KB Heap buffer
+
+        int requiredSize = elfEndAddress + minHeapSize + stackSize;
 
         // 2. Delegate Allocation
         var layout = memoryCoordinator.allocateMemory(pid, requiredSize);
@@ -82,6 +86,8 @@ public class TaskManager {
 
         // 4. Create Task Object
         Task task = new Task(pid, name, entryPoint, layout.stackSize, layout.stackBase);
+
+        task.setAllocatedSize(requiredSize);
 
         // REMOVED: if (instanceof PagedMemoryManager) task.setAddressSpace(...)
         // Reason: The coordinator now handles context switching using PID lookup only.
@@ -239,10 +245,15 @@ public class TaskManager {
         // We assume the child needs the same memory footprint as the parent
         // In paging, this is just a quota. In contiguous, this finds a hole of the same
         // size.
-        int estimatedSize = parent.getStackSize() + (1024 * 1024); // Size calculation
+        int childMemorySize = parent.getAllocatedSize();
+
+        // Fallback for tasks created before this fix or special cases
+        if (childMemorySize == 0) {
+            childMemorySize = parent.getStackSize() + (1024 * 1024);
+        }
 
         // Strategy Pattern: Allocate based on mode (Paging or Contiguous)
-        ProcessMemoryCoordinator.MemoryLayout layout = memoryCoordinator.allocateMemory(childPid, estimatedSize);
+        ProcessMemoryCoordinator.MemoryLayout layout = memoryCoordinator.allocateMemory(childPid, childMemorySize);
 
         // 3. Copy Memory Content
         // Strategy Pattern: Copy Page Tables OR Copy Physical Bytes
@@ -267,6 +278,7 @@ public class TaskManager {
         child.getRegisters()[10] = 0; // a0 = 0
 
         // 7. Hierarchy & Scheduler
+        child.setAllocatedSize(childMemorySize);
         child.setParent(parent);
         parent.addChild(child);
         child.setState(TaskState.READY);

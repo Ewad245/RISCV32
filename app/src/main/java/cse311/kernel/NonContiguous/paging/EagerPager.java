@@ -1,6 +1,6 @@
 package cse311.kernel.NonContiguous.paging;
 
-import cse311.MemoryAccessException;
+import cse311.Exception.MemoryAccessException;
 
 /**
  * Eager pager implementation that allocates pages immediately when needed.

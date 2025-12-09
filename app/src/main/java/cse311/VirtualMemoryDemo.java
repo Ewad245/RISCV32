@@ -2,6 +2,7 @@ package cse311;
 
 import cse311.Enum.MemoryMode;
 import cse311.kernel.Kernel;
+import cse311.kernel.process.Task;
 
 /**
  * Demonstration of individual address spaces for tasks

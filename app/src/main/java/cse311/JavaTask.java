@@ -1,6 +1,8 @@
 package cse311;
 
 import cse311.kernel.Kernel;
+import cse311.kernel.process.Task;
+import cse311.kernel.process.TaskState;
 
 /**
  * An abstract base class for tasks whose logic is written in Java,

@@ -3,6 +3,8 @@ package cse311;
 import cse311.kernel.Kernel;
 import cse311.kernel.contiguous.BestFitStrategy;
 import cse311.kernel.contiguous.ContiguousMemoryManager;
+import cse311.kernel.process.Task;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
