@@ -44,26 +44,42 @@ Kernel (Main Coordinator)
 
 ## Quick Start
 
+### Boot Sequence
+
+The system follows this boot sequence:
+
+1. **Hardware Initialization**
+   - 128MB RAM allocation
+   - CPU initialization
+   - Memory management setup
+
+2. **Kernel Configuration**
+   - Scheduler type set to ROUND_ROBIN
+   - Time slice of 2000 instructions per task
+
+3. **Process Initialization**
+   - The bootloader spawns the Init process (PID 1)
+   - The Init process can spawn additional processes (like a shell)
+
+4. **ELF Loading**
+   - Optional pre-loading of ELF files at startup
+   - ELF files are loaded from the "User_Program_ELF" directory
+
 ### Basic Usage
 
 ```java
-// Create memory and CPU
-SimpleMemory simpleMemory = new SimpleMemory(128 * 1024 * 1024);
-MemoryManager memory = new MemoryManager(simpleMemory);
-RV32iCpu cpu = new RV32iCpu(memory);
+// 1. Create computer with 128MB RAM and memory mode
+RV32iComputer computer = new RV32iComputer(128 * 1024 * 1024, 100, MemoryMode.CONTIGUOUS);
+Kernel kernel = computer.getKernel();
 
-// Create kernel
-Kernel kernel = new Kernel(cpu, memory);
-
-// Configure scheduler
+// 2. Configure scheduler
 kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.ROUND_ROBIN);
-kernel.getConfig().setTimeSlice(1000);
+kernel.getConfig().setTimeSlice(2000);
 
-// Create tasks
-Task task1 = kernel.createTask(elfData, "my_program");
-Task task2 = kernel.createTask("path/to/program.elf");
+// 3. (Optional) Load initial ELF program
+kernel.createTask("User_Program_ELF/init.elf");
 
-// Start kernel
+// 4. Start the kernel (this blocks forever)
 kernel.start();
 ```
 
@@ -185,25 +201,140 @@ case CUSTOM:
 ## Task States and Lifecycle
 
 ```
-[NEW] → [READY] → [RUNNING] → [TERMINATED]
-           ↑         ↓
-           └─── [WAITING] ←──┘
+[BOOT] → [INIT] → [READY] → [RUNNING] → [TERMINATED]
+            |         |         ↓
+            |         └─── [WAITING] ←──┘
+            |                   ↑
+            └─── [SHELL] ───────┘
 ```
 
+- **BOOT**: System is initializing
+- **INIT**: Initial process (PID 1) is starting
 - **READY**: Task is ready to run
 - **RUNNING**: Task is currently executing
 - **WAITING**: Task is blocked (I/O, sleep, etc.)
 - **TERMINATED**: Task has finished or been killed
+- **SHELL**: Special shell process spawned by init
 
-## Memory Layout
+## Initialization Process
 
+The system starts with a special Init process (PID 1) that:
+1. Initializes system services
+2. Can spawn a shell or other system processes
+3. Manages system startup scripts
+
+The Init process is responsible for:
+- Setting up the system environment
+- Starting system services
+- Launching the default shell
+- Managing process cleanup
+
+## Error Handling
+
+The kernel includes comprehensive error handling:
+- Invalid ELF files are rejected
+- System resources are properly cleaned up on errors
+- Detailed error messages are provided for debugging
+- The system fails gracefully with clear error messages
+
+## Memory Management
+
+The system supports two memory management approaches:
+
+### 1. Contiguous Memory Management
 ```
-0x00000000 - 0x0FFFFFFF: User space
-0x10000000 - 0x1FFFFFFF: Device memory (UART, etc.)
-0x20000000 - 0x6FFFFFFF: Kernel space
-0x70000000 - 0x7FFFFFFF: Task stacks
-0x80000000 - 0xFFFFFFFF: High memory
+[Process 1] [Process 2]  ...  [Process N]  [Free Space]
 ```
+
+#### Key Features
+- **Base/Limit Registers**: Hardware-enforced memory protection
+- **Allocation Strategies**: First-Fit, Best-Fit
+- **Process Isolation**: Each process has its own memory partition
+- **Fragmentation Handling**: External fragmentation handled via compaction
+
+### 2. Non-Contiguous Memory Management (Paging)
+```
++------------------+ 0xFFFFFFFF
+|     Stack        | (grows down)
+|     ...          |
++------------------+
+|     Heap         | (grows up)
+|     ...          |
++------------------+
+|     Data         |
++------------------+
+|     Code         |
++------------------+ 0x00000000
+```
+
+#### Key Features
+- **Paging**: 4KB pages with 2-level page tables (Sv32-like)
+- **Virtual Memory**: Each process has its own 1GB virtual address space
+- **Page Replacement**: Configurable paging policies (Demand Paging, Eager Paging)
+- **Frame Allocation**: Global frame allocator with reverse mapping
+
+### Memory Protection
+- **Contiguous**: Base/Limit registers ensure process isolation
+- **Paged**: Page table permissions control access
+- **Common**:
+  - Memory accesses are validated to prevent out-of-bounds access
+  - Each task has its own isolated memory space
+  - UART I/O region is handled separately for device communication
+
+### UART Registers (Memory-Mapped I/O)
+- `0x10000000`: UART_TX_DATA - Write data to transmit
+- `0x10000004`: UART_RX_DATA - Read received data
+- `0x10000008`: UART_STATUS - Status register
+- `0x1000000C`: UART_CONTROL - Control register
+
+### Process Memory Layout (Per Process)
+
+#### Contiguous Mode
+```
++-------------------+ 0x00000000
+|      Code         |
+|-------------------|
+|      Data         |
+|-------------------|
+|      Heap         | (grows upward)
+|                   |
+|-------------------|
+|                   |
+|      Stack        | (grows downward)
++-------------------+ [Base + Limit]
+```
+
+#### Paged Mode
+```
++------------------+ 0xFFFFFFFF
+|     Stack        | (grows down)
+|     ...          |
++------------------+
+|     Heap         | (grows up)
+|     ...          |
++------------------+
+|     Data         |
++------------------+
+|     Code         |
++------------------+ 0x00000000
+```
+
+### Notes
+- **Contiguous Mode**:
+  - Simpler, lower overhead
+  - Suffers from external fragmentation
+  - Requires compaction for long-running systems
+
+- **Paged Mode**:
+  - Eliminates external fragmentation
+  - Supports virtual memory and demand paging
+  - Higher overhead due to page tables
+  - Configurable page replacement policies
+
+- **Common**:
+  - UART region (0x10000000-0x10000FFF) is memory-mapped I/O
+  - Memory accesses are validated for protection
+  - Each process has its own isolated address space
 
 ## Debugging and Monitoring
 
