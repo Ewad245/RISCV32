@@ -14,7 +14,7 @@ public class VirtualMemoryDemo {
             System.out.println("=== Virtual Memory Demo: Individual Address Spaces ===\n");
 
             // Create computer with task-aware memory management
-            RV32iComputer computer = new RV32iComputer(128 * 1024 * 1024, 4, MemoryMode.PAGING); // 128MB, max 4 tasks
+            RV32Computer computer = new RV32Computer(128 * 1024 * 1024, 4, MemoryMode.PAGING); // 128MB, max 4 tasks
             TaskAwareMemoryManager memory = computer.getTaskAwareMemoryManager();
             Kernel kernel = computer.getKernel();
 

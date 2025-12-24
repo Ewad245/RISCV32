@@ -14,7 +14,7 @@ public class CompilationTest {
     @Test
     void testBasicCompilation() {
         // Test that all classes can be instantiated
-        RV32iComputer computer = new RV32iComputer(64 * 1024 * 1024, 4, MemoryMode.PAGING);
+        RV32Computer computer = new RV32Computer(64 * 1024 * 1024, 4, MemoryMode.PAGING);
         assertNotNull(computer);
         assertNotNull(computer.getCpu());
         assertNotNull(computer.getMemoryManager());

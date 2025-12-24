@@ -13,7 +13,7 @@ public class KernelExample {
             // Create memory and CPU
             SimpleMemory simpleMemory = new SimpleMemory(128 * 1024 * 1024); // 128MB
             MemoryManager memory = new MemoryManager(simpleMemory);
-            RV32iCpu cpu = new RV32iCpu(memory);
+            RV32Cpu cpu = new RV32Cpu(memory);
 
             // Create kernel
             Kernel kernel = new Kernel(cpu, memory);

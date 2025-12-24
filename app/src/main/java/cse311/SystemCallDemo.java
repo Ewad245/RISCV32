@@ -17,7 +17,7 @@ public class SystemCallDemo {
             // Create memory and CPU
             SimpleMemory simpleMemory = new SimpleMemory(64 * 1024 * 1024);
             MemoryManager memory = new MemoryManager(simpleMemory);
-            RV32iCpu cpu = new RV32iCpu(memory);
+            RV32Cpu cpu = new RV32Cpu(memory);
 
             // Create kernel
             Kernel kernel = new Kernel(cpu, memory);
@@ -42,7 +42,7 @@ public class SystemCallDemo {
         }
     }
 
-    private static void testEcallDetection(RV32iCpu cpu) {
+    private static void testEcallDetection(RV32Cpu cpu) {
         System.out.println("   - Resetting CPU flags");
         cpu.resetFlags();
 
@@ -55,7 +55,7 @@ public class SystemCallDemo {
         System.out.println("   - ECALL flag after check: " + cpu.isEcall() + " (should be false - auto-reset)");
     }
 
-    private static void testSystemCallHandling(Kernel kernel, RV32iCpu cpu, MemoryManager memory) throws Exception {
+    private static void testSystemCallHandling(Kernel kernel, RV32Cpu cpu, MemoryManager memory) throws Exception {
         System.out.println("   - Creating test task");
         Task task = new Task(1, "test_task", 0x1000, 4096, 0x7000, null);
 

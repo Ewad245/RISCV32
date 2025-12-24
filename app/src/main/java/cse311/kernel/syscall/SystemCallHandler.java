@@ -24,7 +24,7 @@ import cse311.kernel.process.TaskState;
  */
 public class SystemCallHandler {
     private final Kernel kernel;
-    private RV32iCpu cpu;
+    private RV32Cpu cpu;
 
     // System call numbers (following Linux RISC-V convention)
     public static final int SYS_EXIT = 93;
@@ -41,7 +41,7 @@ public class SystemCallHandler {
     public static final int SYS_GET_TIME = 1001;
     public static final int SYS_SLEEP = 1002;
 
-    public SystemCallHandler(Kernel kernel, RV32iCpu cpu) {
+    public SystemCallHandler(Kernel kernel, RV32Cpu cpu) {
         this.kernel = kernel;
         this.cpu = cpu;
     }

@@ -8,16 +8,16 @@ import cse311.kernel.contiguous.BestFitStrategy;
 import cse311.kernel.contiguous.ContiguousMemoryManager;
 import cse311.kernel.process.Task;
 
-public class RV32iComputer {
-    private RV32iCpu cpu;
+public class RV32Computer {
+    private RV32Cpu cpu;
     private MemoryManager memory;
     private Kernel kernel;
 
-    public RV32iComputer(int memSize) {
+    public RV32Computer(int memSize) {
         this(memSize, 16, MemoryMode.PAGING); // Default to 16 max tasks
     }
 
-    public RV32iComputer(int memSize, int maxTasks, MemoryMode mode) {
+    public RV32Computer(int memSize, int maxTasks, MemoryMode mode) {
         System.out.println("--- Booting RV32iComputer in " + mode + " Mode ---");
 
         // 1. Initialize Memory Hardware & Logic
@@ -42,7 +42,7 @@ public class RV32iComputer {
         }
 
         // 2. Initialize CPU (Polymorphic: works with either memory)
-        this.cpu = new RV32iCpu(memory);
+        this.cpu = new RV32Cpu(memory);
 
         // 3. Initialize Kernel (Kernel constructor detects memory type)
         this.kernel = new Kernel(cpu, memory);
@@ -108,7 +108,7 @@ public class RV32iComputer {
      * 
      * @return The CPU
      */
-    public RV32iCpu getCpu() {
+    public RV32Cpu getCpu() {
         return cpu;
     }
 

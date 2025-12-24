@@ -39,7 +39,7 @@ public class DynamicElfExample {
             System.out.println("Entry point: 0x" + Integer.toHexString(entryPoint));
 
             // Create and configure CPU
-            RV32iCpu cpu = new RV32iCpu(memory);
+            RV32Cpu cpu = new RV32Cpu(memory);
             cpu.setProgramCounterEntryPoint(entryPoint);
 
             // Initialize stack pointer to a reasonable value
@@ -105,7 +105,7 @@ public class DynamicElfExample {
             }
 
             // Create CPU and run
-            RV32iCpu cpu = new RV32iCpu(memory);
+            RV32Cpu cpu = new RV32Cpu(memory);
             cpu.setProgramCounterEntryPoint(loadAddress);
             cpu.setRegister(2, 0x7C00000); // Set stack pointer
 

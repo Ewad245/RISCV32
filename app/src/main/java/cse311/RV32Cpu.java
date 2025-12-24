@@ -7,7 +7,7 @@ import cse311.Exception.MemoryAccessException;
 import java.util.HashMap;
 import java.util.Map;
 
-public class RV32iCpu {
+public class RV32Cpu {
 
     private int[] x = new int[32];
     private int lastPC = -1;
@@ -68,7 +68,7 @@ public class RV32iCpu {
     private boolean lastInstructionWasEcall = false;
     private boolean exceptionOccurred = false;
 
-    public RV32iCpu(MemoryManager memory) {
+    public RV32Cpu(MemoryManager memory) {
         this.memory = memory;
         input = new InputThread();
 

@@ -165,14 +165,14 @@ public class MemoryManager {
      * Legacy method for backward compatibility
      */
     public void validateAccess(int address) throws MemoryAccessException { // Changed to public to fix visibility issues
-        validateAccess(address, RV32iCpu.PRIVILEGE_MACHINE);
+        validateAccess(address, RV32Cpu.PRIVILEGE_MACHINE);
     }
 
     /**
      * Legacy method for backward compatibility
      */
     private void validateWriteAccess(int address) throws MemoryAccessException {
-        validateWriteAccess(address, RV32iCpu.PRIVILEGE_MACHINE);
+        validateWriteAccess(address, RV32Cpu.PRIVILEGE_MACHINE);
     }
 
     /**

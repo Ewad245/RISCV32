@@ -3,7 +3,7 @@ package cse311.kernel.process;
 import java.util.ArrayList;
 import java.util.List;
 
-import cse311.RV32iCpu;
+import cse311.RV32Cpu;
 import cse311.WaitReason;
 
 /**
@@ -93,7 +93,7 @@ public class Task {
      * 
      * @param cpu The CPU whose state should be saved
      */
-    public void saveState(RV32iCpu cpu) {
+    public void saveState(RV32Cpu cpu) {
         // System.out.println("DEBUG: Saving task " + id + " state, PC=" +
         // cpu.getProgramCounter() + ", a0="
         // + cpu.getRegisters()[10]);
@@ -106,7 +106,7 @@ public class Task {
      * 
      * @param cpu The CPU to restore the state to
      */
-    public void restoreState(RV32iCpu cpu) {
+    public void restoreState(RV32Cpu cpu) {
         // System.out.println("DEBUG: Restoring task " + id + " state, PC=" + this.pc +
         // ", a0=" + this.registers[10]);
         cpu.setProgramCounter(this.pc);

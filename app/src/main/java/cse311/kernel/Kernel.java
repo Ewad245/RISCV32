@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Provides a clean interface for managing tasks, scheduling, and system calls
  */
 public class Kernel {
-    private final RV32iCpu cpu;
+    private final RV32Cpu cpu;
     private final MemoryManager memory;
     private final TaskManager taskManager;
     private final Scheduler scheduler;
@@ -34,7 +34,7 @@ public class Kernel {
     // Configuration
     private final KernelConfig config;
 
-    public Kernel(RV32iCpu cpu, MemoryManager memory) {
+    public Kernel(RV32Cpu cpu, MemoryManager memory) {
         this.cpu = cpu;
         this.memory = memory;
         this.config = new KernelConfig();
@@ -390,7 +390,7 @@ public class Kernel {
     }
 
     // Getters for kernel subsystems
-    public RV32iCpu getCpu() {
+    public RV32Cpu getCpu() {
         return cpu;
     }
 

@@ -12,7 +12,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class RV32iComputerIntegrationTest {
 
-    private RV32iComputer computer;
+    private RV32Computer computer;
     private Kernel kernel;
 
     @BeforeEach
@@ -21,12 +21,12 @@ class RV32iComputerIntegrationTest {
                 8 * 1024 * 1024,
                 new BestFitStrategy());
 
-        RV32iCpu cpu = new RV32iCpu(memory);
+        RV32Cpu cpu = new RV32Cpu(memory);
         kernel = new Kernel(cpu, memory);
 
         // We use the constructor that matches our memory mode manually
         // or recreate the computer wrapper if needed.
-        computer = new RV32iComputer(8 * 1024 * 1024, 16, cse311.Enum.MemoryMode.CONTIGUOUS);
+        computer = new RV32Computer(8 * 1024 * 1024, 16, cse311.Enum.MemoryMode.CONTIGUOUS);
         kernel = computer.getKernel(); // Refreshed kernel from new computer
     }
 

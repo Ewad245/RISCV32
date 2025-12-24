@@ -8,14 +8,14 @@ import cse311.Exception.MemoryAccessException;
 import static org.junit.jupiter.api.Assertions.*;
 
 public class RV32iCpuTest {
-    private RV32iCpu cpu;
+    private RV32Cpu cpu;
     private MemoryManager memory;
 
     @BeforeEach
     void setUp() {
         SimpleMemory simpleMemory = new SimpleMemory(128 * 1024 * 1024);
         memory = new MemoryManager(simpleMemory);
-        cpu = new RV32iCpu(memory);
+        cpu = new RV32Cpu(memory);
     }
 
     // R-type instruction tests

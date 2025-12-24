@@ -13,7 +13,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class SystemCallIntegrationTest {
 
     private Kernel kernel;
-    private RV32iCpu cpu;
+    private RV32Cpu cpu;
     private MemoryManager memory;
 
     @BeforeEach
@@ -22,7 +22,7 @@ class SystemCallIntegrationTest {
                 8 * 1024 * 1024,
                 new BestFitStrategy());
         this.memory = cmm;
-        this.cpu = new RV32iCpu(memory);
+        this.cpu = new RV32Cpu(memory);
         this.kernel = new Kernel(cpu, memory);
     }
 

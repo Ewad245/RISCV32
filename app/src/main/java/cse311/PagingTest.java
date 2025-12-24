@@ -11,7 +11,7 @@ public class PagingTest {
             System.out.println("=== Testing Paging Implementation ===");
 
             // Create computer with paging
-            RV32iComputer computer = new RV32iComputer(64 * 1024 * 1024); // 64MB
+            RV32Computer computer = new RV32Computer(64 * 1024 * 1024); // 64MB
 
             // Create a simple program
             byte[] simpleProgram = {
