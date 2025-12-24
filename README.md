@@ -166,6 +166,8 @@ The kernel exposes a standard UNIX-like system call interface to user programs:
 | `SYS_FORK` | 220 | Copy current process (parent -\> child) |
 | `SYS_EXEC` | 221 | Load new executable image |
 | `SYS_WAIT` | 260 | Wait for child to change state |
+| `SYS_SHM_OPEN` | 20 | Create or open a shared memory region |
+| `SYS_SHM_ATTACH` | 21 | Attach a shared memory region to process address space |
 
 -----
 
