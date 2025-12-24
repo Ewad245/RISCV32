@@ -30,11 +30,12 @@ public final class AddressSpace {
         boolean V, R, W, X, U;
         boolean D; // Dirty bit (for Linux-like page management)
         boolean A; // Accessed bit (for page replacement)
+        boolean shared;
 
         @Override
         public String toString() {
-            return String.format("PTE{ppn=0x%x, V=%b, R=%b, W=%b, X=%b, D=%b, A=%b}",
-                    ppn, V, R, W, X, D, A);
+            return String.format("PTE{ppn=0x%x, V=%b, R=%b, W=%b, X=%b, D=%b, A=%b, Shared=%b}",
+                    ppn, V, R, W, X, D, A, shared);
         }
     }
 

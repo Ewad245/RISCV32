@@ -3,6 +3,7 @@ package cse311.kernel.memory;
 import java.util.List;
 
 import cse311.Exception.MemoryAccessException;
+import cse311.kernel.process.ProgramInfo;
 
 /**
  * Strategy interface for managing process memory lifecycles.
@@ -26,7 +27,7 @@ public interface ProcessMemoryCoordinator {
      * 
      * @return The entry point address.
      */
-    int loadProgram(int pid, byte[] elfData) throws Exception;
+    ProgramInfo loadProgram(int pid, byte[] elfData) throws Exception;
 
     /**
      * Frees resources when a process dies.

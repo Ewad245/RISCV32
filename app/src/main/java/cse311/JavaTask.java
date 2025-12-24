@@ -23,7 +23,7 @@ public abstract class JavaTask extends Task {
     public JavaTask(int id, String name, Kernel kernel, Task parent) {
         // Call the base 'Task' constructor with dummy values
         // for entryPoint, stackSize, and stackBase, as they aren't used.
-        super(id, name, 0, 0, 0);
+        super(id, name, 0, 0, 0, null);
 
         this.kernel = kernel;
         this.setState(TaskState.READY); // Start in the ready state

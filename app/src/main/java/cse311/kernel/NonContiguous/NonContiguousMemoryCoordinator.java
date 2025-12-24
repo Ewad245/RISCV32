@@ -1,6 +1,7 @@
 package cse311.kernel.NonContiguous;
 
 import cse311.kernel.memory.ProcessMemoryCoordinator;
+import cse311.kernel.process.ProgramInfo;
 import cse311.MemoryManager;
 import cse311.Exception.MemoryAccessException;
 
@@ -36,7 +37,7 @@ public class NonContiguousMemoryCoordinator implements ProcessMemoryCoordinator 
     }
 
     @Override
-    public int loadProgram(int pid, byte[] elfData) throws Exception {
+    public ProgramInfo loadProgram(int pid, byte[] elfData) throws Exception {
         // 1. Switch context so we write to the correct tables
         mapper.switchContext(pid);
 
@@ -45,7 +46,7 @@ public class NonContiguousMemoryCoordinator implements ProcessMemoryCoordinator 
         ElfLoader loader = new ElfLoader(mapper.getMemoryInterface());
         loader.loadElf(elfData);
 
-        return loader.getEntryPoint();
+        return loader.getProgramInfo();
     }
 
     @Override

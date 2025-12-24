@@ -82,10 +82,10 @@ public class TaskManager {
         var layout = memoryCoordinator.allocateMemory(pid, requiredSize);
 
         // 3. Delegate Loading
-        int entryPoint = memoryCoordinator.loadProgram(pid, elfData);
+        ProgramInfo info = memoryCoordinator.loadProgram(pid, elfData);
 
         // 4. Create Task Object
-        Task task = new Task(pid, name, entryPoint, layout.stackSize, layout.stackBase);
+        Task task = new Task(pid, name, info.entryPoint, layout.stackSize, layout.stackBase, info);
 
         task.setAllocatedSize(requiredSize);
 
@@ -98,7 +98,7 @@ public class TaskManager {
             parent.addChild(task);
         }
 
-        TaskMemoryInfo memInfo = new TaskMemoryInfo(pid, entryPoint, layout.stackBase, layout.stackSize);
+        TaskMemoryInfo memInfo = new TaskMemoryInfo(pid, info.entryPoint, layout.stackBase, layout.stackSize);
         taskMemory.put(pid, memInfo);
 
         return task;
@@ -207,7 +207,7 @@ public class TaskManager {
         Task child = new Task(childPid, name,
                 parent.getProgramCounter(),
                 parent.getStackSize(),
-                parent.getStackBase());
+                parent.getStackBase(), parent.getProgramInfo());
 
         // Copy registers
         child.setProgramCounter(parent.getProgramCounter());
@@ -216,14 +216,6 @@ public class TaskManager {
         // Set up parent relationship
         child.setParent(parent);
         parent.addChild(child);
-
-        // Copy memory layout
-        child.setTextStart(parent.getTextStart());
-        child.setTextSize(parent.getTextSize());
-        child.setDataStart(parent.getDataStart());
-        child.setDataSize(parent.getDataSize());
-        child.setHeapStart(parent.getHeapStart());
-        child.setHeapSize(parent.getHeapSize());
 
         return child;
     }
@@ -269,7 +261,7 @@ public class TaskManager {
         Task child = new Task(childPid, childName,
                 parent.getProgramCounter(),
                 parent.getStackSize(),
-                parent.getStackBase());
+                parent.getStackBase(), parent.getProgramInfo());
 
         // 5. Copy CPU State
         child.setRegisters(parent.getRegisters().clone());

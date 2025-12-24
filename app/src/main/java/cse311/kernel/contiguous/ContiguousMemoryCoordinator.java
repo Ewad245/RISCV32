@@ -7,6 +7,7 @@ import cse311.ElfLoader;
 import cse311.MemoryManager;
 import cse311.Exception.MemoryAccessException;
 import cse311.kernel.memory.ProcessMemoryCoordinator;
+import cse311.kernel.process.ProgramInfo;
 
 public class ContiguousMemoryCoordinator implements ProcessMemoryCoordinator {
 
@@ -38,7 +39,7 @@ public class ContiguousMemoryCoordinator implements ProcessMemoryCoordinator {
     }
 
     @Override
-    public int loadProgram(int pid, byte[] elfData) throws Exception {
+    public ProgramInfo loadProgram(int pid, byte[] elfData) throws Exception {
         // 1. Set Hardware Context (Base/Limit)
         manager.switchContext(pid);
 
@@ -49,7 +50,7 @@ public class ContiguousMemoryCoordinator implements ProcessMemoryCoordinator {
 
         // Note: For contiguous, the "Virtual" entry point is what we want
         // (e.g. 0x10000), because PC is relative to Base.
-        return loader.getEntryPoint();
+        return loader.getProgramInfo();
     }
 
     @Override

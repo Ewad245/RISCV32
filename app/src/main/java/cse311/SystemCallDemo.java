@@ -57,7 +57,7 @@ public class SystemCallDemo {
 
     private static void testSystemCallHandling(Kernel kernel, RV32iCpu cpu, MemoryManager memory) throws Exception {
         System.out.println("   - Creating test task");
-        Task task = new Task(1, "test_task", 0x1000, 4096, 0x7000);
+        Task task = new Task(1, "test_task", 0x1000, 4096, 0x7000, null);
 
         System.out.println("   - Setting up write system call");
         // Set up write system call: write("Hello", 5) to stdout

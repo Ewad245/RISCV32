@@ -12,6 +12,7 @@ import cse311.Exception.ElfException;
 import cse311.Exception.MemoryAccessException;
 import cse311.kernel.NonContiguous.paging.AddressSpace;
 import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
+import cse311.kernel.process.ProgramInfo;
 
 public class ElfLoader {
     private byte[] elfData;
@@ -198,6 +199,55 @@ public class ElfLoader {
         for (int i = segment.fileSize; i < segment.memorySize; i++) {
             memory.writeByteToVirtualAddress(loadAddr + i, (byte) 0);
         }
+    }
+
+    /**
+     * Analyzes loaded segments to determine program layout (Text, Data, Heap).
+     */
+    public ProgramInfo getProgramInfo() {
+        int entry = getEntryPoint();
+        int txtStart = Integer.MAX_VALUE;
+        int txtEnd = 0;
+        int datStart = Integer.MAX_VALUE;
+        int datEnd = 0;
+
+        for (ElfSegment seg : segments) {
+            int start = seg.virtualAddr;
+            int end = start + seg.memorySize;
+
+            if (seg.executable) {
+                // Text Segment (Executable)
+                if (start < txtStart)
+                    txtStart = start;
+                if (end > txtEnd)
+                    txtEnd = end;
+            } else if (seg.writable) {
+                // Data Segment (Writable but not Executable)
+                if (start < datStart)
+                    datStart = start;
+                if (end > datEnd)
+                    datEnd = end;
+            }
+        }
+
+        // Handle cases where sections might be missing
+        if (txtStart == Integer.MAX_VALUE)
+            txtStart = 0;
+        if (datStart == Integer.MAX_VALUE) {
+            datStart = txtEnd;
+            datEnd = txtEnd;
+        }
+
+        // Heap starts immediately after the Data segment, aligned to 4 bytes
+        int heapStart = (datEnd + 3) & ~3;
+
+        return new ProgramInfo(
+                entry,
+                txtStart,
+                txtEnd - txtStart,
+                datStart,
+                datEnd - datStart,
+                heapStart);
     }
 
     public int getEntryPoint() {

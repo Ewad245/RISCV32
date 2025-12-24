@@ -36,12 +36,7 @@ public class Task {
     private int exitCode;
 
     // Process memory information
-    private int textStart;
-    private int textSize;
-    private int dataStart;
-    private int dataSize;
-    private int heapStart;
-    private int heapSize;
+    private ProgramInfo meminfo;
     private int allocatedSize;
 
     // Generic context (AddressSpace or SegmentTable)
@@ -55,9 +50,10 @@ public class Task {
      * @param stackSize  The size of the task's stack in bytes
      * @param stackBase  The base address of the task's stack
      */
-    public Task(int id, int entryPoint, int stackSize, int stackBase) {
+    public Task(int id, int entryPoint, int stackSize, int stackBase, ProgramInfo info) {
         this.id = id;
         this.pc = entryPoint;
+        this.meminfo = info;
         this.registers = new int[32]; // RV32I has 32 registers
         this.stackSize = stackSize;
         this.stackBase = stackBase;
@@ -86,8 +82,8 @@ public class Task {
     /**
      * Creates a new task with a name
      */
-    public Task(int id, String name, int entryPoint, int stackSize, int stackBase) {
-        this(id, entryPoint, stackSize, stackBase);
+    public Task(int id, String name, int entryPoint, int stackSize, int stackBase, ProgramInfo info) {
+        this(id, entryPoint, stackSize, stackBase, info);
         this.name = name;
         this.exitCode = 0;
     }
@@ -227,55 +223,6 @@ public class Task {
         this.cpuTime += time;
     }
 
-    // Memory layout
-    public int getTextStart() {
-        return textStart;
-    }
-
-    public void setTextStart(int textStart) {
-        this.textStart = textStart;
-    }
-
-    public int getTextSize() {
-        return textSize;
-    }
-
-    public void setTextSize(int textSize) {
-        this.textSize = textSize;
-    }
-
-    public int getDataStart() {
-        return dataStart;
-    }
-
-    public void setDataStart(int dataStart) {
-        this.dataStart = dataStart;
-    }
-
-    public int getDataSize() {
-        return dataSize;
-    }
-
-    public void setDataSize(int dataSize) {
-        this.dataSize = dataSize;
-    }
-
-    public int getHeapStart() {
-        return heapStart;
-    }
-
-    public void setHeapStart(int heapStart) {
-        this.heapStart = heapStart;
-    }
-
-    public int getHeapSize() {
-        return heapSize;
-    }
-
-    public void setHeapSize(int heapSize) {
-        this.heapSize = heapSize;
-    }
-
     public void setMemoryContext(Object context) {
         this.memoryContext = context;
     }
@@ -335,12 +282,20 @@ public class Task {
         this.allocatedSize = allocatedSize;
     }
 
+    public ProgramInfo getProgramInfo() {
+        return meminfo;
+    }
+
+    public void setProgramInfo(ProgramInfo meminfo) {
+        this.meminfo = meminfo;
+    }
+
     /**
      * Creates a new thread within this process's thread group
      * Threads share the same address space and TGID but have separate stacks
      */
     public Task createThread(int threadId, int entryPoint, int stackSize, int stackBase) {
-        Task thread = new Task(threadId, entryPoint, stackSize, stackBase);
+        Task thread = new Task(threadId, entryPoint, stackSize, stackBase, this.meminfo);
         thread.setParent(this);
         thread.setTgid(this.tgid); // Same thread group
         thread.setMemoryContext(this.memoryContext); // Share address space
