@@ -210,12 +210,10 @@ public class PagedMemoryManager extends MemoryManager {
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.WRITE);
 
-        // --- FIX START ---
         if (frame == -2) {
             super.writeWord(va, v);
             return;
         }
-        // --- FIX END ---
 
         int pa = (frame << 12) | (va & 0xFFF);
         super.writeWord(pa, v);
@@ -254,7 +252,7 @@ public class PagedMemoryManager extends MemoryManager {
         int frame = freeFrames.nextSetBit(0);
         if (frame != -1) {
             freeFrames.clear(frame);
-            frameRefCount[frame] = 1; // Mặc định là 1 chủ sở hữu
+            frameRefCount[frame] = 1; // Default to 1 owner
             return frame;
         }
         return -1; // out of memory
@@ -271,33 +269,33 @@ public class PagedMemoryManager extends MemoryManager {
 
     public void freeFrame(int frame) {
         if (frame >= 0 && frame < totalFrames) {
-            // Giảm số lượng tham chiếu
+            // Decrease reference count
             frameRefCount[frame]--;
 
-            // Chỉ thực sự giải phóng khi không còn ai dùng (refCount <= 0)
+            // Only free when no one is using it (refCount <= 0)
             if (frameRefCount[frame] <= 0) {
                 freeFrames.set(frame);
                 reverseMap[frame] = null;
                 pageTableFrames.remove(frame);
                 pageDirectoryFrames.remove(frame);
 
-                // Nếu frame này nằm trong shared map, xóa nó đi
+                // If frame is in shared map, remove it
                 sharedKeyMap.values().removeIf(val -> val == frame);
             }
         }
     }
 
     public int openSharedRegion(int key) {
-        // Nếu key đã tồn tại, trả về frame cũ
+        // If key already exists, return old frame
         if (sharedKeyMap.containsKey(key)) {
             return sharedKeyMap.get(key);
         }
 
-        // Nếu chưa, tạo frame mới
+        // If not, create new frame
         int newFrame = allocateFrame();
         if (newFrame != -1) {
             sharedKeyMap.put(key, newFrame);
-            // Xóa sạch dữ liệu cũ (Zero-fill)
+            // Zero-fill the new frame
             for (int i = 0; i < PAGE_SIZE; i++) {
                 try {
                     writeByteToPhysicalAddress((newFrame << 12) + i, (byte) 0);
@@ -308,20 +306,20 @@ public class PagedMemoryManager extends MemoryManager {
         return newFrame;
     }
 
-    // Hàm map thủ công cho Shared Memory (đánh dấu shared = true)
+    // Manually map shared memory (set shared = true)
     public boolean mapSharedPage(AddressSpace as, int vpn, int frame, boolean write) {
-        // Gọi hàm nội bộ mapPageInternal (giả sử bạn có quyền truy cập hoặc sửa
-        // visibility)
-        // Hoặc sửa mapPage để nhận tham số shared
+        // Call internal mapPageInternal (assume you have access or modify visibility)
+        // Or modify mapPage to accept shared parameter
 
-        // Cách đơn giản nhất: Map bình thường rồi sửa cờ shared
+        // Simplest way: Map normally then modify shared flag
         boolean success = as.mapPage(vpn, frame, write, false); // No Exec
         if (success) {
-            // Tăng refCount vì có thêm một page table trỏ vào frame này
+            // Increase refCount because another page table points to this frame
             frameRefCount[frame]++;
 
-            // Đặt cờ shared = true trong PTE
-            AddressSpace.PageTableEntry pte = as.getPTEInternal(vpn); // Cần expose hàm này hoặc viết logic tìm PTE
+            // Set shared flag in PTE
+            AddressSpace.PageTableEntry pte = as.getPTEInternal(vpn); // Need to expose this function or write logic to
+                                                                      // find PTE
             if (pte != null)
                 pte.shared = true;
         }
@@ -404,7 +402,7 @@ public class PagedMemoryManager extends MemoryManager {
                 continue;
             }
 
-            // Duyệt qua Page Table (Level 2)
+            // Iterate over Page Table (Level 2)
             for (int l2Index = 0; l2Index < 1024; l2Index++) {
                 AddressSpace.PageTableEntry pte = l2Table.entries[l2Index];
 
@@ -413,41 +411,41 @@ public class PagedMemoryManager extends MemoryManager {
                 }
 
                 int vpn = (l1Index << 10) | l2Index;
-                int oldFrame = pte.ppn; // Khung trang vật lý của cha
+                int oldFrame = pte.ppn; // Physical frame of parent
 
-                // --- KIỂM TRA: NẾU LÀ TRANG SHARED ---
+                // --- CHECK: IF IT'S A SHARED PAGE ---
                 if (pte.shared) {
-                    // 1. Không cấp phát frame mới.
-                    // 2. Map VPN của con trỏ thẳng vào frame CŨ của cha.
+                    // 1. Do not allocate new frame.
+                    // 2. Map VPN of child directly to old frame of parent.
                     boolean mapped = newAS.mapPage(vpn, oldFrame, pte.W, pte.X);
 
                     if (mapped) {
-                        // Đánh dấu PTE của con cũng là shared
+                        // Mark PTE of child as shared
                         AddressSpace.PageTableEntry childPTE = newAS.getPTEInternal(vpn);
                         if (childPTE != null)
                             childPTE.shared = true;
 
-                        // Tăng số lượng tham chiếu (Reference Count) cho frame này
+                        // Increase reference count for this frame
                         frameRefCount[oldFrame]++;
                     } else {
                         throw new MemoryAccessException("copyAddressSpace: failed to map shared page");
                     }
 
                 } else {
-                    // --- TRƯỜNG HỢP KHÔNG SHARED (PRIVATE) -> LOGIC CŨ ---
+                    // --- CASE: NOT SHARED (PRIVATE) -> OLD LOGIC ---
 
-                    // 1. Cấp phát frame mới cho con
+                    // 1. Allocate new frame for child
                     int newFrame = allocateFrame();
                     if (newFrame < 0) {
                         throw new MemoryAccessException("copyAddressSpace: out of physical memory");
                     }
 
-                    // 2. Tính toán địa chỉ vật lý để copy dữ liệu
-                    int oldPa = oldFrame << 12; // Địa chỉ vật lý nguồn
-                    int newPa = newFrame << 12; // Địa chỉ vật lý đích
+                    // 2. Calculate physical addresses to copy data
+                    int oldPa = oldFrame << 12; // Source physical address
+                    int newPa = newFrame << 12; // Destination physical address
 
                     try {
-                        // Sao chép từng byte từ cha sang con (Deep Copy)
+                        // Deep Copy each byte from parent to child
                         for (int i = 0; i < PAGE_SIZE; i++) {
                             byte b = super.readByte(oldPa + i);
                             super.writeByte(newPa + i, b);

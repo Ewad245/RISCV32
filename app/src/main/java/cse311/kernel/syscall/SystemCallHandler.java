@@ -114,35 +114,35 @@ public class SystemCallHandler {
                     result = handleSleep(task, arg0);
                     break;
 
-                // Thêm case vào switch(syscallNum)
+                // Add case to switch(syscallNum)
                 case 20: // SYS_SHM_OPEN (a0 = key) -> returns shmid (frame index)
-                    // Lấy tham số từ thanh ghi a0 (register 10) của task
+                    // Get parameter from register a0 (register 10) of task
                     int key = (int) task.getRegisters()[10];
-                    // Truy cập Memory Manager từ Kernel
+                    // Access Memory Manager from Kernel
                     if (kernel.getMemory() instanceof cse311.kernel.NonContiguous.paging.PagedMemoryManager) {
                         PagedMemoryManager pmm = (PagedMemoryManager) kernel.getMemory();
 
                         int frameId = pmm.openSharedRegion(key);
-                        task.getRegisters()[10] = frameId; // Trả về kết quả vào a0
+                        task.getRegisters()[10] = frameId; // Return result to a0
                     } else {
-                        task.getRegisters()[10] = -1; // Lỗi: Không phải chế độ Paging
+                        task.getRegisters()[10] = -1; // Error: Not Paging mode
                     }
                     break;
 
                 case 21: // SYS_SHM_ATTACH (a0 = shmid, a1 = vaddr)
-                    // Lấy tham số a0 (frameId) và a1 (virtualAddr)
+                    // Get parameters a0 (frameId) and a1 (virtualAddr)
                     int frameToMap = (int) task.getRegisters()[10];
                     int virtualAddr = (int) task.getRegisters()[11];
 
                     if (kernel.getMemory() instanceof PagedMemoryManager) {
                         PagedMemoryManager pmm = (PagedMemoryManager) kernel.getMemory();
 
-                        // Lấy AddressSpace của task hiện tại (dựa vào PID)
+                        // Get AddressSpace of current task (based on PID)
                         AddressSpace currentAS = pmm.getAddressSpace(task.getId());
 
                         if (currentAS != null) {
                             int vpn = virtualAddr / 4096;
-                            // Map frame đó vào không gian địa chỉ với quyền Write
+                            // Map frame to address space with Write permission
                             boolean success = pmm.mapSharedPage(currentAS, vpn, frameToMap, true);
                             task.getRegisters()[10] = success ? 0 : -1;
                         } else {
