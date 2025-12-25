@@ -224,6 +224,16 @@ public class ContiguousMemoryManager extends MemoryManager {
                 System.arraycopy(ram, pb.start, ram, currentPos, pb.size);
                 pb.start = currentPos;
             }
+
+            // Check and update immediately.
+            // We do this outside the 'if (moved)' block because even if the process
+            // didn't move (it was already at 0), it's safe and consistent to ensure
+            // the registers match the PCB.
+            if (pb.pid == currentPid) {
+                this.baseRegister = pb.start;
+                this.limitRegister = pb.size;
+            }
+
             currentPos += pb.size;
         }
 
