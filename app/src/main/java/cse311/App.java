@@ -34,6 +34,7 @@ public class App {
 
             // --------------------------------------------------------
             // 3. LAUNCH INIT PROCESS (PID 1)
+            // Java Simulated Init Task or from ELF
             // --------------------------------------------------------
             System.out.println("Bootloader: Spawning Init process (PID 1)...");
 
@@ -43,14 +44,9 @@ public class App {
             // InitTask initTask = new InitTask(1, kernel);
             // kernel.addTaskToScheduler(initTask);
 
-            // --------------------------------------------------------
-            // 4. (OPTIONAL) PRE-LOAD ELF
-            // --------------------------------------------------------
             // If you pass a filename (e.g., "program.elf"), we load it now.
             // This is like adding a service to startup scripts.
 
-            // Test
-            // if (args.length > 0) {
             String elfPath = "User_Program_ELF\\init.elf";
             System.out.println("Current working directory: " + System.getProperty("user.dir"));
             System.out.println("Looking for ELF at: " + elfPath);
@@ -64,7 +60,7 @@ public class App {
             // }
 
             // --------------------------------------------------------
-            // 5. START KERNEL
+            // 4. START KERNEL
             // --------------------------------------------------------
             // This blocks forever in the mainLoop().
             // 1. Scheduler picks InitTask -> InitTask spawns ShellTask
