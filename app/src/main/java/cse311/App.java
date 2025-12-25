@@ -37,14 +37,15 @@ public class App {
             // Java Simulated Init Task or from ELF
             // --------------------------------------------------------
             System.out.println("Bootloader: Spawning Init process (PID 1)...");
-
+            // First Option: Simulated Init (Not tested yet)
             // We only need to create InitTask manually.
             // The InitTask code (InitTask.java) will automatically detect
             // that the Shell is missing and spawn ShellTask for us.
             // InitTask initTask = new InitTask(1, kernel);
             // kernel.addTaskToScheduler(initTask);
 
-            // If you pass a filename (e.g., "program.elf"), we load it now.
+            // Second Option: Loading Init.elf
+            // Pass a filename (e.g., "init.elf"), we load it now.
             // This is like adding a service to startup scripts.
 
             String elfPath = "User_Program_ELF\\init.elf";
