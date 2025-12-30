@@ -24,28 +24,16 @@ public class RoundRobinScheduler extends Scheduler {
     }
 
     @Override
-    public Task schedule(Collection<Task> tasks) {
+    public Task schedule() {
         long startTime = System.nanoTime();
         totalSchedules++;
 
-        // Add any newly ready tasks to the queue
-        for (Task task : tasks) {
-            if (task.getState() == TaskState.READY && !readyQueue.contains(task)) {
-                readyQueue.offer(task);
-            }
-        }
-
-        // Remove non-ready tasks from the queue
-        readyQueue.removeIf(t -> t.getState() != TaskState.READY);
-
-        // Get the next task from the queue
+        // Get the next task from the head of the queue (FIFO)
+        // This removes it from the queue.
         Task nextTask = readyQueue.poll();
 
-        // If we have a task, add it back to the end of the queue for next time
         if (nextTask != null) {
-            readyQueue.offer(nextTask);
-
-            // Count context switch if we're switching to a different task
+            // Context switch tracking
             if (currentTask != nextTask) {
                 contextSwitches++;
                 currentTask = nextTask;

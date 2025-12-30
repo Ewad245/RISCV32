@@ -22,7 +22,7 @@ public class App {
             // 1. HARDWARE INIT
             // --------------------------------------------------------
             // Initialize 128MB RAM, CPU, Memory Management Techniques
-            RV32Computer computer = new RV32Computer(128 * 1024 * 1024, 100, MemoryMode.CONTIGUOUS);
+            RV32Computer computer = new RV32Computer(128 * 1024 * 1024, 100, MemoryMode.PAGING);
             Kernel kernel = computer.getKernel();
 
             // --------------------------------------------------------

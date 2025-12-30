@@ -11,8 +11,10 @@ import java.util.concurrent.PriorityBlockingQueue;
  * Tasks with higher priority values are scheduled first
  */
 public class PriorityScheduler extends Scheduler {
+    // The Ready Queue: Explicitly managed inside the scheduler
     private final PriorityBlockingQueue<Task> readyQueue = new PriorityBlockingQueue<>(
             16, Comparator.comparingInt(Task::getPriority).reversed());
+
     private Task currentTask = null;
 
     // Statistics
@@ -29,28 +31,15 @@ public class PriorityScheduler extends Scheduler {
     }
 
     @Override
-    public Task schedule(Collection<Task> tasks) {
+    public Task schedule() {
         long startTime = System.nanoTime();
         totalSchedules++;
 
-        // Add any newly ready tasks to the queue
-        for (Task task : tasks) {
-            if (task.getState() == TaskState.READY && !readyQueue.contains(task)) {
-                readyQueue.offer(task);
-            }
-        }
-
-        // Remove non-ready tasks from the queue
-        readyQueue.removeIf(t -> t.getState() != TaskState.READY);
-
-        // Get the highest priority task
+        // Poll the highest priority task from the internal ready queue
+        // This effectively removes it from the queue (dequeue)
         Task nextTask = readyQueue.poll();
 
-        // If we have a task, add it back to the queue for next time
-        // (unless it's about to be terminated)
-        if (nextTask != null && nextTask.getState() == TaskState.READY) {
-            readyQueue.offer(nextTask);
-
+        if (nextTask != null) {
             // Count context switch if we're switching to a different task
             if (currentTask != nextTask) {
                 contextSwitches++;
@@ -64,7 +53,12 @@ public class PriorityScheduler extends Scheduler {
 
     @Override
     public void addTask(Task task) {
-        if (task.getState() == TaskState.READY && !readyQueue.contains(task)) {
+        // Only add if not already present to avoid duplicates
+        if (!readyQueue.contains(task)) {
+            // Ensure state is READY before adding (defensive programming)
+            if (task.getState() != TaskState.READY) {
+                task.setState(TaskState.READY);
+            }
             readyQueue.offer(task);
         }
     }

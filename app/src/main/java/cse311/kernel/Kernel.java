@@ -12,6 +12,7 @@ import cse311.kernel.contiguous.ContiguousMemoryManager;
 import cse311.kernel.memory.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * Main kernel class that coordinates all kernel subsystems
@@ -26,9 +27,21 @@ public class Kernel {
     private final KernelMemoryManager kernelMemory;
     private ProcessMemoryCoordinator memoryCoordinator;
 
+    // 1. I/O Wait Queue (FIFO)
+    private final Queue<Task> ioWaitQueue = new ConcurrentLinkedQueue<>();
+
+    // 2. Interrupt/Timer Wait Queue (Sorted by wakeup time)
+    private final PriorityQueue<Task> sleepWaitQueue = new PriorityQueue<>(
+            Comparator.comparingLong(Task::getWakeupTime));
+
+    // 3. Child Termination Wait Queue
+    // Map: Child PID -> Parent Task (The parent waiting for that child)
+    private final Map<Integer, Task> childTerminationWaitQueue = new ConcurrentHashMap<>();
+
     // Kernel state
     private boolean running = false;
     private int nextPid = 1;
+    // Master list of all tasks (for tracking purposes only, not scheduling)
     private final Map<Integer, Task> tasks = new ConcurrentHashMap<>();
 
     // Configuration
@@ -126,30 +139,39 @@ public class Kernel {
     private void mainLoop() {
         while (running) {
             try {
-                // Get the next task to run
-                Task currentTask = scheduler.schedule(tasks.values());
+                // 1. CHECK INTERRUPTS & WAKEUP (Move from Wait Queues -> Ready Queue)
+                checkDeviceInterrupts();
+
+                // 2. SCHEDULE (Get next task from Ready Queue)
+                Task currentTask = scheduler.schedule();
 
                 if (currentTask == null) {
-                    // No runnable tasks, check for waiting tasks
-                    if (hasWaitingTasks()) {
-                        // Handle I/O or other events that might wake tasks
-                        handleWaitingTasks();
-                        continue;
-                    } else {
-                        // No tasks at all, kernel can idle or exit
-                        System.out.println("No tasks to run, kernel idling...");
-                        break;
-                    }
+                    // CPU Idle
+                    idle();
+                    continue;
                 }
 
                 // Execute the selected task
                 executeTask(currentTask);
+
+                // 4. DISPATCH (Decide where the task goes next)
+                dispatchTask(currentTask);
 
             } catch (Exception e) {
                 System.err.println("Kernel error: " + e.getMessage());
                 e.printStackTrace();
                 // Continue running unless it's a critical error
             }
+        }
+    }
+
+    private void idle() {
+        // Simple idle loop: sleep briefly to save host CPU
+        try {
+            Thread.sleep(1);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
         }
     }
 
@@ -234,6 +256,140 @@ public class Kernel {
                 task.setState(TaskState.READY);
             }
         }
+    }
+
+    /**
+     * Checks hardware status and moves tasks from Wait Queues to Ready Queue.
+     * This corresponds to the "Interrupt Occurs" or "I/O Completion" arrows.
+     */
+    private void checkDeviceInterrupts() {
+        // A. Check UART (I/O)
+        // If UART has data, wake up ALL tasks waiting for UART input
+        // (Real OS might be more selective, but this matches your logic)
+        try {
+            if ((memory.readByte(MemoryManager.UART_STATUS) & 1) != 0) {
+                Iterator<Task> it = ioWaitQueue.iterator();
+                while (it.hasNext()) {
+                    Task t = it.next();
+                    if (t.getWaitReason() == WaitReason.UART_INPUT) {
+                        t.wakeup(); // Set state to READY
+                        scheduler.addTask(t); // Move to Ready Queue
+                        it.remove(); // Remove from I/O Wait Queue
+                        System.out.println("Kernel: Woke up Task " + t.getId() + " (UART)");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Kernel: UART check error: " + e.getMessage());
+            e.printStackTrace();
+        }
+
+        // B. Check Timer (Interrupt Wait Queue)
+        long now = System.currentTimeMillis();
+        while (!sleepWaitQueue.isEmpty() && sleepWaitQueue.peek().getWakeupTime() <= now) {
+            Task t = sleepWaitQueue.poll(); // Remove from Interrupt Wait Queue
+            t.wakeup();
+            scheduler.addTask(t); // Move to Ready Queue
+            System.out.println("Kernel: Woke up Task " + t.getId() + " (Timer)");
+        }
+    }
+
+    /**
+     * Decides where to put the task after it stops running on the CPU.
+     * This implements the arrows leaving the CPU node.
+     */
+    private void dispatchTask(Task task) {
+        switch (task.getState()) {
+            case RUNNING:
+                // Time slice expired, still runnable
+                task.setState(TaskState.READY);
+                scheduler.addTask(task); // Back to Ready Queue
+                break;
+
+            case WAITING:
+                // Blocked (Syscall or I/O)
+                handleWaitRequest(task);
+                break;
+
+            case TERMINATED:
+                // Task finished
+                handleTermination(task);
+                break;
+
+            case READY:
+                // Should not happen immediately after execution, but treat as re-queue
+                scheduler.addTask(task);
+                break;
+        }
+    }
+
+    private void handleWaitRequest(Task task) {
+        switch (task.getWaitReason()) {
+            case UART_INPUT:
+                ioWaitQueue.add(task); // -> I/O Wait Queue
+                break;
+
+            case TIMER:
+                sleepWaitQueue.add(task); // -> Interrupt Wait Queue
+                break;
+
+            case PROCESS_EXIT:
+                // The task is waiting for a specific child PID
+                int childPid = task.getWaitingForPid();
+                if (childPid != -1) {
+                    childTerminationWaitQueue.put(childPid, task); // -> Child Wait Queue
+                } else {
+                    // Waiting for ANY child (simplified: just put in sleep queue or check
+                    // immediately)
+                    // For strict diagram adherence, we'd add to a generic wait list.
+                    // Here we fall back to a slow polling list for "Wait Any"
+                    ioWaitQueue.add(task);
+                }
+                break;
+
+            default:
+                // Generic wait
+                ioWaitQueue.add(task);
+                break;
+        }
+    }
+
+    private void handleTermination(Task task) {
+        // 1. Remove from Scheduler so it never runs again
+        scheduler.removeTask(task);
+
+        // 2. Notify waiting parents
+        int pid = task.getId();
+
+        // Check if a parent was waiting specifically for THIS child
+        Task parent = childTerminationWaitQueue.remove(pid);
+
+        // Check for parents waiting for ANY child (WaitReason.PROCESS_EXIT with pid -1)
+        if (parent == null && task.getParent() != null) {
+            Task p = task.getParent();
+            if (p.getState() == TaskState.WAITING &&
+                    p.getWaitReason() == WaitReason.PROCESS_EXIT &&
+                    p.getWaitingForPid() == -1) {
+                parent = p;
+                // Remove from generic wait queue if it was stored there
+                ioWaitQueue.remove(parent);
+            }
+        }
+
+        if (parent != null) {
+            // Wake up the parent.
+            // When the parent runs, it will re-execute the 'wait' instruction,
+            // find this ZOMBIE (TERMINATED) task, read its exit code,
+            // and perform the actual cleanup.
+            parent.wakeup();
+            scheduler.addTask(parent);
+            System.out.println("Kernel: Zombie Task " + pid + " woke up Parent " + parent.getId());
+        } else {
+            System.out.println("Kernel: Task " + pid + " became a Zombie (Parent not waiting).");
+        }
+
+        // We must leave the task in memory as a ZOMBIE so the parent can read the exit
+        // code.
     }
 
     /**
