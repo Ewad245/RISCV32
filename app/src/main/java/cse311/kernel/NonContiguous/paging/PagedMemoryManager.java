@@ -474,4 +474,12 @@ public class PagedMemoryManager extends MemoryManager {
     public void writeByteToPhysicalAddress(int physicalAddress, byte value) throws MemoryAccessException {
         super.writeByte(physicalAddress, value);
     }
+
+    public int unlinkSharedRegion(int key) {
+        if (sharedKeyMap.containsKey(key)) {
+            sharedKeyMap.remove(key); // Remove the key, the frame is still in use
+            return 0; // Success
+        }
+        return -1; // Key not found
+    }
 }

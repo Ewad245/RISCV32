@@ -11,6 +11,8 @@ public class KernelConfig {
         PRIORITY
     }
 
+    private int CORE_COUNT = 4;
+
     // Scheduling configuration
     private SchedulerType schedulerType = SchedulerType.ROUND_ROBIN;
     private int timeSlice = 3; // Instructions per time slice
@@ -90,5 +92,13 @@ public class KernelConfig {
 
     public void setUartBufferSize(int uartBufferSize) {
         this.uartBufferSize = uartBufferSize;
+    }
+
+    public int getCoreCount() {
+        return CORE_COUNT;
+    }
+
+    public void setCoreCount(int coreCount) {
+        CORE_COUNT = coreCount;
     }
 }

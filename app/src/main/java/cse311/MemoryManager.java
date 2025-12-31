@@ -1,5 +1,7 @@
 package cse311;
 
+import java.util.concurrent.ConcurrentHashMap;
+
 import cse311.Exception.MemoryAccessException;
 
 public class MemoryManager {
@@ -13,6 +15,9 @@ public class MemoryManager {
     public static final int UART_RX_DATA = UART_BASE + 0x4; // Read received data
     public static final int UART_STATUS = UART_BASE + 0x8; // Status register
     public static final int UART_CONTROL = UART_BASE + 0xC;
+
+    // Map to track which CPU reserved which address
+    private ConcurrentHashMap<Integer, Integer> reservations = new ConcurrentHashMap<>();
 
     public MemoryManager() {
         this.memory = new SimpleMemory();
@@ -37,7 +42,7 @@ public class MemoryManager {
     }
 
     // Memory access methods
-    public byte readByte(int address) throws MemoryAccessException {
+    public synchronized byte readByte(int address) throws MemoryAccessException {
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             return (byte) uart.read(address);
         }
@@ -54,7 +59,7 @@ public class MemoryManager {
         return memory.readHalfWord(address);
     }
 
-    public int readWord(int address) throws MemoryAccessException {
+    public synchronized int readWord(int address) throws MemoryAccessException {
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             return (int) uart.read(address);
         }
@@ -63,17 +68,22 @@ public class MemoryManager {
         return memory.readWord(address);
     }
 
-    public void writeByte(int address, byte value) throws MemoryAccessException {
+    public synchronized void writeByte(int address, byte value) throws MemoryAccessException {
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             uart.write(address, value);
             return;
         }
         validateAccess(address);
         validateWriteAccess(address);
+
+        // ATOMIC LOGIC: Invalidate reservation for the Word containing this Byte
+        // Align address to the nearest 4-byte boundary
+        int wordAddr = address & 0xFFFFFFFC;
+        reservations.remove(wordAddr);
         memory.writeByte(address, value);
     }
 
-    public void writeHalfWord(int address, short value) throws MemoryAccessException {
+    public synchronized void writeHalfWord(int address, short value) throws MemoryAccessException {
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             uart.write(address, value);
             return;
@@ -81,22 +91,28 @@ public class MemoryManager {
         validateAccess(address);
         validateAccess(address + 1);
         validateWriteAccess(address);
+
+        // ATOMIC LOGIC: Invalidate reservation for the Word containing this HalfWord
+        int wordAddr = address & 0xFFFFFFFC;
+        reservations.remove(wordAddr);
         memory.writeHalfWord(address, value);
     }
 
-    public void writeWord(int address, int value) throws MemoryAccessException {
+    public synchronized void writeWord(int address, int value) throws MemoryAccessException {
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             uart.write(address, value);
             return;
         }
         validateAccess(address);
         validateAccess(address + 3);
-        // validateWriteAccess(address);
+
+        // ATOMIC LOGIC: Invalidate reservation for this exact Word address
+        reservations.remove(address);
         memory.writeWord(address, value);
     }
 
     // New method for ELF loading to virtual addresses
-    public void writeByteToVirtualAddress(int address, byte value) throws MemoryAccessException {
+    public synchronized void writeByteToVirtualAddress(int address, byte value) throws MemoryAccessException {
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             uart.write(address, value);
             return;
@@ -104,8 +120,29 @@ public class MemoryManager {
 
         // For ELF loading, we bypass normal write protection checks
         // but still validate the address is within reasonable bounds
+
+        // ATOMIC LOGIC: Even during ELF loading, we should theoretically clear
+        // reservations,
+        // though unlikely to conflict during bootstrap.
+        int wordAddr = address & 0xFFFFFFFC;
+        reservations.remove(wordAddr);
+
         validateVirtualAddress(address);
         memory.writeByte(address, value);
+    }
+
+    public void registerReservation(int addr, int cpuId) {
+        reservations.put(addr, cpuId);
+    }
+
+    public boolean checkReservation(int addr, int cpuId) {
+        // Returns true if the reservation exists for this CPU
+        Integer owner = reservations.get(addr);
+        boolean success = (owner != null && owner == cpuId);
+
+        // SC always clears the reservation, regardless of success/failure
+        reservations.remove(addr);
+        return success;
     }
 
     public void reset() {

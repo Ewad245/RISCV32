@@ -9,6 +9,7 @@ import java.util.Map;
 
 public class RV32Cpu {
 
+    private int cpuId;
     private int[] x = new int[32];
     private int lastPC = -1;
     private int lastPCBranch = -1;
@@ -892,6 +893,14 @@ public class RV32Cpu {
                     }
                 }
                 break;
+            case 0x2F: // Atomic Operations (RV32A)
+                try {
+                    executeAtomic(instruction);
+                } catch (MemoryAccessException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                }
+                break;
         }
 
     }
@@ -900,6 +909,61 @@ public class RV32Cpu {
         if (x[17] == 93) { // Exit operation
             this.running = false;
             System.out.println("Program exited with code: " + x[10]);
+        }
+    }
+
+    private void executeAtomic(InstructionDecoded instr) throws MemoryAccessException {
+        int funct5 = (instr.getFunc7() >> 2);
+        int aq = (instr.getFunc7() >> 1) & 1; // Acquire bit (ordering)
+        int rl = instr.getFunc7() & 1; // Release bit (ordering)
+        int rs1 = instr.getRs1();
+        int rs2 = instr.getRs2();
+        int rd = instr.getRd();
+        int func3 = instr.getFunc3(); // Width (2 = word)
+
+        if (func3 != 2) {
+            throw new MemoryAccessException("Only 32-bit atomic operations supported");
+        }
+
+        int addr = x[rs1];
+
+        // CRITICAL: We lock the memory object to ensure atomicity at the Java level
+        synchronized (memory) {
+            int loadedValue = memory.readWord(addr); // 1. Load
+            int result = 0;
+
+            // 2. Operation
+            switch (funct5) {
+                case 0x01: // AMOSWAP
+                    result = x[rs2];
+                    break;
+                case 0x00: // AMOADD
+                    result = loadedValue + x[rs2];
+                    break;
+                case 0x02: // LR.W (Load Reserved)
+                    // Register this reservation in MemoryManager (see Step 2b below)
+                    memory.registerReservation(addr, this.cpuId);
+                    result = loadedValue;
+                    // LR does NOT write back to memory, it just loads
+                    x[rd] = result;
+                    return;
+                case 0x03: // SC.W (Store Conditional)
+                    // Check if reservation is still valid
+                    if (memory.checkReservation(addr, this.cpuId)) {
+                        memory.writeWord(addr, x[rs2]);
+                        x[rd] = 0; // Success (0)
+                    } else {
+                        x[rd] = 1; // Failure (nonzero)
+                    }
+                    return;
+                // Add AMOAND, AMOOR, AMOXOR, etc. here...
+                default:
+                    throw new RuntimeException("Unknown Atomic Operation: " + funct5);
+            }
+
+            // 3. Store Back (for AMOs only, not LR/SC)
+            memory.writeWord(addr, result);
+            x[rd] = loadedValue; // AMOs write the ORIGINAL value to rd
         }
     }
 
@@ -1020,6 +1084,14 @@ public class RV32Cpu {
      */
     public int readCSRTest(int csrAddr) {
         return csrRegisters.getOrDefault(csrAddr, 0);
+    }
+
+    public void setId(int id) {
+        this.cpuId = id;
+    }
+
+    public int getId() {
+        return cpuId;
     }
 
     /**

@@ -22,7 +22,7 @@ public class App {
             // 1. HARDWARE INIT
             // --------------------------------------------------------
             // Initialize 128MB RAM, CPU, Memory Management Techniques
-            RV32Computer computer = new RV32Computer(128 * 1024 * 1024, 100, MemoryMode.CONTIGUOUS);
+            RV32Computer computer = new RV32Computer(1024 * 1024 * 128, Integer.MAX_VALUE, MemoryMode.PAGING);
             Kernel kernel = computer.getKernel();
 
             // --------------------------------------------------------
@@ -30,8 +30,10 @@ public class App {
             // --------------------------------------------------------
             // Use Round Robin to allow Init, Shell, and User apps to share CPU
             kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.ROUND_ROBIN);
-            // 5 instructions per slice
-            kernel.getConfig().setTimeSlice(5);
+            // Set Time Slice to X instructions
+            kernel.getConfig().setTimeSlice(3);
+            // Update the scheduler's time slice since it was already created
+            kernel.getScheduler().setTimeSlice(3);
 
             // --------------------------------------------------------
             // 3. LAUNCH INIT PROCESS (PID 1)

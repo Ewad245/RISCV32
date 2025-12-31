@@ -24,7 +24,6 @@ import cse311.kernel.process.TaskState;
  */
 public class SystemCallHandler {
     private final Kernel kernel;
-    private RV32Cpu cpu;
 
     // System call numbers (following Linux RISC-V convention)
     public static final int SYS_EXIT = 93;
@@ -41,15 +40,14 @@ public class SystemCallHandler {
     public static final int SYS_GET_TIME = 1001;
     public static final int SYS_SLEEP = 1002;
 
-    public SystemCallHandler(Kernel kernel, RV32Cpu cpu) {
+    public SystemCallHandler(Kernel kernel) {
         this.kernel = kernel;
-        this.cpu = cpu;
     }
 
     /**
      * Handle a system call from a task
      */
-    public void handleSystemCall(Task task) {
+    public void handleSystemCall(Task task, RV32Cpu cpu) {
         int[] registers = cpu.getRegisters();
         int syscallNumber = registers[17]; // a7
 
@@ -75,7 +73,7 @@ public class SystemCallHandler {
                     break;
 
                 case SYS_READ:
-                    result = handleRead(task, arg0, arg1, arg2);
+                    result = handleRead(cpu, task, arg0, arg1, arg2);
                     break;
 
                 case SYS_YIELD:
@@ -164,7 +162,7 @@ public class SystemCallHandler {
                 // 1. Update the CPU (so immediate execution is correct)
                 cpu.setRegister(10, result);
 
-                // 2. CRITICAL: Update the Task object's register state as well.
+                // 2. Update the Task object's register state as well.
                 // Since Kernel.java now skips the final saveState() to protect 'exec',
                 // we must manually ensure the return value is saved to the Task.
                 task.getRegisters()[10] = result;
@@ -216,7 +214,7 @@ public class SystemCallHandler {
         return -1; // Unsupported file descriptor
     }
 
-    private int handleRead(Task task, int fd, int bufferAddr, int count) {
+    private int handleRead(RV32Cpu cpu, Task task, int fd, int bufferAddr, int count) {
         if (fd == 0) { // stdin
             try {
                 // Check if UART has data
