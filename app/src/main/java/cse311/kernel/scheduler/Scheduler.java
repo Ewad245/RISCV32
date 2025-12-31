@@ -16,12 +16,9 @@ public abstract class Scheduler {
     }
 
     /**
-     * Select the next task to run
-     * 
-     * @param tasks Collection of all tasks
-     * @return The task to run next, or null if no task is ready
+     * Retrieve the next task from the Ready Queue.
      */
-    public abstract Task schedule(Collection<Task> tasks);
+    public abstract Task schedule();
 
     /**
      * Add a new task to the scheduler
