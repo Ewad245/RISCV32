@@ -9,7 +9,7 @@ import cse311.kernel.contiguous.ContiguousMemoryManager;
 import cse311.kernel.process.Task;
 
 public class RV32Computer {
-    private RV32Cpu cpu;
+    // private RV32Cpu cpu;
     private MemoryManager memory;
     private Kernel kernel;
 
@@ -42,10 +42,10 @@ public class RV32Computer {
         }
 
         // 2. Initialize CPU (Polymorphic: works with either memory)
-        this.cpu = new RV32Cpu(memory);
+        // this.cpu = new RV32Cpu(memory);
 
         // 3. Initialize Kernel (Kernel constructor detects memory type)
-        this.kernel = new Kernel(cpu, memory);
+        this.kernel = new Kernel(memory);
 
         this.cpu.turnOn();
 
@@ -104,15 +104,6 @@ public class RV32Computer {
     }
 
     /**
-     * Gets the CPU.
-     * 
-     * @return The CPU
-     */
-    public RV32Cpu getCpu() {
-        return cpu;
-    }
-
-    /**
      * Gets the memory manager.
      * 
      * @return The memory manager
@@ -151,10 +142,5 @@ public class RV32Computer {
      */
     public void stop() {
         kernel.stop();
-    }
-
-    @Override
-    public String toString() {
-        return "RV32iComputer [cpu=" + cpu + ", memory=" + memory + ", kernel=" + kernel + "]";
     }
 }

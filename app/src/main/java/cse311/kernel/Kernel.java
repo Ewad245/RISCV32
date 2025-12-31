@@ -13,6 +13,7 @@ import cse311.kernel.memory.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.PriorityBlockingQueue;
 
 /**
  * Main kernel class that coordinates all kernel subsystems
@@ -31,8 +32,8 @@ public class Kernel {
     private final Queue<Task> ioWaitQueue = new ConcurrentLinkedQueue<>();
 
     // 2. Interrupt/Timer Wait Queue (Sorted by wakeup time)
-    private final PriorityQueue<Task> sleepWaitQueue = new PriorityQueue<>(
-            Comparator.comparingLong(Task::getWakeupTime));
+    private final PriorityBlockingQueue<Task> sleepWaitQueue = new PriorityBlockingQueue<>(
+            11, Comparator.comparingLong(Task::getWakeupTime));
 
     // 3. Child Termination Wait Queue
     // Map: Child PID -> Parent Task (The parent waiting for that child)
@@ -47,16 +48,22 @@ public class Kernel {
     // Configuration
     private final KernelConfig config;
 
-    public Kernel(RV32Cpu cpu, MemoryManager memory) {
-        this.cpu = cpu;
+    public Kernel(MemoryManager memory) {
+        cpus = new ArrayList<>();
         this.memory = memory;
         this.config = new KernelConfig();
+
+        for (int i = 0; i < config.getCoreCount(); i++) {
+            RV32Cpu core = new RV32Cpu(memory); // All cores share the same physical RAM
+            core.setId(i);
+            this.cpus.add(core);
+        }
 
         // Initialize kernel subsystems
         this.kernelMemory = new KernelMemoryManager(memory);
         this.taskManager = new TaskManager(this, kernelMemory);
         this.scheduler = createScheduler();
-        this.syscallHandler = new SystemCallHandler(this, cpu);
+        this.syscallHandler = new SystemCallHandler(this);
 
         // --------------------------------------------------------
         // 1. FACTORY: Initialize the correct Memory Coordinator
@@ -121,8 +128,13 @@ public class Kernel {
         running = true;
         System.out.println("Kernel starting...");
 
-        // Main kernel loop
-        mainLoop();
+        // 1. Launch Maintenance Thread (Handles Interrupts/Timers)
+        new Thread(this::maintenanceLoop, "Kernel-Maintenance").start();
+
+        // 2. Launch CPU Threads (Handle Execution)
+        for (RV32Cpu cpu : cpus) {
+            new Thread(() -> cpuRunLoop(cpu), "CPU-Core-" + cpu.getId()).start();
+        }
     }
 
     /**
@@ -134,33 +146,49 @@ public class Kernel {
     }
 
     /**
-     * Main kernel execution loop
+     * [Thread 1..N] The Main Execution Loop for each CPU Core
      */
-    private void mainLoop() {
+    private void cpuRunLoop(RV32Cpu cpu) {
+        System.out.println("Core " + cpu.getId() + " online.");
+        cpu.turnOn();
         while (running) {
             try {
-                // 1. CHECK INTERRUPTS & WAKEUP (Move from Wait Queues -> Ready Queue)
-                checkDeviceInterrupts();
+                Task currentTask;
 
-                // 2. SCHEDULE (Get next task from Ready Queue)
-                Task currentTask = scheduler.schedule();
+                // Synchronize scheduler access
+                synchronized (scheduler) {
+                    currentTask = scheduler.schedule();
+                }
 
                 if (currentTask == null) {
-                    // CPU Idle
                     idle();
                     continue;
                 }
 
-                // Execute the selected task
-                executeTask(currentTask);
+                // Execute the selected task on THIS cpu
+                executeTask(currentTask, cpu);
 
-                // 4. DISPATCH (Decide where the task goes next)
+                // Decide where the task goes next (Ready, Wait, or Terminated)
                 dispatchTask(currentTask);
 
             } catch (Exception e) {
-                System.err.println("Kernel error: " + e.getMessage());
+                System.err.println("Core " + cpu.getId() + " error: " + e.getMessage());
                 e.printStackTrace();
-                // Continue running unless it's a critical error
+            }
+        }
+    }
+
+    /**
+     * [Thread 0] Maintenance Loop
+     * Checks hardware status and moves tasks from Wait Queues to Ready Queue.
+     */
+    private void maintenanceLoop() {
+        while (running) {
+            try {
+                checkDeviceInterrupts();
+                Thread.sleep(10); // Prevent burning host CPU
+            } catch (Exception e) {
+                e.printStackTrace();
             }
         }
     }
@@ -178,7 +206,7 @@ public class Kernel {
     /**
      * Execute a task for its time slice
      */
-    private void executeTask(Task task) {
+    private void executeTask(Task task, RV32Cpu cpu) {
         if (task.getState() != TaskState.READY) {
             return;
         }
@@ -225,7 +253,7 @@ public class Kernel {
                         task.saveState(cpu);
 
                         // 2. Handle the syscall (which might change Task state, like exec)
-                        handleSystemCall(task);
+                        handleSystemCall(task, cpu);
 
                         // 3. Mark that we have already saved/handled the state.
                         // This prevents the code below the loop from overwriting
@@ -405,9 +433,9 @@ public class Kernel {
     /**
      * Handle system call from a task
      */
-    private void handleSystemCall(Task task) {
+    private void handleSystemCall(Task task, RV32Cpu cpu) {
         try {
-            syscallHandler.handleSystemCall(task);
+            syscallHandler.handleSystemCall(task, cpu);
         } catch (Exception e) {
             System.err.println("System call error for task " + task.getId() + ": " + e.getMessage());
             task.setState(TaskState.TERMINATED);
@@ -546,10 +574,6 @@ public class Kernel {
     }
 
     // Getters for kernel subsystems
-    public RV32Cpu getCpu() {
-        return cpu;
-    }
-
     public MemoryManager getMemory() {
         return memory;
     }

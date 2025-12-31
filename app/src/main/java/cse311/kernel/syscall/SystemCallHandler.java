@@ -89,7 +89,7 @@ public class SystemCallHandler {
                     break;
 
                 case SYS_WAIT:
-                    result = handleWait(task, arg0);
+                    result = handleWait(cpu, task, arg0);
                     break;
 
                 case SYS_EXEC:
@@ -280,7 +280,7 @@ public class SystemCallHandler {
     }
 
     // Replace your handleWait stub
-    private int handleWait(Task task, int statusAddr) {
+    private int handleWait(RV32Cpu cpu, Task task, int statusAddr) {
 
         boolean hasChildren = false;
         for (Task child : task.getChildren()) {
