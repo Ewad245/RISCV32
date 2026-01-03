@@ -22,8 +22,9 @@ class SystemCallIntegrationTest {
                 8 * 1024 * 1024,
                 new BestFitStrategy());
         this.memory = cmm;
-        this.cpu = new RV32Cpu(memory);
-        this.kernel = new Kernel(cpu, memory);
+        // this.cpu = new RV32Cpu(memory);
+        this.kernel = new Kernel(memory);
+        this.cpu = kernel.getCpu(0);
     }
 
     private byte[] getMinimalElf() {
@@ -82,7 +83,7 @@ class SystemCallIntegrationTest {
         cpu.testExecuteInstruction(0x00000073); // ECALL
 
         if (cpu.isEcall()) {
-            kernel.getSystemCallHandler().handleSystemCall(task);
+            kernel.getSystemCallHandler().handleSystemCall(task, cpu);
         }
 
         assertEquals(task.getId(), task.getRegisters()[10]);
@@ -100,7 +101,7 @@ class SystemCallIntegrationTest {
         task.restoreState(cpu);
 
         // 3. Manually trigger handler
-        kernel.getSystemCallHandler().handleSystemCall(task);
+        kernel.getSystemCallHandler().handleSystemCall(task, cpu);
 
         // 4. Verify result (PID) was written back to register a0 (index 10)
         assertEquals(task.getId(), task.getRegisters()[10]);

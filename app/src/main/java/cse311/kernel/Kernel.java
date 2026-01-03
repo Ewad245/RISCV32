@@ -45,6 +45,12 @@ public class Kernel {
     // Master list of all tasks (for tracking purposes only, not scheduling)
     private final Map<Integer, Task> tasks = new ConcurrentHashMap<>();
 
+    // Boot coordination
+    private volatile boolean started = false;
+
+    // Synchronization
+    private final cse311.kernel.lock.Spinlock schedulerLock = new cse311.kernel.lock.Spinlock("scheduler");
+
     // Configuration
     private final KernelConfig config;
 
@@ -118,7 +124,7 @@ public class Kernel {
     }
 
     /**
-     * Start the kernel and begin task execution
+     * Start the kernel and eventually the APs
      */
     public void start() {
         if (running) {
@@ -131,9 +137,44 @@ public class Kernel {
         // 1. Launch Maintenance Thread (Handles Interrupts/Timers)
         new Thread(this::maintenanceLoop, "Kernel-Maintenance").start();
 
-        // 2. Launch CPU Threads (Handle Execution)
-        for (RV32Cpu cpu : cpus) {
-            new Thread(() -> cpuRunLoop(cpu), "CPU-Core-" + cpu.getId()).start();
+        // 2. Launch Bootstrap Processor (BSP) - Core 0
+        RV32Cpu bsp = cpus.get(0);
+        new Thread(() -> {
+            System.out.println("BSP (Core 0) booting...");
+            cpuRunLoop(bsp);
+        }, "CPU-Core-0").start();
+
+        // Note: Application Processors (APs) are NOT started here.
+        // They will be started by the BSP calling startOthers().
+        // For simulation purposes, we will trigger this automatically after a short
+        // delay
+        // to mimic the BSP finishing its initialization.
+        new Thread(() -> {
+            try {
+                Thread.sleep(1000); // Simulate BSP initialization time
+                startOthers();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }).start();
+    }
+
+    /**
+     * Wake up Application Processors (APs)
+     * In xv6, this is done by the BSP in main() calling startothers()
+     */
+    private void startOthers() {
+        System.out.println("BSP: Starting Application Processors (APs)...");
+        // Set the flag to allow APs to proceed
+        started = true;
+
+        // In simulation, we need to actually start the threads if they aren't already.
+        // But to better match the 'spin wait' logic, we could have started them earlier
+        // and let them spin.
+        // For now, adhering to the plan: we launch them here, and they check the flag.
+        for (int i = 1; i < cpus.size(); i++) {
+            RV32Cpu ap = cpus.get(i);
+            new Thread(() -> cpuRunLoop(ap), "CPU-Core-" + ap.getId()).start();
         }
     }
 
@@ -150,14 +191,29 @@ public class Kernel {
      */
     private void cpuRunLoop(RV32Cpu cpu) {
         System.out.println("Core " + cpu.getId() + " online.");
-        cpu.turnOn();
+        // Only start the keyboard input thread on the BSP (Core 0)
+        // This prevents multiple threads from contending for System.in
+        if (cpu.getId() == 0) {
+            cpu.turnOn();
+        }
+
+        // Boot Coordination: APs spin-wait until BSP says 'started'
+        if (cpu.getId() != 0) {
+            while (!started) {
+                Thread.yield(); // Spin
+            }
+        }
+
         while (running) {
             try {
                 Task currentTask;
 
-                // Synchronize scheduler access
-                synchronized (scheduler) {
+                // Synchronize scheduler access using our Spinlock
+                schedulerLock.acquire();
+                try {
                     currentTask = scheduler.schedule();
+                } finally {
+                    schedulerLock.release();
                 }
 
                 if (currentTask == null) {
@@ -571,6 +627,21 @@ public class Kernel {
             default:
                 return false;
         }
+    }
+
+    public RV32Cpu getCpu(int id) {
+        if (id < 0 || id >= cpus.size()) {
+            return null;
+        }
+        return cpus.get(id);
+    }
+
+    /**
+     * Get the Bootstrap Processor (Core 0)
+     * Added for backward compatibility
+     */
+    public RV32Cpu getCpu() {
+        return getCpu(0);
     }
 
     // Getters for kernel subsystems

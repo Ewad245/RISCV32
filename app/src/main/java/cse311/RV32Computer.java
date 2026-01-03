@@ -47,8 +47,6 @@ public class RV32Computer {
         // 3. Initialize Kernel (Kernel constructor detects memory type)
         this.kernel = new Kernel(memory);
 
-        this.cpu.turnOn();
-
         System.out.println("System Initialized. Memory: " + (memSize / 1024 / 1024) + "MB");
     }
 

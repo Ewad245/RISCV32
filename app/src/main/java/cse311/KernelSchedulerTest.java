@@ -31,8 +31,7 @@ public class KernelSchedulerTest {
         // Create kernel with round robin scheduler
         SimpleMemory memory = new SimpleMemory(64 * 1024 * 1024);
         MemoryManager memManager = new MemoryManager(memory);
-        RV32Cpu cpu = new RV32Cpu(memManager);
-        Kernel kernel = new Kernel(cpu, memManager);
+        Kernel kernel = new Kernel(memManager);
 
         kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.ROUND_ROBIN);
         kernel.getConfig().setTimeSlice(100); // Small time slice for demonstration
@@ -59,8 +58,7 @@ public class KernelSchedulerTest {
 
         SimpleMemory memory = new SimpleMemory(64 * 1024 * 1024);
         MemoryManager memManager = new MemoryManager(memory);
-        RV32Cpu cpu = new RV32Cpu(memManager);
-        Kernel kernel = new Kernel(cpu, memManager);
+        Kernel kernel = new Kernel(memManager);
 
         kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.COOPERATIVE);
 
@@ -83,8 +81,7 @@ public class KernelSchedulerTest {
 
         SimpleMemory memory = new SimpleMemory(64 * 1024 * 1024);
         MemoryManager memManager = new MemoryManager(memory);
-        RV32Cpu cpu = new RV32Cpu(memManager);
-        Kernel kernel = new Kernel(cpu, memManager);
+        Kernel kernel = new Kernel(memManager);
 
         kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.PRIORITY);
         kernel.getConfig().setTimeSlice(200);

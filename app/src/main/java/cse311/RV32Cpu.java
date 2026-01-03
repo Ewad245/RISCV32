@@ -12,9 +12,6 @@ public class RV32Cpu {
     private int cpuId;
     private int[] x = new int[32];
     private int lastPC = -1;
-    private int lastPCBranch = -1;
-    private int loopCountBranch = 0;
-    private int loopCount = 0;
     private int pc = 0;
     // private int[] instruction;
     private static final int INSTRUCTION_SIZE = 4; // 32-bit instructions
@@ -39,6 +36,7 @@ public class RV32Cpu {
     public static final int MCAUSE = 0x342; // Machine trap cause
     public static final int MTVAL = 0x343; // Machine trap value
     public static final int MIP = 0x344; // Machine interrupt pending
+    public static final int MHARTID = 0xF14; // Hardware Thread ID (Vendor-specific/Standard)
 
     // Supervisor-level CSRs
     public static final int SSTATUS = 0x100; // Supervisor status register
@@ -62,7 +60,6 @@ public class RV32Cpu {
     private Scanner reader;
     private Thread cpuThread;
     private boolean running = false;
-    private static final int LOOP_THRESHOLD = 1000; // Maximum times to execute same instruction
     private InputThread input;
 
     // Fields to track system calls and exceptions for kernel integration
@@ -75,6 +72,15 @@ public class RV32Cpu {
 
         // Initialize CSR registers
         initializeCSRs();
+    }
+
+    public void setId(int id) {
+        this.cpuId = id;
+        // Update MHARTID CSR
+        csrRegisters.put(MHARTID, id);
+        // Set Thread Pointer (x4) to cpuId
+        // This is a common optimization (used in xv6) to quickly access per-cpu data
+        x[4] = id;
     }
 
     /**
@@ -285,19 +291,8 @@ public class RV32Cpu {
     }
 
     private void fetchExecuteCycle() throws Exception {
-        // Check for infinite loop
-        if (pc == lastPC) {
-            loopCount++;
-            if (loopCount > LOOP_THRESHOLD) {
-                System.out.println("Infinite loop detected at PC: 0x" + Integer.toHexString(pc));
-                System.out.println("Program halted after " + LOOP_THRESHOLD + " iterations");
-                this.running = false;
-                return;
-            }
-        } else {
-            lastPC = pc;
-            loopCount = 0;
-        }
+        // Infinite loop detection removed to allow spin-waiting and idle loops
+        lastPC = pc;
 
         try {
             // Fetch the instruction from memory at the address in the pc register
@@ -780,28 +775,14 @@ public class RV32Cpu {
                 if (takeBranch) {
                     pc += imm_b - INSTRUCTION_SIZE; // Subtract INSTRUCTION_SIZE because pc was already incremented in
                                                     // fetch
-                    /*
-                     * if (lastPCBranch == -1) {
-                     * lastPCBranch = pc;
-                     * } else if (pc == lastPCBranch) {
-                     * loopCountBranch++;
-                     * } else {
-                     * loopCountBranch = 0;
-                     * lastPCBranch = -1;
-                     * }
-                     * if (loopCountBranch > 20) {
-                     * loopCountBranch = 0;
-                     * lastPCBranch = -1;
-                     * System.out.println("Getting input");
-                     * memory.getInput(reader.nextLine());
-                     * }
-                     */
                 }
                 break;
 
             // Jump instructions
             case 0b1101111: // JAL
-                if (rd != 0) {
+                if (rd != 0)
+
+                {
                     x[rd] = pc;
                 }
                 pc += imm_j - INSTRUCTION_SIZE;
@@ -1086,9 +1067,7 @@ public class RV32Cpu {
         return csrRegisters.getOrDefault(csrAddr, 0);
     }
 
-    public void setId(int id) {
-        this.cpuId = id;
-    }
+    // setId moved to top to handle initialization logic
 
     public int getId() {
         return cpuId;

@@ -14,13 +14,13 @@ public class SystemCallDemo {
         try {
             System.out.println("=== System Call Integration Demo ===\n");
 
-            // Create memory and CPU
+            // Create memory
             SimpleMemory simpleMemory = new SimpleMemory(64 * 1024 * 1024);
             MemoryManager memory = new MemoryManager(simpleMemory);
-            RV32Cpu cpu = new RV32Cpu(memory);
 
-            // Create kernel
-            Kernel kernel = new Kernel(cpu, memory);
+            // Create kernel (which creates CPU)
+            Kernel kernel = new Kernel(memory);
+            RV32Cpu cpu = kernel.getCpu(); // Use BSP
 
             // Configure for cooperative scheduling to see system calls clearly
             kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.COOPERATIVE);
@@ -78,7 +78,7 @@ public class SystemCallDemo {
 
         if (cpu.isEcall()) {
             System.out.println("   - ECALL detected, handling system call");
-            kernel.getSystemCallHandler().handleSystemCall(task);
+            kernel.getSystemCallHandler().handleSystemCall(task, cpu);
             System.out.println("   - System call completed, return value: " + task.getRegisters()[10]);
         } else {
             System.out.println("   - ERROR: ECALL not detected!");
@@ -106,7 +106,7 @@ public class SystemCallDemo {
             kernel.getCpu().step();
             if (kernel.getCpu().isEcall()) {
                 System.out.println("   - System call detected by kernel");
-                kernel.getSystemCallHandler().handleSystemCall(task);
+                kernel.getSystemCallHandler().handleSystemCall(task, kernel.getCpu());
                 System.out.println("   - Task state after system call: " + task.getState());
             }
         } catch (Exception e) {

@@ -1,8 +1,7 @@
 package cse311;
 
 import cse311.kernel.Kernel;
-import cse311.kernel.contiguous.BestFitStrategy;
-import cse311.kernel.contiguous.ContiguousMemoryManager;
+
 import cse311.kernel.process.Task;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -17,13 +16,6 @@ class RV32iComputerIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        ContiguousMemoryManager memory = new ContiguousMemoryManager(
-                8 * 1024 * 1024,
-                new BestFitStrategy());
-
-        RV32Cpu cpu = new RV32Cpu(memory);
-        kernel = new Kernel(cpu, memory);
-
         // We use the constructor that matches our memory mode manually
         // or recreate the computer wrapper if needed.
         computer = new RV32Computer(8 * 1024 * 1024, 16, cse311.Enum.MemoryMode.CONTIGUOUS);
@@ -53,7 +45,7 @@ class RV32iComputerIntegrationTest {
     @Test
     void testComputerInitialization() {
         assertNotNull(computer);
-        assertNotNull(computer.getCpu());
+        // assertNotNull(computer.getCpu()); // CPU managed by Kernel
         assertNotNull(computer.getMemoryManager());
         assertNotNull(computer.getKernel());
     }

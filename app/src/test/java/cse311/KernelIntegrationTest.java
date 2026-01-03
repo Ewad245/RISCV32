@@ -17,7 +17,7 @@ class KernelIntegrationTest {
 
     private Kernel kernel;
     private MemoryManager memory;
-    private RV32Cpu cpu;
+    // private RV32Cpu cpu; // Managed internally by kernel
 
     @BeforeEach
     void setUp() {
@@ -27,8 +27,8 @@ class KernelIntegrationTest {
                 new BestFitStrategy());
         this.memory = cmm;
 
-        cpu = new RV32Cpu(memory);
-        kernel = new Kernel(cpu, memory);
+        // cpu = new RV32Cpu(memory);
+        kernel = new Kernel(memory);
     }
 
     /**

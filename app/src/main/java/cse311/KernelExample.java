@@ -10,13 +10,12 @@ public class KernelExample {
 
     public static void main(String[] args) {
         try {
-            // Create memory and CPU
+            // Create memory
             SimpleMemory simpleMemory = new SimpleMemory(128 * 1024 * 1024); // 128MB
             MemoryManager memory = new MemoryManager(simpleMemory);
-            RV32Cpu cpu = new RV32Cpu(memory);
 
             // Create kernel
-            Kernel kernel = new Kernel(cpu, memory);
+            Kernel kernel = new Kernel(memory);
 
             // Configure kernel for cooperative scheduling
             kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.COOPERATIVE);
