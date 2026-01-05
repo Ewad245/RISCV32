@@ -353,7 +353,7 @@ public class SystemCallHandler {
         String path = readStringFromTask(task, pathPtr);
         if (path == null)
             return -1;
-        String fullPath = "User_Program_ELF" + App.file_seperator + path + ".elf";
+        String fullPath = ".." + App.file_seperator + "User_Program_ELF" + App.file_seperator + path + ".elf";
 
         // Read argv (Logic remains same, just using generic memory)
         List<String> argvList = new ArrayList<>();

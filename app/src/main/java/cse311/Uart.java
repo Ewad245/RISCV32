@@ -1,6 +1,7 @@
 package cse311;
 
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 
 public class Uart {
     private static final int TX_READY = 0x20;
@@ -8,6 +9,9 @@ public class Uart {
 
     private int status;
     private int control;
+
+    // Output listener (e.g., for GUI Console)
+    private Consumer<Integer> outputListener;
 
     // --- FIFO Ring Buffer Variables ---
     private byte[] rxBuffer;
@@ -60,8 +64,16 @@ public class Uart {
         try {
             switch (address - MemoryManager.UART_BASE) {
                 case 0x0:
-                    System.out.write(value & 0xFF);
+                    int byteVal = value & 0xFF;
+                    System.out.write(byteVal);
                     System.out.flush();
+                    if (outputListener != null) {
+                        try {
+                            outputListener.accept(byteVal);
+                        } catch (Exception e) {
+                            // Ignore listener errors
+                        }
+                    }
                     break;
                 case 0xC:
                     control = value;
@@ -90,5 +102,9 @@ public class Uart {
     public void receiveDatas(byte[] data) {
         for (byte b : data)
             receiveData(b);
+    }
+
+    public void setOutputListener(Consumer<Integer> listener) {
+        this.outputListener = listener;
     }
 }

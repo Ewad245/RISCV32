@@ -14,6 +14,7 @@ public class PriorityScheduler extends Scheduler {
     // The Ready Queue: Explicitly managed inside the scheduler
     private final PriorityBlockingQueue<Task> readyQueue = new PriorityBlockingQueue<>(
             16, Comparator.comparingInt(Task::getPriority).reversed());
+    private final Set<Task> queuedTasks = Collections.synchronizedSet(new HashSet<>());
 
     private Task currentTask = null;
 
@@ -40,6 +41,7 @@ public class PriorityScheduler extends Scheduler {
         Task nextTask = readyQueue.poll();
 
         if (nextTask != null) {
+            queuedTasks.remove(nextTask);
             // Count context switch if we're switching to a different task
             if (currentTask != nextTask) {
                 contextSwitches++;
@@ -54,11 +56,12 @@ public class PriorityScheduler extends Scheduler {
     @Override
     public void addTask(Task task) {
         // Only add if not already present to avoid duplicates
-        if (!readyQueue.contains(task)) {
-            // Ensure state is READY before adding (defensive programming)
-            if (task.getState() != TaskState.READY) {
-                task.setState(TaskState.READY);
-            }
+        // Ensure state is READY before adding (defensive programming)
+        if (task.getState() != TaskState.READY) {
+            task.setState(TaskState.READY);
+        }
+
+        if (queuedTasks.add(task)) {
             readyQueue.offer(task);
         }
     }
@@ -66,6 +69,7 @@ public class PriorityScheduler extends Scheduler {
     @Override
     public void removeTask(Task task) {
         readyQueue.remove(task);
+        queuedTasks.remove(task);
         if (currentTask == task) {
             currentTask = null;
         }
@@ -99,5 +103,10 @@ public class PriorityScheduler extends Scheduler {
     public int getHighestPriority() {
         Task highest = readyQueue.peek();
         return highest != null ? highest.getPriority() : -1;
+    }
+
+    @Override
+    public Collection<Task> getReadyTasks() {
+        return Collections.unmodifiableCollection(readyQueue);
     }
 }

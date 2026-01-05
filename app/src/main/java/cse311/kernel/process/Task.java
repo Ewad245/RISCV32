@@ -5,6 +5,7 @@ import java.util.List;
 
 import cse311.RV32Cpu;
 import cse311.WaitReason;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Represents a task (process) in the simulated operating system.
@@ -440,5 +441,36 @@ public class Task {
     @Override
     public String toString() {
         return String.format("Task[pid=%d, name=%s, state=%s]", getId(), name, state);
+    }
+
+    // --- Concurrency Detection ---
+    private final AtomicInteger activeHartId = new AtomicInteger(-1);
+
+    /**
+     * Tries to claim this task for a specific Hart (CPU).
+     * 
+     * @param hartId The ID of the CPU attempting to run this task.
+     * @return true if successfully claimed, false if already running on another
+     *         CPU.
+     */
+    public boolean tryAcquireCpu(int hartId) {
+        return activeHartId.compareAndSet(-1, hartId);
+    }
+
+    /**
+     * Releases this task from the current CPU.
+     * Use with caution.
+     */
+    public void releaseCpu() {
+        activeHartId.set(-1);
+    }
+
+    /**
+     * Gets the ID of the Hart currently executing this task (if any).
+     * 
+     * @return Hart ID or -1 if idle.
+     */
+    public int getActiveHartId() {
+        return activeHartId.get();
     }
 }

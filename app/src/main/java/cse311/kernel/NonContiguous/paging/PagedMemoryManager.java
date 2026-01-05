@@ -6,6 +6,7 @@ import cse311.Exception.MemoryAccessException;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Sv32-like 2-level page table for per-process virtual memory.
@@ -24,7 +25,10 @@ public class PagedMemoryManager extends MemoryManager {
 
     // Address-space mapping
     private final Map<Integer, AddressSpace> spaces = new HashMap<>();
-    private AddressSpace current = null;
+
+    // Per-Core (Thread) Active Address Space
+    private final Map<Long, AddressSpace> activeContexts = new ConcurrentHashMap<>();
+
     private Pager pager = null; // Policy implementation
 
     // Shared Memory
@@ -56,7 +60,7 @@ public class PagedMemoryManager extends MemoryManager {
     }
 
     // ---- Address-space lifecycle ----
-    public AddressSpace createAddressSpace(int pid) {
+    public synchronized AddressSpace createAddressSpace(int pid) {
         AddressSpace as = new AddressSpace(pid, this);
         spaces.put(pid, as);
         return as;
@@ -66,7 +70,7 @@ public class PagedMemoryManager extends MemoryManager {
         return spaces.get(pid);
     }
 
-    public void destroyAddressSpace(int pid) {
+    public synchronized void destroyAddressSpace(int pid) {
         AddressSpace as = spaces.get(pid);
         if (as == null)
             return;
@@ -102,7 +106,8 @@ public class PagedMemoryManager extends MemoryManager {
     }
 
     public void switchTo(AddressSpace as) {
-        this.current = as;
+        // Update the active address space for THIS thread (CPU)
+        activeContexts.put(Thread.currentThread().getId(), as);
     }
 
     // ---- Public helpers used by TaskManager/Kernel ----
@@ -119,17 +124,13 @@ public class PagedMemoryManager extends MemoryManager {
     // Policy-based memory access using Pager
     @Override
     public void writeByteToVirtualAddress(int va, byte val) throws MemoryAccessException {
-        ensureCurrent();
-        ensurePager();
-        int frame = pager.ensureResident(current, va, VmAccess.WRITE);
-
-        // --- FIX START ---
-        if (frame == -2) { // UART MMIO
-            // Delegate to parent MemoryManager to handle UART write
+        if (isUart(va)) {
             super.writeByte(va, val);
             return;
         }
-        // --- FIX END ---
+        AddressSpace current = ensureCurrent();
+        ensurePager();
+        int frame = pager.ensureResident(current, va, VmAccess.WRITE);
 
         int pa = (frame << 12) | (va & 0xFFF);
         super.writeByte(pa, val);
@@ -137,16 +138,12 @@ public class PagedMemoryManager extends MemoryManager {
 
     @Override
     public byte readByte(int va) throws MemoryAccessException {
-        ensureCurrent();
-        ensurePager();
-        int frame = pager.ensureResident(current, va, VmAccess.READ);
-
-        // --- FIX START ---
-        if (frame == -2) { // UART MMIO
-            // Delegate to parent MemoryManager to handle UART read (Status/Data)
+        if (isUart(va)) {
             return super.readByte(va);
         }
-        // --- FIX END ---
+        AddressSpace current = ensureCurrent();
+        ensurePager();
+        int frame = pager.ensureResident(current, va, VmAccess.READ);
 
         int pa = (frame << 12) | (va & 0xFFF);
         return super.readByte(pa);
@@ -154,14 +151,12 @@ public class PagedMemoryManager extends MemoryManager {
 
     @Override
     public short readHalfWord(int va) throws MemoryAccessException {
-        ensureCurrent();
+        if (isUart(va)) {
+            return super.readHalfWord(va);
+        }
+        AddressSpace current = ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.READ);
-
-        // --- FIX START ---
-        if (frame == -2)
-            return super.readHalfWord(va);
-        // --- FIX END ---
 
         int pa = (frame << 12) | (va & 0xFFF);
         return super.readHalfWord(pa);
@@ -169,14 +164,12 @@ public class PagedMemoryManager extends MemoryManager {
 
     @Override
     public int readWord(int va) throws MemoryAccessException {
-        ensureCurrent();
+        if (isUart(va)) {
+            return super.readWord(va);
+        }
+        AddressSpace current = ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.READ);
-
-        // --- FIX START ---
-        if (frame == -2)
-            return super.readWord(va);
-        // --- FIX END ---
 
         int pa = (frame << 12) | (va & 0xFFF);
         return super.readWord(pa);
@@ -189,16 +182,13 @@ public class PagedMemoryManager extends MemoryManager {
 
     @Override
     public void writeHalfWord(int va, short v) throws MemoryAccessException {
-        ensureCurrent();
-        ensurePager();
-        int frame = pager.ensureResident(current, va, VmAccess.WRITE);
-
-        // --- FIX START ---
-        if (frame == -2) {
+        if (isUart(va)) {
             super.writeHalfWord(va, v);
             return;
         }
-        // --- FIX END ---
+        AddressSpace current = ensureCurrent();
+        ensurePager();
+        int frame = pager.ensureResident(current, va, VmAccess.WRITE);
 
         int pa = (frame << 12) | (va & 0xFFF);
         super.writeHalfWord(pa, v);
@@ -206,14 +196,13 @@ public class PagedMemoryManager extends MemoryManager {
 
     @Override
     public void writeWord(int va, int v) throws MemoryAccessException {
-        ensureCurrent();
-        ensurePager();
-        int frame = pager.ensureResident(current, va, VmAccess.WRITE);
-
-        if (frame == -2) {
+        if (isUart(va)) {
             super.writeWord(va, v);
             return;
         }
+        AddressSpace current = ensureCurrent();
+        ensurePager();
+        int frame = pager.ensureResident(current, va, VmAccess.WRITE);
 
         int pa = (frame << 12) | (va & 0xFFF);
         super.writeWord(pa, v);
@@ -234,11 +223,18 @@ public class PagedMemoryManager extends MemoryManager {
         return totalFrames;
     }
 
+    public FrameOwner[] getFrameOwners() {
+        return reverseMap;
+    }
+
     // ---- Internals ----
-    private void ensureCurrent() throws MemoryAccessException {
+    // ---- Internals ----
+    private AddressSpace ensureCurrent() throws MemoryAccessException {
+        AddressSpace current = activeContexts.get(Thread.currentThread().getId());
         if (current == null) {
             throw new MemoryAccessException("No current address space");
         }
+        return current;
     }
 
     private void ensurePager() throws MemoryAccessException {
@@ -248,7 +244,7 @@ public class PagedMemoryManager extends MemoryManager {
     }
 
     // Frame management methods for Pager implementations
-    public int allocateFrame() {
+    public synchronized int allocateFrame() {
         int frame = freeFrames.nextSetBit(0);
         if (frame != -1) {
             freeFrames.clear(frame);
@@ -267,7 +263,7 @@ public class PagedMemoryManager extends MemoryManager {
         return frame;
     }
 
-    public void freeFrame(int frame) {
+    public synchronized void freeFrame(int frame) {
         if (frame >= 0 && frame < totalFrames) {
             // Decrease reference count
             frameRefCount[frame]--;
@@ -285,7 +281,7 @@ public class PagedMemoryManager extends MemoryManager {
         }
     }
 
-    public int openSharedRegion(int key) {
+    public synchronized int openSharedRegion(int key) {
         // If key already exists, return old frame
         if (sharedKeyMap.containsKey(key)) {
             return sharedKeyMap.get(key);
@@ -307,7 +303,7 @@ public class PagedMemoryManager extends MemoryManager {
     }
 
     // Manually map shared memory (set shared = true)
-    public boolean mapSharedPage(AddressSpace as, int vpn, int frame, boolean write) {
+    public synchronized boolean mapSharedPage(AddressSpace as, int vpn, int frame, boolean write) {
         // Call internal mapPageInternal (assume you have access or modify visibility)
         // Or modify mapPage to accept shared parameter
 

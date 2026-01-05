@@ -58,4 +58,10 @@ public abstract class Scheduler {
      * @return Scheduler-specific statistics
      */
     public abstract SchedulerStats getStats();
+
+    /**
+     * Get a collection of tasks currently in the ready queue.
+     * This is primarily for visualization/observability.
+     */
+    public abstract Collection<Task> getReadyTasks();
 }

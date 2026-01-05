@@ -1,11 +1,11 @@
 package cse311.kernel.contiguous;
 
 public class ProcessBlock {
-    int pid;
-    int start;
-    int size;
+    public int pid;
+    public int start;
+    public int size;
 
-    ProcessBlock(int p, int s, int sz) {
+    public ProcessBlock(int p, int s, int sz) {
         pid = p;
         start = s;
         size = sz;

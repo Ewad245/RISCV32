@@ -24,6 +24,10 @@ public class MemoryManager {
         this.uart = new Uart();
     }
 
+    public Uart getUart() {
+        return uart;
+    }
+
     public MemoryManager(SimpleMemory memory) {
         this.memory = memory;
         this.uart = new Uart();

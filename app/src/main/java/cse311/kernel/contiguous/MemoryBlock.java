@@ -3,10 +3,10 @@ package cse311.kernel.contiguous;
 import java.util.List;
 
 public class MemoryBlock {
-    int start;
-    int size;
+    public int start;
+    public int size;
 
-    MemoryBlock(int s, int sz) {
+    public MemoryBlock(int s, int sz) {
         start = s;
         size = sz;
     }

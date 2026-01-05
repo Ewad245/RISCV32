@@ -2,6 +2,9 @@ package cse311.kernel.contiguous;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.Collections;
 
 import cse311.MemoryManager;
 import cse311.SimpleMemory;
@@ -16,14 +19,24 @@ public class ContiguousMemoryManager extends MemoryManager {
     private final int totalMemory;
     private final AllocationStrategy allocator;
 
-    // Simulates the Hardware Registers
-    private int baseRegister = 0;
-    private int limitRegister = 0;
-    private int currentPid = -1;
+    // Simulates the Hardware Registers (Per-Core)
+    private static class CpuContext {
+        int baseRegister = 0;
+        int limitRegister = 0;
+        int currentPid = -1;
+    }
+
+    // Map Thread ID (CPU Core) -> CPU Register Context
+    private final Map<Long, CpuContext> contexts = new ConcurrentHashMap<>();
 
     // Track free and allocated blocks
+    // Synchronized lists for thread safety during allocation/free/compact
     private List<MemoryBlock> freeList = new ArrayList<>();
     private List<ProcessBlock> allocatedList = new ArrayList<>();
+
+    private CpuContext getContext() {
+        return contexts.computeIfAbsent(Thread.currentThread().getId(), k -> new CpuContext());
+    }
 
     public ContiguousMemoryManager(int totalMemory, AllocationStrategy allocator) {
         // Initialize the underlying physical RAM
@@ -35,7 +48,7 @@ public class ContiguousMemoryManager extends MemoryManager {
     }
 
     public int getLimitRegister() {
-        return this.limitRegister;
+        return getContext().limitRegister;
     }
 
     private boolean isMMIO(int address) {
@@ -46,32 +59,34 @@ public class ContiguousMemoryManager extends MemoryManager {
      * Switch hardware context (Base/Limit registers) to a specific process.
      */
     public void switchContext(int pid) {
-        this.currentPid = pid;
+        CpuContext ctx = getContext();
+        ctx.currentPid = pid;
         // Load Base and Limit registers for the current process
         for (ProcessBlock pb : allocatedList) {
             if (pb.pid == pid) {
-                this.baseRegister = pb.start;
-                this.limitRegister = pb.size;
+                ctx.baseRegister = pb.start;
+                ctx.limitRegister = pb.size;
                 return;
             }
         }
         // If kernel or not found, grant full access (or default to 0)
-        this.baseRegister = 0;
-        this.limitRegister = totalMemory;
+        ctx.baseRegister = 0;
+        ctx.limitRegister = totalMemory;
     }
 
     /**
      * Translate Logical Address -> Physical Address
      */
     public int translate(int logicalAddr) throws MemoryAccessException {
+        CpuContext ctx = getContext();
         // Check Limit Register (Protection)
-        if (logicalAddr >= limitRegister) {
+        if (logicalAddr >= ctx.limitRegister) {
             throw new MemoryAccessException(
                     String.format("Segmentation Fault: PID %d accessed 0x%08X (Limit: 0x%08X)",
-                            currentPid, logicalAddr, limitRegister));
+                            ctx.currentPid, logicalAddr, ctx.limitRegister));
         }
         // Apply Relocation Register
-        return baseRegister + logicalAddr;
+        return ctx.baseRegister + logicalAddr;
     }
 
     // --- OVERRIDE MEMORY ACCESS METHODS ---
@@ -140,7 +155,7 @@ public class ContiguousMemoryManager extends MemoryManager {
 
     // --- ALLOCATION LOGIC (Managed by Coordinator) ---
 
-    public boolean allocateMemory(int pid, int size) {
+    public synchronized boolean allocateMemory(int pid, int size) {
         // Use strategy (First/Best/Worst fit) to find a hole
         int startAddr = allocator.findRegion(freeList, size);
 
@@ -166,7 +181,7 @@ public class ContiguousMemoryManager extends MemoryManager {
      * Copies the content of the parent's memory partition to the child's partition.
      * Essential for fork() implementation.
      */
-    public boolean copyMemory(int parentPid, int childPid) {
+    public synchronized boolean copyMemory(int parentPid, int childPid) {
         ProcessBlock parent = null;
         ProcessBlock child = null;
 
@@ -200,7 +215,7 @@ public class ContiguousMemoryManager extends MemoryManager {
         }
     }
 
-    public void freeMemory(int pid) {
+    public synchronized void freeMemory(int pid) {
         allocatedList.removeIf(b -> {
             if (b.pid == pid) {
                 freeList.add(new MemoryBlock(b.start, b.size));
@@ -211,7 +226,7 @@ public class ContiguousMemoryManager extends MemoryManager {
         mergeHoles();
     }
 
-    public void compact() {
+    public synchronized void compact() {
         // Simple compaction: Move all allocated blocks to the start
         int currentPos = 0;
 
@@ -225,13 +240,12 @@ public class ContiguousMemoryManager extends MemoryManager {
                 pb.start = currentPos;
             }
 
-            // Check and update immediately.
-            // We do this outside the 'if (moved)' block because even if the process
-            // didn't move (it was already at 0), it's safe and consistent to ensure
-            // the registers match the PCB.
-            if (pb.pid == currentPid) {
-                this.baseRegister = pb.start;
-                this.limitRegister = pb.size;
+            // Update registers for ALL contexts tracking this process
+            for (CpuContext ctx : contexts.values()) {
+                if (ctx.currentPid == pb.pid) {
+                    ctx.baseRegister = pb.start;
+                    ctx.limitRegister = pb.size;
+                }
             }
 
             currentPos += pb.size;
@@ -276,5 +290,13 @@ public class ContiguousMemoryManager extends MemoryManager {
                 i--; // Retry this index
             }
         }
+    }
+
+    public List<ProcessBlock> getAllocatedBlocks() {
+        return Collections.unmodifiableList(allocatedList);
+    }
+
+    public List<MemoryBlock> getFreeBlocks() {
+        return Collections.unmodifiableList(freeList);
     }
 }

@@ -7,6 +7,8 @@ import cse311.Exception.MemoryAccessException;
 import java.util.HashMap;
 import java.util.Map;
 
+import cse311.kernel.process.Task;
+
 public class RV32Cpu {
 
     private int cpuId;
@@ -61,6 +63,9 @@ public class RV32Cpu {
     private Thread cpuThread;
     private boolean running = false;
     private InputThread input;
+
+    // Track Current Task (for GUI/Observability)
+    private volatile Task currentTask;
 
     // Fields to track system calls and exceptions for kernel integration
     private boolean lastInstructionWasEcall = false;
@@ -219,6 +224,14 @@ public class RV32Cpu {
 
     public void setProgramCounterEntryPoint(int entryPoint) {
         this.pc = entryPoint;
+    }
+
+    public Task getCurrentTask() {
+        return currentTask;
+    }
+
+    public void setCurrentTask(Task currentTask) {
+        this.currentTask = currentTask;
     }
 
     // Methods needed by the kernel

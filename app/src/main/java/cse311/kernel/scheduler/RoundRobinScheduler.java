@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  */
 public class RoundRobinScheduler extends Scheduler {
     private final Queue<Task> readyQueue = new ConcurrentLinkedQueue<>();
+    private final Set<Task> queuedTasks = Collections.synchronizedSet(new HashSet<>());
     private Task currentTask = null;
 
     // Statistics
@@ -33,6 +34,7 @@ public class RoundRobinScheduler extends Scheduler {
         Task nextTask = readyQueue.poll();
 
         if (nextTask != null) {
+            queuedTasks.remove(nextTask);
             // Context switch tracking
             if (currentTask != nextTask) {
                 contextSwitches++;
@@ -46,7 +48,8 @@ public class RoundRobinScheduler extends Scheduler {
 
     @Override
     public void addTask(Task task) {
-        if (task.getState() == TaskState.READY && !readyQueue.contains(task)) {
+        // Atomic check-and-add to prevent duplicates
+        if (task.getState() == TaskState.READY && queuedTasks.add(task)) {
             readyQueue.offer(task);
         }
     }
@@ -54,6 +57,7 @@ public class RoundRobinScheduler extends Scheduler {
     @Override
     public void removeTask(Task task) {
         readyQueue.remove(task);
+        queuedTasks.remove(task);
         if (currentTask == task) {
             currentTask = null;
         }
@@ -77,5 +81,10 @@ public class RoundRobinScheduler extends Scheduler {
      */
     public List<Task> getReadyQueueSnapshot() {
         return new ArrayList<>(readyQueue);
+    }
+
+    @Override
+    public Collection<Task> getReadyTasks() {
+        return Collections.unmodifiableCollection(readyQueue);
     }
 }

@@ -22,7 +22,7 @@ public class App {
             // 1. HARDWARE INIT
             // --------------------------------------------------------
             // Initialize 128MB RAM, CPU, Memory Management Techniques
-            RV32Computer computer = new RV32Computer(1024 * 1024 * 128, Integer.MAX_VALUE, MemoryMode.PAGING);
+            RV32Computer computer = new RV32Computer(1024 * 1024 * 12, Integer.MAX_VALUE, MemoryMode.PAGING);
             Kernel kernel = computer.getKernel();
 
             // --------------------------------------------------------
@@ -51,7 +51,7 @@ public class App {
             // Pass a filename (e.g., "init.elf"), we load it now.
             // This is like adding a service to startup scripts.
 
-            String elfPath = "User_Program_ELF" + file_seperator + "init.elf";
+            String elfPath = ".." + file_seperator + "User_Program_ELF" + file_seperator + "init.elf";
             System.out.println("Current working directory: " + System.getProperty("user.dir"));
             System.out.println("Looking for ELF at: " + elfPath);
             File f = new File(elfPath);

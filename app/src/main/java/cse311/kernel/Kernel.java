@@ -48,6 +48,10 @@ public class Kernel {
     // Boot coordination
     private volatile boolean started = false;
 
+    // Execution Control
+    private volatile boolean paused = false;
+    private volatile int executionDelayMs = 0; // 0 = max speed
+
     // Synchronization
     private final cse311.kernel.lock.Spinlock schedulerLock = new cse311.kernel.lock.Spinlock("scheduler");
 
@@ -206,6 +210,25 @@ public class Kernel {
 
         while (running) {
             try {
+                // ------------------------------------------------------------
+                // 1. EXECUTION CONTROL (Pause / Speed)
+                // ------------------------------------------------------------
+                while (paused) {
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+
+                if (executionDelayMs > 0) {
+                    try {
+                        Thread.sleep(executionDelayMs);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+
                 Task currentTask;
 
                 // Synchronize scheduler access using our Spinlock
@@ -217,15 +240,35 @@ public class Kernel {
                 }
 
                 if (currentTask == null) {
+                    cpu.setCurrentTask(null); // Explicitly mark as idle
                     idle();
                     continue;
                 }
 
-                // Execute the selected task on THIS cpu
-                executeTask(currentTask, cpu);
+                // DOUBLE-SCHEDULE CHECK
+                if (!currentTask.tryAcquireCpu(cpu.getId())) {
+                    int otherHart = currentTask.getActiveHartId();
+                    String error = "DOUBLE SCHEDULE DETECTED! Task " + currentTask.getId()
+                            + " is already running on Hart " + otherHart
+                            + " but Hart " + cpu.getId() + " tried to run it!";
+                    System.err.println(error);
+                    throw new RuntimeException(error);
+                }
+
+                try {
+                    // Execute the selected task on THIS cpu
+                    executeTask(currentTask, cpu);
+                } finally {
+                    // Release ownership
+                    currentTask.releaseCpu();
+                }
 
                 // Decide where the task goes next (Ready, Wait, or Terminated)
                 dispatchTask(currentTask);
+
+                // Note: We do NOT clear currentTask here to avoid UI flickering.
+                // It will be updated in the next 'executeTask' call
+                // or cleared in the 'if (currentTask == null)' block above.
 
             } catch (Exception e) {
                 System.err.println("Core " + cpu.getId() + " error: " + e.getMessage());
@@ -266,6 +309,8 @@ public class Kernel {
         if (task.getState() != TaskState.READY) {
             return;
         }
+
+        cpu.setCurrentTask(task); // Notify CPU about the task it is running
 
         if (task instanceof cse311.JavaTask) {
             // This is a Java-based task
@@ -642,6 +687,39 @@ public class Kernel {
      */
     public RV32Cpu getCpu() {
         return getCpu(0);
+    }
+
+    // --- Execution Control Methods ---
+    public void pause() {
+        this.paused = true;
+        System.out.println("Kernel: Execution Paused.");
+    }
+
+    public void resume() {
+        this.paused = false;
+        System.out.println("Kernel: Execution Resumed.");
+    }
+
+    public void setExecutionSpeed(int delayMs) {
+        this.executionDelayMs = delayMs;
+        System.out.println("Kernel: Speed set to " + delayMs + "ms delay.");
+    }
+
+    public boolean isPaused() {
+        return paused;
+    }
+
+    // --- Observability Methods (For GUI) ---
+    public Collection<Task> getIoWaitQueue() {
+        return Collections.unmodifiableCollection(ioWaitQueue);
+    }
+
+    public Collection<Task> getSleepWaitQueue() {
+        return Collections.unmodifiableCollection(sleepWaitQueue);
+    }
+
+    public Collection<Task> getReadyQueue() {
+        return scheduler.getReadyTasks(); // Needs to be implemented in Scheduler
     }
 
     // Getters for kernel subsystems

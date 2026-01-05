@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  */
 public class CooperativeScheduler extends Scheduler {
     private final Queue<Task> readyQueue = new ConcurrentLinkedQueue<>();
+    private final Set<Task> queuedTasks = Collections.synchronizedSet(new HashSet<>());
     private Task currentTask = null;
 
     // Statistics
@@ -32,6 +33,7 @@ public class CooperativeScheduler extends Scheduler {
         Task nextTask = readyQueue.poll();
 
         if (nextTask != null) {
+            queuedTasks.remove(nextTask);
             if (currentTask != nextTask) {
                 contextSwitches++;
                 currentTask = nextTask;
@@ -44,10 +46,10 @@ public class CooperativeScheduler extends Scheduler {
 
     @Override
     public void addTask(Task task) {
-        if (!readyQueue.contains(task)) {
-            if (task.getState() != TaskState.READY) {
-                task.setState(TaskState.READY);
-            }
+        if (task.getState() != TaskState.READY) {
+            task.setState(TaskState.READY);
+        }
+        if (queuedTasks.add(task)) {
             readyQueue.offer(task);
         }
     }
@@ -55,6 +57,7 @@ public class CooperativeScheduler extends Scheduler {
     @Override
     public void removeTask(Task task) {
         readyQueue.remove(task);
+        queuedTasks.remove(task);
         if (currentTask == task) {
             currentTask = null;
         }
@@ -71,5 +74,10 @@ public class CooperativeScheduler extends Scheduler {
      */
     public int getTaskCount() {
         return readyQueue.size();
+    }
+
+    @Override
+    public Collection<Task> getReadyTasks() {
+        return Collections.unmodifiableCollection(readyQueue);
     }
 }
