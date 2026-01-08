@@ -27,21 +27,23 @@ public class ConsoleView extends VBox {
         outputArea.setWrapText(true);
 
         // Capture key events for input (Simulated Keyboard)
-        outputArea.setOnKeyPressed(event -> {
-            String text = event.getText();
-            if (event.getCode().name().equals("ENTER")) {
-                text = "\n";
-            } else if (event.getCode().name().equals("BACK_SPACE")) {
-                // Send Backspace (0x08)
-                text = "\b";
+        // Capture key typed events for input (Simulated Keyboard)
+        // We use setOnKeyTyped because it handles Shift modifiers and special
+        // characters correctly
+        outputArea.setOnKeyTyped(event -> {
+            String character = event.getCharacter();
+
+            // Handle special mappings if necessary
+            // JavaFX weirdness: Enter might be \r, we might want to normalize to \n or just
+            // pass it
+            if (character.equals("\r")) {
+                character = "\n";
             }
 
             // Check if text is valid character
-            if (text != null && !text.isEmpty()) {
+            if (character != null && !character.isEmpty()) {
                 // Send to Simulated UART
-                memory.getInput(text);
-                // Local echo (optional, shell usually handles echo)
-                // appendText(text);
+                memory.getInput(character);
             }
         });
 
