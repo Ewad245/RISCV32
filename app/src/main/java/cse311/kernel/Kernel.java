@@ -369,6 +369,11 @@ public class Kernel {
                         break;
                     }
 
+                    if (task.isKilled()) {
+                        task.setState(TaskState.TERMINATED);
+                        break;
+                    }
+
                 } catch (Exception e) {
                     System.err.println("Task " + task.getId() + " error: " + e.getMessage());
                     task.setState(TaskState.TERMINATED);

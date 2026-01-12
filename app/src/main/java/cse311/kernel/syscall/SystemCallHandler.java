@@ -34,6 +34,7 @@ public class SystemCallHandler {
     public static final int SYS_FORK = 220;
     public static final int SYS_WAIT = 260;
     public static final int SYS_EXEC = 221;
+    public static final int SYS_KILL = 129;
 
     // Custom system calls
     public static final int SYS_DEBUG_PRINT = 1000;
@@ -94,6 +95,10 @@ public class SystemCallHandler {
 
                 case SYS_EXEC:
                     result = handleExec(task, arg0, arg1);
+                    break;
+
+                case SYS_KILL:
+                    result = handleKill(task, arg0);
                     break;
 
                 case SYS_DEBUG_PRINT:
@@ -454,6 +459,15 @@ public class SystemCallHandler {
         } catch (Exception e) {
             return -1;
         }
+    }
+
+    private int handleKill(Task task, int pidToKill) {
+        Task target = kernel.getTask(pidToKill);
+        if (target != null) {
+            target.kill();
+            return 0;
+        }
+        return -1;
     }
 
     private int handleGetTime(Task task) {

@@ -43,6 +43,8 @@ public class Task {
     // Generic context (AddressSpace or SegmentTable)
     private transient Object memoryContext;
 
+    private volatile boolean killed = false;
+
     /**
      * Creates a new task with the specified ID and stack size.
      * 
@@ -281,6 +283,14 @@ public class Task {
 
     public void setAllocatedSize(int allocatedSize) {
         this.allocatedSize = allocatedSize;
+    }
+
+    public boolean isKilled() {
+        return killed;
+    }
+
+    public void kill() {
+        this.killed = true;
     }
 
     public ProgramInfo getProgramInfo() {

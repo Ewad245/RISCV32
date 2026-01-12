@@ -106,4 +106,28 @@ class SystemCallIntegrationTest {
         // 4. Verify result (PID) was written back to register a0 (index 10)
         assertEquals(task.getId(), task.getRegisters()[10]);
     }
+
+    @Test
+    void testSysKill() throws Exception {
+        // 1. Create a victim task
+        Task victim = kernel.createTask(getMinimalElf(), "victim");
+        victim.setState(cse311.kernel.process.TaskState.READY);
+
+        // 2. Create a killer task (the caller)
+        Task killer = kernel.createTask(getMinimalElf(), "killer");
+
+        // Setup syscall arguments for killer: SYS_KILL(victimPid)
+        killer.getRegisters()[17] = SystemCallHandler.SYS_KILL; // a7
+        killer.getRegisters()[10] = victim.getId(); // a0 = pid to kill
+
+        // Sync to CPU
+        killer.restoreState(cpu);
+
+        // 3. Execute syscall
+        kernel.getSystemCallHandler().handleSystemCall(killer, cpu);
+
+        // 4. Verify victim is marked as killed
+        assertTrue(victim.isKilled(), "Victim task should be marked as killed");
+        assertEquals(0, killer.getRegisters()[10], "SYS_KILL should return 0 on success");
+    }
 }

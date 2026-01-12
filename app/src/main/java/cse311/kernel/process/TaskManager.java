@@ -161,8 +161,17 @@ public class TaskManager {
             // D. Important: If the child was already ZOMBIE (TERMINATED),
             // Init needs to know so it can reap it immediately.
             // In a real OS, we might send a SIGCHLD signal here.
-            // For this simulator, if the child is already TERMINATED, Init will
-            // pick it up in its next wait() call naturally.
+            if (child.getState() == TaskState.TERMINATED) {
+                // Check if init is actually waiting for a child to exit
+                if (initTask.getState() == TaskState.WAITING &&
+                        initTask.getWaitReason() == WaitReason.PROCESS_EXIT) {
+
+                    // Wake it up
+                    initTask.wakeup();
+                    // Important: Put it back in the scheduler so it runs ASAP
+                    kernel.addTaskToScheduler(initTask);
+                }
+            }
         }
     }
 
@@ -330,7 +339,8 @@ public class TaskManager {
     }
 
     /**
-     * Clean up task resources and notify parent
+     * Clean up task resources and notify parent (Used for Java Simulated Task
+     * Methods) (Not used for actual tasks) (Not tested yet)
      */
     public void cleanupTaskAndNotify(Task task) {
         int pid = task.getId();
