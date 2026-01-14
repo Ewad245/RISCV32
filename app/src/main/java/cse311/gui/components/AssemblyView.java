@@ -6,14 +6,14 @@ import cse311.RV32Cpu;
 import javafx.application.Platform;
 import javafx.collections.FXCollections;
 import javafx.collections.ObservableList;
-import javafx.scene.control.Label;
-import javafx.scene.control.ListView;
-import javafx.scene.control.ListCell;
-import javafx.scene.layout.VBox;
+import javafx.geometry.Insets;
+import javafx.scene.control.*;
+import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
-import javafx.scene.paint.Color;
+import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
 import cse311.kernel.process.Task;
+import java.util.Map;
 
 public class AssemblyView extends VBox {
 
@@ -22,17 +22,34 @@ public class AssemblyView extends VBox {
     private final ListView<InstructionItem> listView;
     private final ObservableList<InstructionItem> instructions;
     private final Label taskLabel;
+    private final CheckBox chkFollowPc;
+
+    private int currentPc = 0;
 
     public AssemblyView(RV32Cpu cpu, MemoryManager memory) {
         this.cpu = cpu;
         this.memory = memory;
         this.instructions = FXCollections.observableArrayList();
 
-        this.taskLabel = new Label("Task: Idle");
-        this.taskLabel.setStyle("-fx-font-weight: bold; -fx-padding: 5;");
+        // Toolbar
+        HBox toolbar = new HBox(10);
+        toolbar.setPadding(new Insets(5));
+        toolbar.setAlignment(javafx.geometry.Pos.CENTER_LEFT);
 
+        this.taskLabel = new Label("Task: Idle");
+        this.taskLabel.setStyle("-fx-font-weight: bold;");
+
+        this.chkFollowPc = new CheckBox("Follow PC");
+        this.chkFollowPc.setSelected(true);
+
+        toolbar.getChildren().addAll(taskLabel, new Separator(), chkFollowPc);
+
+        // List View
         this.listView = new ListView<>(instructions);
-        this.listView.setCellFactory(param -> new ListCell<InstructionItem>() {
+        this.listView.setStyle("-fx-font-family: 'Monospace';");
+
+        // Cell Factory for formatting
+        listView.setCellFactory(param -> new ListCell<InstructionItem>() {
             @Override
             protected void updateItem(InstructionItem item, boolean empty) {
                 super.updateItem(item, empty);
@@ -41,82 +58,143 @@ public class AssemblyView extends VBox {
                     setGraphic(null);
                     setStyle("-fx-background-color: transparent;");
                 } else {
-                    setText(item.toString());
-                    setFont(Font.font("Courier New", 12));
-                    if (item.isCurrentPc) {
-                        setStyle("-fx-background-color: #e0f7fa; -fx-text-fill: #006064; -fx-font-weight: bold;");
+                    setFont(Font.font("Monospace", 12));
+
+                    if (item.isLabel) {
+                        // Label Row: "00000060 <start>:"
+                        setText(item.assembly);
+                        setStyle("-fx-font-weight: bold; -fx-text-fill: black; -fx-background-color: transparent;");
                     } else {
-                        setStyle("-fx-background-color: transparent; -fx-text-fill: black;");
+                        // Instruction Row: " 60: 00058313 addi x6 x11 0"
+                        setText(String.format("    %x:        %08x        %s", item.address, item.code, item.assembly));
+
+                        if (item.address == currentPc) {
+                            setStyle("-fx-background-color: #d4e157; -fx-text-fill: black;");
+                        } else {
+                            setStyle("-fx-background-color: transparent; -fx-text-fill: black;");
+                        }
                     }
                 }
             }
         });
 
         VBox.setVgrow(listView, Priority.ALWAYS);
-        this.getChildren().addAll(taskLabel, listView);
+        this.getChildren().addAll(toolbar, listView);
     }
 
-    private int lastPc = -1;
+    private int cachedStartAddress = -1;
+    private int cachedEndAddress = -1;
+    private static final int WINDOW_SIZE = 100; // Keep 100 instructions in buffer
+    private static final int SCROLL_MARGIN = 20; // Reload if within 20 instructions of edge
 
     public void update() {
         // Run on JavaFX thread
         Platform.runLater(() -> {
             int pc = cpu.getProgramCounter();
+            currentPc = pc;
 
-            // Only update if PC changed, preventing scroll lock
-            if (pc == lastPc && !instructions.isEmpty()) {
-                return;
-            }
-            lastPc = pc;
             // Update Task Info
             Task task = cpu.getCurrentTask();
+            String taskName = "Idle";
+            int tid = 0;
             if (task != null) {
-                taskLabel.setText(String.format("Task: [%d] %s", task.getId(), task.getName()));
-            } else {
-                taskLabel.setText("Task: [0] Idle");
+                tid = task.getId();
+                taskName = task.getName();
             }
+            taskLabel.setText(String.format("Task: [%d] %s", tid, taskName));
 
-            // int pc = cpu.getProgramCounter(); // Removed duplicate
-            instructions.clear();
+            listView.refresh();
 
-            // Show 15 instructions before and 15 after (total 31)
-            int startAddress = pc - (15 * 4);
-            if (startAddress < 0)
-                startAddress = 0;
+            if (chkFollowPc.isSelected()) {
+                boolean needsReload = false;
 
-            for (int i = 0; i < 31; i++) {
-                int addr = startAddress + (i * 4);
-                try {
-                    int instruction = memory.readWord(addr);
-                    String asm = Disassembler.disassemble(instruction, addr);
-                    boolean isCurrent = (addr == pc);
-                    instructions.add(new InstructionItem(addr, instruction, asm, isCurrent));
-                } catch (Exception e) {
-                    instructions.add(new InstructionItem(addr, 0, "INVALID ACCESS", false));
+                if (instructions.isEmpty()) {
+                    needsReload = true;
+                } else {
+                    if (pc < cachedStartAddress + (SCROLL_MARGIN * 4))
+                        needsReload = true;
+                    if (pc > cachedEndAddress - (SCROLL_MARGIN * 4))
+                        needsReload = true;
+                }
+
+                if (needsReload) {
+                    rebuildList(pc);
+                }
+
+                // Select and Scroll
+                int index = -1;
+                for (int i = 0; i < instructions.size(); i++) {
+                    // We scroll to the instruction at the PC, not the label above it
+                    if (!instructions.get(i).isLabel && instructions.get(i).address == pc) {
+                        index = i;
+                        break;
+                    }
+                }
+
+                if (index != -1) {
+                    listView.getSelectionModel().select(index);
+                    listView.scrollTo(index - 10);
                 }
             }
-
-            // Auto scroll to center
-            listView.scrollTo(15);
         });
     }
 
-    private static class InstructionItem {
-        final int address;
-        final int code;
-        final String assembly;
-        final boolean isCurrentPc;
+    private void rebuildList(int centerPc) {
+        int startAddress = centerPc - ((WINDOW_SIZE / 2) * 4);
+        if (startAddress < 0)
+            startAddress = 0;
 
-        public InstructionItem(int address, int code, String assembly, boolean isCurrentPc) {
+        cachedStartAddress = startAddress;
+
+        // Retrieve Symbol Map
+        Map<Integer, String> symbolMap = null;
+        Task task = cpu.getCurrentTask();
+        if (task != null && task.getProgramInfo() != null) {
+            symbolMap = task.getProgramInfo().symbols;
+        }
+
+        instructions.clear();
+        for (int i = 0; i < WINDOW_SIZE; i++) {
+            int addr = startAddress + (i * 4);
+
+            // Check for Symbol Label
+            if (symbolMap != null && symbolMap.containsKey(addr)) {
+                String symName = symbolMap.get(addr);
+                // Ripes format: "00000060 <start>:"
+                String labelStr = String.format("%08x <%s>:", addr, symName);
+                instructions.add(new InstructionItem(addr, 0, labelStr, true));
+            }
+
+            try {
+                int code = memory.readWord(addr);
+                String asm = Disassembler.disassemble(code, addr);
+                // Remove commas for clean look
+                asm = asm.replace(",", "");
+
+                instructions.add(new InstructionItem(addr, code, asm, false));
+                cachedEndAddress = addr;
+            } catch (Exception e) {
+                instructions.add(new InstructionItem(addr, 0, "???", false));
+                cachedEndAddress = addr;
+            }
+        }
+    }
+
+    public static class InstructionItem {
+        public final int address;
+        public final int code;
+        public final String assembly;
+        public final boolean isLabel;
+
+        public InstructionItem(int address, int code, String assembly) {
+            this(address, code, assembly, false);
+        }
+
+        public InstructionItem(int address, int code, String assembly, boolean isLabel) {
             this.address = address;
             this.code = code;
             this.assembly = assembly;
-            this.isCurrentPc = isCurrentPc;
-        }
-
-        @Override
-        public String toString() {
-            return String.format("[0x%08X]  %08X  %s", address, code, assembly);
+            this.isLabel = isLabel;
         }
     }
 }

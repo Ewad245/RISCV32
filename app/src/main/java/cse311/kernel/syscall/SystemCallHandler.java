@@ -184,8 +184,8 @@ public class SystemCallHandler {
     private int handleExit(Task task, int exitCode) {
         // System.out.println("Task " + task.getId() + " exiting with code " +
         // exitCode);
+        kernel.terminateTask(task.getId());
         task.setExitCode(exitCode);
-        task.setState(TaskState.TERMINATED);
         return exitCode;
     }
 

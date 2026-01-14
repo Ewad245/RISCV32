@@ -12,6 +12,7 @@ import javafx.scene.Parent;
 import javafx.scene.control.*;
 import javafx.scene.layout.BorderPane;
 import javafx.scene.layout.HBox;
+import javafx.scene.layout.StackPane;
 import javafx.scene.layout.Priority;
 import javafx.scene.layout.VBox;
 import cse311.kernel.process.Task;
@@ -28,7 +29,15 @@ public class MainController {
     private TabPane cpuTabs; // To update tab titles
     private SchedulerView schedulerView;
     private MemoryView memoryView;
-    private ConsoleView consoleView; // NEW
+    private ConsoleView consoleView;
+
+    // NEW Components
+    private cse311.gui.components.SidebarView sidebarView;
+    private cse311.gui.components.DatapathView datapathView;
+    private cse311.gui.components.AssemblyView datapathAssemblyView;
+    private StackPane viewStack;
+    private SplitPane dashboardPane; // The original SplitPane
+    private SplitPane datapathPane; // The new view
 
     // Controls
     private Button btnPause;
@@ -45,7 +54,7 @@ public class MainController {
     }
 
     private void initializeUI() {
-        // --- TOP: Toolbar ---
+        // --- 1. Top Toolbar ---
         HBox toolbar = new HBox(10);
         toolbar.setPadding(new Insets(10));
         toolbar.setStyle("-fx-background-color: #ddd; -fx-border-color: #bbb; -fx-border-width: 0 0 1 0;");
@@ -69,10 +78,9 @@ public class MainController {
 
         toolbar.getChildren().addAll(btnPause, btnResume, new Separator(), lblSpeed, speedSlider, new Separator(),
                 lblStatus);
-        root.setTop(toolbar);
 
-        // --- CENTER: Views ---
-        SplitPane splitPane = new SplitPane();
+        // --- 2. Dashboard View (Original) ---
+        dashboardPane = new SplitPane();
 
         // LEFT: CPU & Scheduler
         SplitPane leftSplit = new SplitPane();
@@ -133,19 +141,53 @@ public class MainController {
         rightPane.getChildren().addAll(new Label("Memory Visualization"), memoryView);
         VBox.setVgrow(memoryView, Priority.ALWAYS);
 
-        // BOTTOM: Console (NEW)
+        dashboardPane.getItems().addAll(leftSplit, rightPane);
+        dashboardPane.setDividerPositions(0.4);
+
+        // --- 3. Datapath View (New) ---
+        datapathPane = new SplitPane();
+        datapathView = new cse311.gui.components.DatapathView(kernel.getCpu(0)); // Visualize Core 0
+        datapathAssemblyView = new cse311.gui.components.AssemblyView(kernel.getCpu(0), kernel.getMemory());
+
+        VBox datapathContainer = new VBox(10, new Label("CPU Datapath (Core 0)"), datapathView);
+        datapathContainer.setPadding(new Insets(10));
+        VBox.setVgrow(datapathView, Priority.ALWAYS);
+
+        VBox assemblyContainer = new VBox(10, new Label("Assembly Stream"), datapathAssemblyView);
+        assemblyContainer.setPadding(new Insets(10));
+        VBox.setVgrow(datapathAssemblyView, Priority.ALWAYS);
+
+        datapathPane.getItems().addAll(datapathContainer, assemblyContainer);
+        datapathPane.setDividerPositions(0.7); // 70% for datapath
+
+        // --- 4. Main Layout Assembly ---
+
+        viewStack = new StackPane(dashboardPane, datapathPane);
+        datapathPane.setVisible(false); // Default to Dashboard
+
         consoleView = new ConsoleView(kernel.getMemory());
         consoleView.setPrefHeight(200);
 
-        // Add to layout
-        splitPane.getItems().addAll(leftSplit, rightPane);
-        splitPane.setDividerPositions(0.4);
+        BorderPane contentLayout = new BorderPane();
+        contentLayout.setTop(toolbar);
+        contentLayout.setCenter(viewStack);
+        contentLayout.setBottom(consoleView);
 
-        BorderPane centerLayout = new BorderPane();
-        centerLayout.setCenter(splitPane);
-        centerLayout.setBottom(consoleView);
+        // Sidebar
+        sidebarView = new cse311.gui.components.SidebarView(view -> {
+            if (view.equals("dashboard")) {
+                dashboardPane.setVisible(true);
+                datapathPane.setVisible(false);
+                dashboardPane.toFront();
+            } else if (view.equals("datapath")) {
+                dashboardPane.setVisible(false);
+                datapathPane.setVisible(true);
+                datapathPane.toFront();
+            }
+        });
 
-        root.setCenter(centerLayout);
+        root.setLeft(sidebarView);
+        root.setCenter(contentLayout);
 
         // Redirect System.out and System.err to ConsoleView
         try {
@@ -179,18 +221,26 @@ public class MainController {
             lblStatus.setStyle("-fx-text-fill: green;");
         }
 
-        // Refresh Sub-views
-        for (int i = 0; i < cpuViews.length; i++) {
-            cpuViews[i].update();
-            assemblyViews[i].update();
+        // Update components based on visibility to save resources
+        if (dashboardPane.isVisible()) {
+            // Refresh Dashboard sub-views
+            for (int i = 0; i < cpuViews.length; i++) {
+                cpuViews[i].update();
+                assemblyViews[i].update();
 
-            // Update Tab Title with PID
-            Task task = kernel.getCpu(i).getCurrentTask();
-            int pid = (task != null) ? task.getId() : 0;
-            cpuTabs.getTabs().get(i).setText("Hart " + i + " [PID: " + pid + "]");
+                // Update Tab Title with PID
+                Task task = kernel.getCpu(i).getCurrentTask();
+                int pid = (task != null) ? task.getId() : 0;
+                cpuTabs.getTabs().get(i).setText("Hart " + i + " [PID: " + pid + "]");
+            }
+            schedulerView.update();
+            memoryView.update();
         }
-        schedulerView.update();
-        memoryView.update();
+
+        if (datapathPane.isVisible()) {
+            datapathView.update();
+            datapathAssemblyView.update();
+        }
     }
 
     public Parent getView() {

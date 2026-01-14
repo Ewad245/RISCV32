@@ -161,17 +161,6 @@ public class TaskManager {
             // D. Important: If the child was already ZOMBIE (TERMINATED),
             // Init needs to know so it can reap it immediately.
             // In a real OS, we might send a SIGCHLD signal here.
-            if (child.getState() == TaskState.TERMINATED) {
-                // Check if init is actually waiting for a child to exit
-                if (initTask.getState() == TaskState.WAITING &&
-                        initTask.getWaitReason() == WaitReason.PROCESS_EXIT) {
-
-                    // Wake it up
-                    initTask.wakeup();
-                    // Important: Put it back in the scheduler so it runs ASAP
-                    kernel.addTaskToScheduler(initTask);
-                }
-            }
         }
     }
 

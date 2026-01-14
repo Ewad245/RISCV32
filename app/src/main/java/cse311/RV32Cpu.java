@@ -26,6 +26,9 @@ public class RV32Cpu {
     // Current privilege level
     private int privilegeMode = PRIVILEGE_MACHINE; // Start in M-mode
 
+    // For visualization
+    private InstructionDecoded lastDecodedInstruction;
+
     // CSR addresses
     // Machine-level CSRs
     public static final int MSTATUS = 0x300; // Machine status register
@@ -279,6 +282,10 @@ public class RV32Cpu {
         this.pc = pc;
     }
 
+    public InstructionDecoded getLastDecodedInstruction() {
+        return lastDecodedInstruction;
+    }
+
     public void turnOn() {
         Runnable task1 = () -> input.getInput(memory);
         /*
@@ -311,6 +318,7 @@ public class RV32Cpu {
             // Fetch the instruction from memory at the address in the pc register
             int instructionFetched = fetch();
             InstructionDecoded instructionDecoded = decode(instructionFetched);
+            this.lastDecodedInstruction = instructionDecoded;
             execute(instructionDecoded);
             // System.out.println(instructionDecoded.toString());
             // displayRegisters();
