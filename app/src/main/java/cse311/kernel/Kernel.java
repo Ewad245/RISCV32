@@ -374,6 +374,10 @@ public class Kernel {
                         break;
                     }
 
+                } catch (cse311.Exception.BreakpointException e) {
+                    System.out.println("Kernel: " + e.getMessage());
+                    this.pause();
+                    break;
                 } catch (Exception e) {
                     System.err.println("Task " + task.getId() + " error: " + e.getMessage());
                     task.setState(TaskState.TERMINATED);

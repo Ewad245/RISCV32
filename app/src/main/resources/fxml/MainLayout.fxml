@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Separator?>
+<?import javafx.scene.control.Slider?>
+<?import javafx.scene.control.SplitPane?>
+<?import javafx.scene.control.TabPane?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+
+<BorderPane xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1" 
+            fx:controller="cse311.gui.MainController">
+
+    <top>
+        <HBox spacing="10" style="-fx-background-color: #ddd; -fx-border-color: #bbb; -fx-border-width: 0 0 1 0;">
+            <padding>
+                <Insets top="10" right="10" bottom="10" left="10"/>
+            </padding>
+            <Button fx:id="btnPause" text="Pause" onAction="#handlePause"/>
+            <Button fx:id="btnResume" text="Resume" onAction="#handleResume"/>
+            <Separator orientation="VERTICAL"/>
+            <Label text="Delay (ms):"/>
+            <Slider fx:id="speedSlider" min="0" max="500" showTickLabels="true" showTickMarks="true" majorTickUnit="100"/>
+            <Separator orientation="VERTICAL"/>
+            <Label fx:id="lblStatus" text="Status: Running"/>
+        </HBox>
+    </top>
+
+    <left>
+        <VBox fx:id="sidebarContainer" spacing="10" style="-fx-background-color: #2c3e50;" prefWidth="200">
+             </VBox>
+    </left>
+
+    <center>
+        <StackPane fx:id="viewStack">
+            
+            <SplitPane fx:id="dashboardPane" dividerPositions="0.6">
+                <SplitPane orientation="VERTICAL" dividerPositions="0.6">
+                    <VBox spacing="5">
+                        <padding><Insets top="10" right="10" bottom="10" left="10"/></padding>
+                        <Label text="CPU State (Harts)"/>
+                        <TabPane fx:id="cpuTabs" VBox.vgrow="ALWAYS"/>
+                    </VBox>
+                    <VBox fx:id="schedulerContainer" spacing="5">
+                        <padding><Insets top="10" right="10" bottom="10" left="10"/></padding>
+                        <Label text="Scheduler Queues"/>
+                        </VBox>
+                </SplitPane>
+                
+                <VBox fx:id="memoryContainer" spacing="5">
+                    <padding><Insets top="10" right="10" bottom="10" left="10"/></padding>
+                    <Label text="Memory Visualization"/>
+                    </VBox>
+            </SplitPane>
+
+            <TabPane fx:id="datapathTabs" visible="false"/>
+
+        </StackPane>
+    </center>
+
+    <bottom>
+        <VBox fx:id="consoleContainer" prefHeight="200"/>
+    </bottom>
+
+</BorderPane>

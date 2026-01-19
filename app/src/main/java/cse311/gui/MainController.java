@@ -1,193 +1,168 @@
 package cse311.gui;
 
+import javafx.fxml.FXML;
+import javafx.fxml.Initializable;
+import javafx.scene.control.*;
+import javafx.scene.layout.*;
+import java.net.URL;
+import java.util.ResourceBundle;
+
+import cse311.kernel.Kernel;
 import cse311.RV32Computer;
 import cse311.RV32Cpu;
-import cse311.gui.components.ConsoleView;
-import cse311.gui.components.MemoryView;
-import cse311.gui.components.SchedulerView;
-import cse311.kernel.Kernel;
-import javafx.animation.AnimationTimer;
-import javafx.geometry.Insets;
-import javafx.scene.Parent;
-import javafx.scene.control.*;
-import javafx.scene.layout.BorderPane;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.StackPane;
-import javafx.scene.layout.Priority;
-import javafx.scene.layout.VBox;
 import cse311.kernel.process.Task;
+import cse311.gui.components.*;
+import javafx.animation.AnimationTimer;
 
-public class MainController {
+public class MainController implements Initializable {
+
+    // Inject items from FXML using their fx:id
+    @FXML
+    private Button btnPause;
+    @FXML
+    private Button btnResume;
+    @FXML
+    private Slider speedSlider;
+    @FXML
+    private Label lblStatus;
+
+    // Containers where we will add our dynamic Java components
+    @FXML
+    private VBox sidebarContainer;
+    @FXML
+    private TabPane cpuTabs;
+    @FXML
+    private VBox schedulerContainer;
+    @FXML
+    private VBox memoryContainer;
+
+    // Datapath components
+
+    @FXML
+    private VBox consoleContainer;
+
+    @FXML
+    private StackPane viewStack;
+    @FXML
+    private SplitPane dashboardPane;
 
     private final Kernel kernel;
     private final RV32Computer computer;
-    private final BorderPane root;
 
-    // Components
-    private cse311.gui.components.CpuView[] cpuViews; // Array of views
-    private cse311.gui.components.AssemblyView[] assemblyViews; // Array of assembly views
-    private TabPane cpuTabs; // To update tab titles
+    // Sub-components (Logic remains in Java)
+    private CpuView[] cpuViews;
+    private AssemblyView[] assemblyViews;
     private SchedulerView schedulerView;
     private MemoryView memoryView;
+
+    private SidebarView sidebarView;
     private ConsoleView consoleView;
-
-    // NEW Components
-    private cse311.gui.components.SidebarView sidebarView;
-    private cse311.gui.components.DatapathView datapathView;
-    private cse311.gui.components.AssemblyView datapathAssemblyView;
-    private StackPane viewStack;
-    private SplitPane dashboardPane; // The original SplitPane
-    private SplitPane datapathPane; // The new view
-
-    // Controls
-    private Button btnPause;
-    private Button btnResume;
-    private Slider speedSlider;
-    private Label lblStatus;
 
     public MainController(Kernel kernel, RV32Computer computer) {
         this.kernel = kernel;
         this.computer = computer;
-        this.root = new BorderPane();
-        initializeUI();
-        startUpdateLoop();
+        // NOTE: We don't build UI here anymore!
     }
 
-    private void initializeUI() {
-        // --- 1. Top Toolbar ---
-        HBox toolbar = new HBox(10);
-        toolbar.setPadding(new Insets(10));
-        toolbar.setStyle("-fx-background-color: #ddd; -fx-border-color: #bbb; -fx-border-width: 0 0 1 0;");
+    @Override
+    public void initialize(URL location, ResourceBundle resources) {
+        // This method is called automatically after FXML is loaded.
+        // Initialize your custom dynamic components here.
 
-        btnPause = new Button("Pause");
-        btnPause.setOnAction(e -> kernel.pause());
+        initializeToolbarLogic();
+        initializeDashboard();
+        initializeDatapath();
+        initializeConsole();
+        initializeSidebar();
 
-        btnResume = new Button("Resume");
-        btnResume.setOnAction(e -> kernel.resume());
+        startUpdateLoop(); // Your existing animation timer logic
+    }
 
-        Label lblSpeed = new Label("Delay (ms):");
-        speedSlider = new Slider(0, 500, 0); // 0 to 500ms delay
-        speedSlider.setShowTickLabels(true);
-        speedSlider.setShowTickMarks(true);
-        speedSlider.setMajorTickUnit(100);
+    private void initializeToolbarLogic() {
         speedSlider.valueProperty().addListener((obs, oldVal, newVal) -> {
             kernel.setExecutionSpeed(newVal.intValue());
         });
 
-        lblStatus = new Label("Status: Running");
+        // Initial status update
+        lblStatus.setText("Status: Running");
+    }
 
-        toolbar.getChildren().addAll(btnPause, btnResume, new Separator(), lblSpeed, speedSlider, new Separator(),
-                lblStatus);
+    @FXML
+    public void handlePause() {
+        kernel.pause();
+    }
 
-        // --- 2. Dashboard View (Original) ---
-        dashboardPane = new SplitPane();
+    @FXML
+    public void handleResume() {
+        kernel.resume();
+    }
 
-        // LEFT: CPU & Scheduler
-        SplitPane leftSplit = new SplitPane();
-        leftSplit.setOrientation(javafx.geometry.Orientation.VERTICAL);
-
-        // Top Half: CPU
-        VBox cpuBox = new VBox(10);
-        cpuBox.setPadding(new Insets(10));
-
-        // Bottom Half: Scheduler
-        VBox schedulerBox = new VBox(10);
-        schedulerBox.setPadding(new Insets(10));
-
-        // Multi-Core Support: Use TabPane
-        cpuTabs = new TabPane();
+    private void initializeDashboard() {
+        // Logic to create CpuViews and add them to the FXML-injected 'cpuTabs'
         int coreCount = kernel.getConfig().getCoreCount();
-        cpuViews = new cse311.gui.components.CpuView[coreCount];
-        assemblyViews = new cse311.gui.components.AssemblyView[coreCount];
+        cpuViews = new CpuView[coreCount];
+        assemblyViews = new AssemblyView[coreCount];
 
         for (int i = 0; i < coreCount; i++) {
-            RV32Cpu cpu = kernel.getCpu(i);
+            var cpu = kernel.getCpu(i);
+            cpuViews[i] = new CpuView(cpu);
+            assemblyViews[i] = new AssemblyView(cpu, kernel.getMemory());
 
-            // View 1: CPU Registers
-            cpuViews[i] = new cse311.gui.components.CpuView(cpu);
-
-            // View 2: Assembly Code
-            assemblyViews[i] = new cse311.gui.components.AssemblyView(cpu, kernel.getMemory());
-
-            // Layout for this Hart's Tab
             VBox hartLayout = new VBox(10, cpuViews[i], new Separator(), new Label("Instruction Stream"),
                     assemblyViews[i]);
-            hartLayout.setPadding(new Insets(5));
-            VBox.setVgrow(assemblyViews[i], Priority.ALWAYS); // Assembly view takes remaining space
+            VBox.setVgrow(assemblyViews[i], Priority.ALWAYS);
 
             Tab tab = new Tab("Hart " + i, hartLayout);
             tab.setClosable(false);
             cpuTabs.getTabs().add(tab);
         }
 
+        // Add Scheduler
         schedulerView = new SchedulerView(kernel);
-
-        // Add to respective boxes
-        cpuBox.getChildren().addAll(new Label("CPU State (Harts)"), cpuTabs);
-        VBox.setVgrow(cpuTabs, Priority.ALWAYS);
-
-        schedulerBox.getChildren().addAll(new Label("Scheduler Queues"), schedulerView);
+        schedulerContainer.getChildren().add(schedulerView);
         VBox.setVgrow(schedulerView, Priority.ALWAYS);
 
-        leftSplit.getItems().addAll(cpuBox, schedulerBox);
-        leftSplit.setDividerPositions(0.6); // Give 60% to CPU by default
-
-        // RIGHT: Memory
-        VBox rightPane = new VBox(10);
-        rightPane.setPadding(new Insets(10));
-
+        // Add Memory
         memoryView = new MemoryView(kernel.getMemory(), kernel.getMemoryCoordinator());
-
-        rightPane.getChildren().addAll(new Label("Memory Visualization"), memoryView);
+        memoryContainer.getChildren().add(memoryView);
         VBox.setVgrow(memoryView, Priority.ALWAYS);
+    }
 
-        dashboardPane.getItems().addAll(leftSplit, rightPane);
-        dashboardPane.setDividerPositions(0.4);
+    @FXML
+    private TabPane datapathTabs;
 
-        // --- 3. Datapath View (New) ---
-        datapathPane = new SplitPane();
-        datapathView = new cse311.gui.components.DatapathView(kernel.getCpu(0)); // Visualize Core 0
-        datapathAssemblyView = new cse311.gui.components.AssemblyView(kernel.getCpu(0), kernel.getMemory());
+    private DatapathView[] datapathViews;
+    private AssemblyView[] datapathAssemblyViews;
 
-        VBox datapathContainer = new VBox(10, new Label("CPU Datapath (Core 0)"), datapathView);
-        datapathContainer.setPadding(new Insets(10));
-        VBox.setVgrow(datapathView, Priority.ALWAYS);
+    private void initializeDatapath() {
+        int coreCount = kernel.getConfig().getCoreCount();
+        datapathViews = new DatapathView[coreCount];
+        datapathAssemblyViews = new AssemblyView[coreCount];
 
-        VBox assemblyContainer = new VBox(10, new Label("Assembly Stream"), datapathAssemblyView);
-        assemblyContainer.setPadding(new Insets(10));
-        VBox.setVgrow(datapathAssemblyView, Priority.ALWAYS);
+        for (int i = 0; i < coreCount; i++) {
+            var cpu = kernel.getCpu(i);
+            datapathViews[i] = new DatapathView(cpu);
+            datapathAssemblyViews[i] = new AssemblyView(cpu, kernel.getMemory());
 
-        datapathPane.getItems().addAll(datapathContainer, assemblyContainer);
-        datapathPane.setDividerPositions(0.7); // 70% for datapath
+            VBox datapathContainer = new VBox(10, new Label("CPU Datapath"), datapathViews[i]);
+            VBox.setVgrow(datapathViews[i], Priority.ALWAYS);
 
-        // --- 4. Main Layout Assembly ---
+            VBox assemblyContainer = new VBox(10, new Label("Assembly Stream"), datapathAssemblyViews[i]);
+            VBox.setVgrow(datapathAssemblyViews[i], Priority.ALWAYS);
 
-        viewStack = new StackPane(dashboardPane, datapathPane);
-        datapathPane.setVisible(false); // Default to Dashboard
+            SplitPane split = new SplitPane(datapathContainer, assemblyContainer);
+            split.setDividerPositions(0.7);
 
+            Tab tab = new Tab("Hart " + i, split);
+            tab.setClosable(false);
+            datapathTabs.getTabs().add(tab);
+        }
+    }
+
+    private void initializeConsole() {
         consoleView = new ConsoleView(kernel.getMemory());
         consoleView.setPrefHeight(200);
-
-        BorderPane contentLayout = new BorderPane();
-        contentLayout.setTop(toolbar);
-        contentLayout.setCenter(viewStack);
-        contentLayout.setBottom(consoleView);
-
-        // Sidebar
-        sidebarView = new cse311.gui.components.SidebarView(view -> {
-            if (view.equals("dashboard")) {
-                dashboardPane.setVisible(true);
-                datapathPane.setVisible(false);
-                dashboardPane.toFront();
-            } else if (view.equals("datapath")) {
-                dashboardPane.setVisible(false);
-                datapathPane.setVisible(true);
-                datapathPane.toFront();
-            }
-        });
-
-        root.setLeft(sidebarView);
-        root.setCenter(contentLayout);
+        consoleContainer.getChildren().add(consoleView);
 
         // Redirect System.out and System.err to ConsoleView
         try {
@@ -199,6 +174,21 @@ public class MainController {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    private void initializeSidebar() {
+        sidebarView = new SidebarView(view -> {
+            if (view.equals("dashboard")) {
+                dashboardPane.setVisible(true);
+                datapathTabs.setVisible(false);
+                dashboardPane.toFront();
+            } else if (view.equals("datapath")) {
+                dashboardPane.setVisible(false);
+                datapathTabs.setVisible(true);
+                datapathTabs.toFront();
+            }
+        });
+        sidebarContainer.getChildren().add(sidebarView);
     }
 
     private void startUpdateLoop() {
@@ -237,13 +227,11 @@ public class MainController {
             memoryView.update();
         }
 
-        if (datapathPane.isVisible()) {
-            datapathView.update();
-            datapathAssemblyView.update();
+        if (datapathTabs.isVisible()) {
+            for (int i = 0; i < datapathViews.length; i++) {
+                datapathViews[i].update();
+                datapathAssemblyViews[i].update();
+            }
         }
-    }
-
-    public Parent getView() {
-        return root;
     }
 }

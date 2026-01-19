@@ -206,6 +206,40 @@ public class PagedMemoryManager extends MemoryManager {
 
         int pa = (frame << 12) | (va & 0xFFF);
         super.writeWord(pa, v);
+        super.writeWord(pa, v);
+    }
+
+    @Override
+    public synchronized int debugReadWord(int va, int pid) {
+        if (isUart(va)) {
+            return super.debugReadWord(va, pid); // UART is shared
+        }
+
+        // Find the AddressSpace for this PID
+        AddressSpace as = spaces.get(pid);
+        if (as == null) {
+            return 0; // Or return super.readWord(va) if we assuming raw access? No, stick to context.
+        }
+
+        // We cannot use ensureResident here because it might modify state (allocate
+        // pages)
+        // and we don't want the debugger to cause page faults or allocations.
+        // We only want to peek at what's already resident.
+
+        int vpn = AddressSpace.getVPN(va);
+        AddressSpace.PageTableEntry pte = as.getPTEInternal(vpn);
+
+        if (pte != null && pte.V) {
+            int frame = pte.ppn;
+            int pa = (frame << 12) | (va & 0xFFF);
+            try {
+                return super.readWord(pa); // Read physical
+            } catch (MemoryAccessException e) {
+                return 0;
+            }
+        }
+
+        return 0; // Page not present or not readable
     }
 
     // ---- Minimal UART passthrough (shared-mapped) ----
@@ -440,6 +474,13 @@ public class PagedMemoryManager extends MemoryManager {
                     int oldPa = oldFrame << 12; // Source physical address
                     int newPa = newFrame << 12; // Destination physical address
 
+                    if (l1Index == 0 && l2Index == 16) { // Code page usually at index 16 (0x10000)
+                        int sampleData = super.readWord(oldPa);
+                        System.out.println("copyAddressSpace: Copying Code Page. VPN=" + vpn + " OldFrame=" + oldFrame
+                                + " OldPA=" + Integer.toHexString(oldPa) + " Data[0]=" + Integer.toHexString(sampleData)
+                                + " NewFrame=" + newFrame);
+                    }
+
                     try {
                         // Deep Copy each byte from parent to child
                         for (int i = 0; i < PAGE_SIZE; i++) {
@@ -464,7 +505,7 @@ public class PagedMemoryManager extends MemoryManager {
                 }
             }
         }
-        System.out.println("PagedMemoryManager: Finished copying address space.");
+        // System.out.println("PagedMemoryManager: Finished copying address space.");
     }
 
     public void writeByteToPhysicalAddress(int physicalAddress, byte value) throws MemoryAccessException {

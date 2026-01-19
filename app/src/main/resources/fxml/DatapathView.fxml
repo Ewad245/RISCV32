@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.layout.AnchorPane?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.shape.Circle?>
+<?import javafx.scene.shape.Line?>
+<?import javafx.scene.shape.Polyline?>
+<?import javafx.scene.shape.Rectangle?>
+<?import javafx.scene.text.Font?>
+<?import javafx.scene.text.Text?>
+
+<fx:root type="javafx.scene.layout.AnchorPane" 
+         fx:id="root"
+         styleClass="datapath-root"
+         xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1"
+         stylesheets="@../css/style.css"
+         prefHeight="600.0" prefWidth="1000.0">
+
+    <!-- Wires (Polyline/Line) -->
+    <Polyline fx:id="wirePcIm" points="90, 280, 150, 280" styleClass="wire-inactive"/>
+    <Polyline fx:id="wireImReg" points="250, 280, 350, 280" styleClass="wire-inactive"/>
+    <Polyline fx:id="wireImImm" points="250, 280, 280, 280, 280, 430, 350, 430" styleClass="wire-inactive"/>
+    <Polyline fx:id="wireRegAluA" points="450, 250, 550, 250" styleClass="wire-inactive"/>
+    <Polyline fx:id="wireRegAluB" points="450, 310, 500, 310, 500, 300, 550, 300" styleClass="wire-inactive"/>
+    <Polyline fx:id="wireImmAluB" points="430, 430, 500, 430, 500, 300" styleClass="wire-inactive"/>
+    <Polyline fx:id="wireAluDmAddr" points="630, 280, 700, 280" styleClass="wire-inactive"/>
+    <Polyline fx:id="wireRegDmData" points="450, 330, 480, 330, 480, 380, 680, 380, 680, 330, 700, 330" styleClass="wire-inactive"/>
+    <Polyline fx:id="wireDmMux" points="800, 280, 850, 260" styleClass="wire-inactive"/>
+    <Polyline fx:id="wireAluMux" points="630, 280, 660, 280, 660, 180, 830, 180, 830, 290, 850, 290" styleClass="wire-inactive"/>
+    <Polyline fx:id="wireWbReg" points="880, 280, 920, 280, 920, 550, 300, 550, 300, 300, 350, 300" styleClass="wire-inactive"/>
+
+
+    <!-- Components -->
+
+    <!-- 1. PC -->
+    <StackPane layoutX="50.0" layoutY="250.0" prefHeight="60.0" prefWidth="40.0">
+        <Rectangle fx:id="compPc" arcHeight="5.0" arcWidth="5.0" height="60.0" width="40.0" styleClass="datapath-component, datapath-pc"/>
+        <Label text="PC"> <font><Font name="System Bold" size="12.0"/></font> </Label>
+    </StackPane>
+    <Text fx:id="txtPC" layoutX="55" layoutY="285" text="PC: --" visible="false"/> 
+
+    <!-- 2. Instruction Memory -->
+    <StackPane layoutX="150.0" layoutY="200.0" prefHeight="150.0" prefWidth="100.0">
+        <Rectangle fx:id="compIm" height="150.0" width="100.0" styleClass="datapath-component, datapath-memory"/>
+        <Label text="Instr&#10;Mem" textAlignment="CENTER"> <font><Font name="Arial Bold" size="12.0"/></font> </Label>
+    </StackPane>
+    <Text fx:id="txtInstruction" layoutX="160" layoutY="280" text="Inst: --"> <font><Font name="Monospace" size="10.0"/></font> </Text>
+
+    <!-- 3. Registers -->
+    <StackPane layoutX="350.0" layoutY="200.0" prefHeight="150.0" prefWidth="100.0">
+        <Rectangle fx:id="compReg" height="150.0" width="100.0" styleClass="datapath-component"/>
+        <Label text="Registers"> <font><Font name="Arial Bold" size="12.0"/></font> </Label>
+    </StackPane>
+
+    <!-- 4. Imm Gen -->
+    <StackPane layoutX="350.0" layoutY="400.0" prefHeight="60.0" prefWidth="80.0">
+        <Rectangle fx:id="compImm" height="60.0" width="80.0" styleClass="datapath-component"/>
+        <Label text="Imm Gen"> <font><Font name="Arial Bold" size="12.0"/></font> </Label>
+    </StackPane>
+
+    <!-- 5. ALU -->
+    <StackPane layoutX="550.0" layoutY="230.0" prefHeight="100.0" prefWidth="80.0">
+        <Rectangle fx:id="compAlu" height="100.0" width="80.0" styleClass="datapath-component, datapath-alu"/>
+        <Label text="ALU"> <font><Font name="Arial Bold" size="12.0"/></font> </Label>
+    </StackPane>
+
+    <!-- 6. Data Memory -->
+    <StackPane layoutX="700.0" layoutY="200.0" prefHeight="150.0" prefWidth="100.0">
+        <Rectangle fx:id="compDm" height="150.0" width="100.0" styleClass="datapath-component, datapath-memory"/>
+        <Label text="Data Mem"> <font><Font name="Arial Bold" size="12.0"/></font> </Label>
+    </StackPane>
+
+    <!-- 7. Write Back Mux -->
+    <StackPane layoutX="850.0" layoutY="250.0" prefHeight="60.0" prefWidth="30.0">
+        <Rectangle fx:id="compMuxWb" height="60.0" width="30.0" styleClass="datapath-component"/>
+    </StackPane>
+
+
+    <!-- Dynamic Text Labels -->
+    <Text fx:id="txtControlSignals" layoutX="50" layoutY="550" text="Control: "> <font><Font name="Monospace" size="14.0"/></font> </Text>
+
+    <Text fx:id="txtRs1Val" layoutX="500" layoutY="240" text="0x00000000" visible="false" styleClass="value-label"/>
+    <Text fx:id="txtRs2Val" layoutX="500" layoutY="300" text="0x00000000" visible="false" styleClass="value-label"/>
+    <Text fx:id="txtAluResult" layoutX="640" layoutY="260" text="0x00000000" visible="false" styleClass="value-label"/>
+
+</fx:root>

@@ -285,4 +285,18 @@ public class MemoryManager {
     public void getInput(String data) {
         uart.receiveDatas(data.getBytes());
     }
+
+    /**
+     * Debug read method that allows specifying a process ID (context).
+     * For basic MemoryManager, this ignores PID and behaves like readWord.
+     * Subclasses (PagedMemoryManager) should override this to read from correct
+     * context.
+     */
+    public synchronized int debugReadWord(int address, int pid) {
+        try {
+            return readWord(address);
+        } catch (MemoryAccessException e) {
+            return 0; // Return 0 for debug views instead of crashing
+        }
+    }
 }

@@ -17,13 +17,25 @@ public class GuiApp extends Application {
     private static Kernel kernel;
 
     @Override
-    public void start(Stage primaryStage) {
+    public void start(Stage primaryStage) throws Exception {
         // 1. Initialize Simulation (Backend)
         initializeSimulation();
 
-        // 2. Create Main Controller & View
-        MainController controller = new MainController(kernel, computer);
-        Scene scene = new Scene(controller.getView(), 1200, 800);
+        // 2. Create the FXMLLoader
+        javafx.fxml.FXMLLoader loader = new javafx.fxml.FXMLLoader(getClass().getResource("/fxml/MainLayout.fxml"));
+
+        // 3. Set the Controller Factory
+        loader.setControllerFactory(param -> new MainController(kernel, computer));
+
+        // 4. Load the root
+        javafx.scene.Parent root = loader.load();
+
+        // 5. Show
+        Scene scene = new Scene(root, 1200, 800);
+
+        // Add Global CSS
+        scene.getStylesheets().add(
+                getClass().getResource("/css/style.css").toExternalForm());
 
         // 3. Configure Stage
         primaryStage.setTitle("RISC-V OS Simulator");

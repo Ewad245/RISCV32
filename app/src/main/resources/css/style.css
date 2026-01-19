@@ -1,0 +1,126 @@
+.cpu-container {
+    -fx-border-color: #ccc;
+    -fx-background-color: #f9f9f9;
+}
+
+#regGrid {
+    -fx-hgap: 8;
+    /* was probably default 10–20 or inherited */
+    -fx-vgap: 4;
+    /* vertical spacing between rows — can be smaller too */
+}
+
+#regGrid .label {
+    -fx-padding: 2 4 2 4;
+    /* top right bottom left — reduce especially right side */
+}
+
+.pc-label {
+    -fx-font-size: 16px;
+    -fx-font-weight: bold;
+}
+
+.reg-name {
+    -fx-font-weight: bold;
+}
+
+.reg-value {
+    -fx-font-family: 'Monospace';
+}
+
+/* Class đặc biệt cho Stack Pointer */
+.stack-pointer {
+    -fx-text-fill: blue;
+}
+
+/* --- Sidebar Styles --- */
+.sidebar {
+    -fx-background-color: #2c3e50;
+    -fx-pref-width: 200;
+}
+
+.sidebar-title {
+    -fx-text-fill: white;
+    -fx-font-size: 20px;
+    -fx-font-weight: bold;
+    -fx-padding: 0 0 20 0;
+}
+
+.nav-button {
+    -fx-background-color: #34495e;
+    -fx-text-fill: #bdc3c7;
+    -fx-font-size: 14px;
+    -fx-cursor: hand;
+    -fx-background-radius: 5;
+    -fx-pref-height: 40;
+}
+
+/* JavaFX handles hover automatically! */
+.nav-button:hover {
+    -fx-background-color: #3e5871;
+}
+
+/* We will toggle this class in Java to show active state */
+.nav-button-active {
+    -fx-background-color: #3498db;
+    -fx-text-fill: white;
+}
+
+.datapath-root {
+    -fx-background-color: #f8fafc;
+}
+
+.datapath-component {
+    -fx-fill: #ffffff;
+    -fx-stroke: #64748b;
+    -fx-stroke-width: 2;
+    -fx-arc-width: 6;
+    -fx-arc-height: 6;
+}
+
+.datapath-component:hover {
+    -fx-stroke: #94a3b8;
+    -fx-stroke-width: 2.5;
+}
+
+.datapath-active {
+    -fx-stroke: #f43f5e !important;
+    /* rose-500 */
+    -fx-stroke-width: 5 !important;
+}
+
+.datapath-active-light {
+    -fx-fill: #fecdd3;
+    /* rose-100/200 */
+}
+
+.datapath-memory {
+    -fx-stroke: #10b981;
+    /* emerald-600 */
+}
+
+.datapath-alu {
+    -fx-stroke: #d97706;
+    /* amber-700 */
+}
+
+.datapath-pc {
+    -fx-stroke: #7c3aed;
+    /* violet-600 */
+}
+
+.value-label {
+    -fx-font-family: "Consolas", "Monaco", monospace;
+    -fx-font-size: 11px;
+    -fx-fill: #1e40af;
+}
+
+.wire-inactive {
+    -fx-stroke: #cbd5e1;
+    -fx-stroke-width: 3;
+}
+
+.wire-dataflow {
+    -fx-stroke: #ec4899;
+    -fx-stroke-width: 6;
+}
