@@ -116,7 +116,12 @@ public class AssemblyView extends VBox {
     public void update() {
         // Run on JavaFX thread
         Platform.runLater(() -> {
-            int pc = cpu.getProgramCounter();
+            int pc = cpu.getLastPC();
+            // If execution hasn't started (lastPC = -1), fallback to next PC to show entry
+            // point
+            if (pc == -1) {
+                pc = cpu.getProgramCounter();
+            }
 
             // Update History logic
             if (pc != currentPc) {

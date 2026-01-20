@@ -191,7 +191,7 @@ public class Disassembler {
             // JALR
             if (opcode == 0x67) {
                 if (rd == 0 && rs1 == 1 && imm_i == 0)
-                    return "ret";
+                    return "jalr x0, ra, 0";
                 return String.format("%-7s %s, %d(%s)", "jalr", reg(rd), imm_i, reg(rs1));
             }
 

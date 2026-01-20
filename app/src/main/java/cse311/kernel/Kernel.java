@@ -1,6 +1,7 @@
 package cse311.kernel;
 
 import cse311.*;
+import cse311.Exception.BreakpointException;
 import cse311.kernel.scheduler.*;
 import cse311.kernel.syscall.*;
 import cse311.kernel.process.*;
@@ -374,7 +375,7 @@ public class Kernel {
                         break;
                     }
 
-                } catch (cse311.Exception.BreakpointException e) {
+                } catch (BreakpointException e) {
                     System.out.println("Kernel: " + e.getMessage());
                     this.pause();
                     break;

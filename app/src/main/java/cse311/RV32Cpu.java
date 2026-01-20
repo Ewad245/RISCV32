@@ -240,6 +240,10 @@ public class RV32Cpu {
         this.pc = entryPoint;
     }
 
+    public int getLastPC() {
+        return lastPC;
+    }
+
     public Task getCurrentTask() {
         return currentTask;
     }
