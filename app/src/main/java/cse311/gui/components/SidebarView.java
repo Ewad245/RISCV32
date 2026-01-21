@@ -16,6 +16,8 @@ public class SidebarView extends VBox {
     private Button btnDashboard;
     @FXML
     private Button btnDatapath;
+    @FXML
+    private Button btnMemory;
 
     public SidebarView(Consumer<String> onNavigation) {
         this.onNavigation = onNavigation;
@@ -46,10 +48,17 @@ public class SidebarView extends VBox {
         onNavigation.accept("datapath");
     }
 
+    @FXML
+    private void onMemoryClicked() {
+        updateActiveState(btnMemory);
+        onNavigation.accept("memory");
+    }
+
     private void updateActiveState(Button activeBtn) {
         // Remove active class from all
         btnDashboard.getStyleClass().remove("nav-button-active");
         btnDatapath.getStyleClass().remove("nav-button-active");
+        btnMemory.getStyleClass().remove("nav-button-active");
 
         // Add active class to selected
         activeBtn.getStyleClass().add("nav-button-active");

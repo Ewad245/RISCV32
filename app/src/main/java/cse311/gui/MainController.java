@@ -34,7 +34,9 @@ public class MainController implements Initializable {
     @FXML
     private VBox schedulerContainer;
     @FXML
-    private VBox memoryContainer;
+    private VBox memoryContainer; // Dashboard memory view
+    @FXML
+    private VBox memoryTabContainer; // Full memory tab view
 
     // Datapath components
 
@@ -54,6 +56,7 @@ public class MainController implements Initializable {
     private AssemblyView[] assemblyViews;
     private SchedulerView schedulerView;
     private MemoryView memoryView;
+    private HexMemoryView hexMemoryView;
 
     private SidebarView sidebarView;
     private ConsoleView consoleView;
@@ -122,10 +125,15 @@ public class MainController implements Initializable {
         schedulerContainer.getChildren().add(schedulerView);
         VBox.setVgrow(schedulerView, Priority.ALWAYS);
 
-        // Add Memory
+        // Add Memory (Dashboard)
         memoryView = new MemoryView(kernel.getMemory(), kernel.getMemoryCoordinator());
         memoryContainer.getChildren().add(memoryView);
         VBox.setVgrow(memoryView, Priority.ALWAYS);
+
+        // Add Memory (Full Tab)
+        hexMemoryView = new HexMemoryView(kernel.getMemory());
+        memoryTabContainer.getChildren().add(hexMemoryView);
+        VBox.setVgrow(hexMemoryView, Priority.ALWAYS);
     }
 
     @FXML
@@ -178,14 +186,20 @@ public class MainController implements Initializable {
 
     private void initializeSidebar() {
         sidebarView = new SidebarView(view -> {
+            // Hide all first
+            dashboardPane.setVisible(false);
+            datapathTabs.setVisible(false);
+            memoryTabContainer.setVisible(false);
+
             if (view.equals("dashboard")) {
                 dashboardPane.setVisible(true);
-                datapathTabs.setVisible(false);
                 dashboardPane.toFront();
             } else if (view.equals("datapath")) {
-                dashboardPane.setVisible(false);
                 datapathTabs.setVisible(true);
                 datapathTabs.toFront();
+            } else if (view.equals("memory")) {
+                memoryTabContainer.setVisible(true);
+                memoryTabContainer.toFront();
             }
         });
         sidebarContainer.getChildren().add(sidebarView);
@@ -232,6 +246,10 @@ public class MainController implements Initializable {
                 datapathViews[i].update();
                 datapathAssemblyViews[i].update();
             }
+        }
+
+        if (memoryTabContainer.isVisible()) {
+            hexMemoryView.update();
         }
     }
 }

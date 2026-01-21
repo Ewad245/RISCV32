@@ -21,4 +21,7 @@
     <Button fx:id="btnDatapath" text="CPU Datapath" maxWidth="Infinity" 
             onAction="#onDatapathClicked" styleClass="nav-button"/>
 
+    <Button fx:id="btnMemory" text="Memory" maxWidth="Infinity" 
+            onAction="#onMemoryClicked" styleClass="nav-button"/>
+
 </fx:root>

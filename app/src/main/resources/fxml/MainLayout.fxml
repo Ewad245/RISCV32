@@ -59,6 +59,8 @@
 
             <TabPane fx:id="datapathTabs" visible="false"/>
 
+            <VBox fx:id="memoryTabContainer" visible="false"/>
+
         </StackPane>
     </center>
 
