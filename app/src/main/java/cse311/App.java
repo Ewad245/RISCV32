@@ -13,9 +13,9 @@ public class App {
     public static final String file_seperator = System.getProperty("file.separator");
 
     public static void main(String[] args) {
-        System.out.println("==========================================");
-        System.out.println("      RISC-V Java Kernel Bootloader       ");
-        System.out.println("==========================================");
+        cse311.Logger.FileLogger.log("==========================================");
+        cse311.Logger.FileLogger.log("      RISC-V Java Kernel Bootloader       ");
+        cse311.Logger.FileLogger.log("==========================================");
 
         try {
             // --------------------------------------------------------
@@ -39,7 +39,7 @@ public class App {
             // 3. LAUNCH INIT PROCESS (PID 1)
             // Java Simulated Init Task or from ELF
             // --------------------------------------------------------
-            System.out.println("Bootloader: Spawning Init process (PID 1)...");
+            cse311.Logger.FileLogger.log("Bootloader: Spawning Init process (PID 1)...");
             // First Option: Simulated Init (Not tested yet)
             // We only need to create InitTask manually.
             // The InitTask code (InitTask.java) will automatically detect
@@ -52,13 +52,13 @@ public class App {
             // This is like adding a service to startup scripts.
 
             String elfPath = ".." + file_seperator + "User_Program_ELF" + file_seperator + "init.elf";
-            System.out.println("Current working directory: " + System.getProperty("user.dir"));
-            System.out.println("Looking for ELF at: " + elfPath);
+            cse311.Logger.FileLogger.log("Current working directory: " + System.getProperty("user.dir"));
+            cse311.Logger.FileLogger.log("Looking for ELF at: " + elfPath);
             File f = new File(elfPath);
-            System.out.println("File exists: " + f.exists());
-            System.out.println("Absolute path: " + f.getAbsolutePath());
+            cse311.Logger.FileLogger.log("File exists: " + f.exists());
+            cse311.Logger.FileLogger.log("Absolute path: " + f.getAbsolutePath());
             if (f.exists()) {
-                System.out.println("Bootloader: Pre-loading user ELF: " + elfPath);
+                cse311.Logger.FileLogger.log("Bootloader: Pre-loading user ELF: " + elfPath);
                 kernel.createTask(elfPath);
             }
             // }
@@ -69,18 +69,18 @@ public class App {
             // This blocks forever in the mainLoop().
             // 1. Scheduler picks InitTask -> InitTask spawns ShellTask
             // 2. Scheduler picks ShellTask -> ShellTask prints "$" and waits for input
-            System.out.println("Bootloader: Starting Kernel scheduler...");
-            System.out.println("------------------------------------------");
+            cse311.Logger.FileLogger.log("Bootloader: Starting Kernel scheduler...");
+            cse311.Logger.FileLogger.log("------------------------------------------");
             kernel.start();
 
         } catch (NullPointerException e) {
-            System.err.println("Path invalid: " + e.getMessage());
-            e.printStackTrace();
+            cse311.Logger.FileLogger.log("Path invalid: " + e.getMessage());
+            cse311.Logger.FileLogger.log(e);
         } catch (Exception e) {
-            System.err.println("\nKERNEL PANIC: " + e.getMessage());
-            e.printStackTrace();
+            cse311.Logger.FileLogger.log("\nKERNEL PANIC: " + e.getMessage());
+            cse311.Logger.FileLogger.log(e);
         } finally {
-            System.out.println("\nSystem Halted.");
+            cse311.Logger.FileLogger.log("\nSystem Halted.");
         }
     }
 }

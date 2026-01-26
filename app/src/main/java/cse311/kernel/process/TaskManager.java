@@ -131,12 +131,14 @@ public class TaskManager {
         Task initTask = kernel.getTask(1);
 
         if (initTask == null) {
-            System.err.println("CRITICAL: Init task (PID 1) not found during reparenting!");
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "CRITICAL: Init task (PID 1) not found during reparenting!");
             return;
         }
 
         if (dyingTask.getId() == 1) {
-            System.err.println("CRITICAL: Init task is dying! System halt imminent.");
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "CRITICAL: Init task is dying! System halt imminent.");
             return;
         }
 

@@ -18,7 +18,8 @@ public class RV32Computer {
     }
 
     public RV32Computer(int memSize, int maxTasks, MemoryMode mode) {
-        System.out.println("--- Booting RV32iComputer in " + mode + " Mode ---");
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                "--- Booting RV32iComputer in " + mode + " Mode ---");
 
         // 1. Initialize Memory Hardware & Logic
         if (mode == MemoryMode.PAGING) {
@@ -47,7 +48,7 @@ public class RV32Computer {
         // 3. Initialize Kernel (Kernel constructor detects memory type)
         this.kernel = new Kernel(memory);
 
-        System.out.println("System Initialized. Memory: " + (memSize / 1024 / 1024) + "MB");
+        cse311.Logger.FileLogger.log("System Initialized. Memory: " + (memSize / 1024 / 1024) + "MB");
     }
 
     /**
@@ -63,7 +64,8 @@ public class RV32Computer {
             byte[] simpleProgram = createSimpleProgram(entryPoint);
             return kernel.createTask(simpleProgram, "task_" + entryPoint);
         } catch (Exception e) {
-            System.err.println("Failed to create task: " + e.getMessage());
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "Failed to create task: " + e.getMessage());
             return null;
         }
     }
@@ -79,7 +81,8 @@ public class RV32Computer {
         try {
             return kernel.createTask(elfData, name);
         } catch (Exception e) {
-            System.err.println("Failed to create task: " + e.getMessage());
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "Failed to create task: " + e.getMessage());
             return null;
         }
     }

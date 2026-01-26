@@ -102,7 +102,8 @@ public class PagedMemoryManager extends MemoryManager {
 
         // 4. Remove the logical structure
         spaces.remove(pid);
-        System.out.println("PagedMemoryManager: Fully reclaimed memory for PID " + pid);
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                "PagedMemoryManager: Fully reclaimed memory for PID " + pid);
     }
 
     public void switchTo(AddressSpace as) {
@@ -367,8 +368,8 @@ public class PagedMemoryManager extends MemoryManager {
     // ---- Debug helpers ----
     public void dumpStats() {
         int used = totalFrames - freeFrames.cardinality();
-        System.out.println("Memory: " + used + "/" + totalFrames + " frames used");
-        System.out.println("Page tables: " + pageTableFrames.size() + " allocated");
+        cse311.Logger.FileLogger.log("Memory: " + used + "/" + totalFrames + " frames used");
+        cse311.Logger.FileLogger.log("Page tables: " + pageTableFrames.size() + " allocated");
     }
 
     // Page table management methods
@@ -417,7 +418,7 @@ public class PagedMemoryManager extends MemoryManager {
     }
 
     public void copyAddressSpace(AddressSpace oldAS, AddressSpace newAS) throws MemoryAccessException {
-        System.out.println(
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
                 "PagedMemoryManager: Copying address space from PID " + oldAS.getPid() + " to " + newAS.getPid());
 
         for (int l1Index = 0; l1Index < 1024; l1Index++) {
@@ -476,9 +477,12 @@ public class PagedMemoryManager extends MemoryManager {
 
                     if (l1Index == 0 && l2Index == 16) { // Code page usually at index 16 (0x10000)
                         int sampleData = super.readWord(oldPa);
-                        System.out.println("copyAddressSpace: Copying Code Page. VPN=" + vpn + " OldFrame=" + oldFrame
-                                + " OldPA=" + Integer.toHexString(oldPa) + " Data[0]=" + Integer.toHexString(sampleData)
-                                + " NewFrame=" + newFrame);
+                        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                                "copyAddressSpace: Copying Code Page. VPN=" + vpn + " OldFrame="
+                                        + oldFrame
+                                        + " OldPA=" + Integer.toHexString(oldPa) + " Data[0]="
+                                        + Integer.toHexString(sampleData)
+                                        + " NewFrame=" + newFrame);
                     }
 
                     try {
@@ -518,5 +522,35 @@ public class PagedMemoryManager extends MemoryManager {
             return 0; // Success
         }
         return -1; // Key not found
+    }
+
+    /**
+     * Check if a frame contains only zeros (for UI visualization).
+     * Samples bytes at intervals to avoid reading entire 4KB.
+     * 
+     * @param frameIndex The frame number to check
+     * @return true if the frame appears empty (all sampled bytes are zero)
+     */
+    public boolean isFrameEmpty(int frameIndex) {
+        if (frameIndex < 0 || frameIndex >= totalFrames) {
+            return true;
+        }
+
+        int baseAddress = frameIndex * PAGE_SIZE;
+
+        // Sample every 64 bytes (64 samples per 4KB frame) for performance
+        try {
+            for (int offset = 0; offset < PAGE_SIZE; offset += 64) {
+                // Read a word (4 bytes) at each sample point
+                int value = super.readWord(baseAddress + offset);
+                if (value != 0) {
+                    return false; // Found non-zero data
+                }
+            }
+        } catch (Exception e) {
+            return true; // On error, consider empty
+        }
+
+        return true; // All samples were zero
     }
 }

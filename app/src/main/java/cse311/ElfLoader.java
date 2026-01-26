@@ -213,7 +213,8 @@ public class ElfLoader {
             try {
                 parseSymbols();
             } catch (Exception e) {
-                System.err.println("Warning: Failed to parse symbols: " + e.getMessage());
+                cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                        "Warning: Failed to parse symbols: " + e.getMessage());
             }
         }
 

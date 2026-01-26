@@ -56,7 +56,7 @@ public class KernelMemoryManager {
             // Update next stack offset for future allocations
             nextStackOffset += alignedSize + 4096; // Add guard page
 
-            System.out.println("Allocated stack for PID " + pid +
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG, "Allocated stack for PID " + pid +
                     ": base=0x" + Integer.toHexString(stackBase) +
                     ", size=" + alignedSize);
 
@@ -75,7 +75,7 @@ public class KernelMemoryManager {
         if (stackInfo != null) {
             // In a real implementation, we would mark this memory as free
             // For now, just remove from our tracking
-            System.out.println("Freed stack for PID " + pid);
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG, "Freed stack for PID " + pid);
         }
     }
 

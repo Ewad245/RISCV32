@@ -343,7 +343,7 @@ public class RV32Cpu {
         } catch (Exception e) {
             // Handle other exceptions using the handleException method
             handleException(2, pc - INSTRUCTION_SIZE); // 2 = illegal instruction
-            e.printStackTrace(); // Log the exception for debugging
+            cse311.Logger.FileLogger.log(e); // Log the exception for debugging
         }
     }
 

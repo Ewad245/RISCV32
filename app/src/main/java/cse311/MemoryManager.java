@@ -269,7 +269,7 @@ public class MemoryManager {
     }
 
     public void dumpMemory(int start, int length) throws MemoryAccessException {
-        System.out.println(memory.dumpMemory(start, length));
+        cse311.Logger.FileLogger.log(memory.dumpMemory(start, length));
     }
 
     public String dumpMemory() throws MemoryAccessException {

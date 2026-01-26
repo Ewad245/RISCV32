@@ -382,3 +382,10 @@ fabric.properties
 
 # End of https://www.toptal.com/developers/gitignore/api/java,gradle,eclipse,windows,macos,intellij
 
+# Log files
+LogFiles/
+
+# Agent Files
+.agent/
+
+/User_Program_Source_Code

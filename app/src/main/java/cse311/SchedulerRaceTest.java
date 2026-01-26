@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class SchedulerRaceTest {
 
     public static void main(String[] args) {
-        System.out.println("=== Scheduler Race Condition Test ===\n");
+        cse311.Logger.FileLogger.log("=== Scheduler Race Condition Test ===\n");
 
         boolean passed = true;
         passed &= testScheduler(new RoundRobinScheduler(100), "RoundRobinScheduler");
@@ -28,16 +28,16 @@ public class SchedulerRaceTest {
         passed &= testScheduler(new CooperativeScheduler(), "CooperativeScheduler");
 
         if (passed) {
-            System.out.println("\nAll tests PASSED.");
+            cse311.Logger.FileLogger.log("\nAll tests PASSED.");
             System.exit(0);
         } else {
-            System.out.println("\nSome tests FAILED.");
+            cse311.Logger.FileLogger.log("\nSome tests FAILED.");
             System.exit(1);
         }
     }
 
     private static boolean testScheduler(Scheduler scheduler, String name) {
-        System.out.println("Testing " + name + "...");
+        cse311.Logger.FileLogger.log("Testing " + name + "...");
 
         // Create a dummy task
         // int id, int entryPoint, int stackSize, int stackBase, ProgramInfo info
@@ -57,7 +57,7 @@ public class SchedulerRaceTest {
                     scheduler.addTask(task);
                 } catch (Exception e) {
                     excCount.incrementAndGet();
-                    e.printStackTrace();
+                    cse311.Logger.FileLogger.log(e);
                 } finally {
                     doneLatch.countDown();
                 }
@@ -70,11 +70,11 @@ public class SchedulerRaceTest {
         try {
             doneLatch.await();
         } catch (InterruptedException e) {
-            e.printStackTrace();
+            cse311.Logger.FileLogger.log(e);
         }
 
         if (excCount.get() > 0) {
-            System.out.println("  [FAIL] Exceptions occurred during addTask.");
+            cse311.Logger.FileLogger.log("  [FAIL] Exceptions occurred during addTask.");
             return false;
         }
 
@@ -86,17 +86,17 @@ public class SchedulerRaceTest {
         Task t2 = scheduler.schedule();
 
         if (t1 == task && t2 == null) {
-            System.out.println("  [PASS] Task scheduled exactly once.");
+            cse311.Logger.FileLogger.log("  [PASS] Task scheduled exactly once.");
             return true;
         } else {
-            System.out.println("  [FAIL] Race condition detected!");
+            cse311.Logger.FileLogger.log("  [FAIL] Race condition detected!");
             if (t1 == null) {
-                System.out.println("    First schedule() returned null (Task not added?)");
+                cse311.Logger.FileLogger.log("    First schedule() returned null (Task not added?)");
             } else {
-                System.out.println("    First schedule() returned task: " + t1);
+                cse311.Logger.FileLogger.log("    First schedule() returned task: " + t1);
             }
             if (t2 != null) {
-                System.out.println("    Second schedule() returned task: " + t2 + " (Duplicate!)");
+                cse311.Logger.FileLogger.log("    Second schedule() returned task: " + t2 + " (Duplicate!)");
             }
             return false;
         }

@@ -142,28 +142,51 @@ public class MemoryView extends Pane {
             double x = col * (boxSize + gap);
             double y = startY + row * (boxSize + gap);
 
-            // Determine Color
+            // Determine Color and Fill Style
             FrameOwner owner = frames[i];
             if (owner == null) {
-                gc.setFill(Color.LIGHTGRAY); // Free
+                // Free frame - light gray
+                gc.setFill(Color.LIGHTGRAY);
+                gc.fillRect(x, y, boxSize, boxSize);
             } else if (owner.pid == -1) {
-                gc.setFill(Color.DARKGRAY); // Page Table Frame
-            } else {
-                gc.setFill(colors[owner.pid % colors.length]); // Allocated to PID
-            }
-
-            gc.fillRect(x, y, boxSize, boxSize);
-
-            // Optional: Draw border for allocated
-            if (owner != null) {
+                // Page Table Frame - dark gray, always solid
+                gc.setFill(Color.DARKGRAY);
+                gc.fillRect(x, y, boxSize, boxSize);
                 gc.setStroke(Color.BLACK);
                 gc.setLineWidth(0.5);
                 gc.strokeRect(x, y, boxSize, boxSize);
+            } else {
+                // User frame - check if it has data
+                Color frameColor = colors[owner.pid % colors.length];
+                boolean hasData = !pmm.isFrameEmpty(i);
+
+                if (hasData) {
+                    // Frame has data - solid fill
+                    gc.setFill(frameColor);
+                    gc.fillRect(x, y, boxSize, boxSize);
+                    gc.setStroke(Color.BLACK);
+                    gc.setLineWidth(0.5);
+                    gc.strokeRect(x, y, boxSize, boxSize);
+                } else {
+                    // Frame is allocated but empty - hollow outline with hatching
+                    gc.setFill(Color.WHITE);
+                    gc.fillRect(x, y, boxSize, boxSize);
+                    gc.setStroke(frameColor);
+                    gc.setLineWidth(2);
+                    gc.strokeRect(x + 1, y + 1, boxSize - 2, boxSize - 2);
+
+                    // Draw diagonal line to indicate "empty"
+                    gc.setStroke(frameColor.deriveColor(0, 1, 0.7, 0.5));
+                    gc.setLineWidth(1);
+                    gc.strokeLine(x + 2, y + boxSize - 2, x + boxSize - 2, y + 2);
+                }
             }
         }
 
         gc.setFill(Color.BLACK);
-        gc.fillText("Paging Mode: " + totalFrames + " Frames (4KB each)", 10, 20);
+        gc.fillText(
+                "Paging Mode: " + totalFrames + " Frames (4KB each)  |  Solid = Has Data, Hollow = Allocated but Empty",
+                10, 20);
     }
 
     private void handleMouseMove(MouseEvent e, Tooltip tooltip) {
@@ -245,12 +268,35 @@ public class MemoryView extends Pane {
 
         if (index >= 0 && index < frames.length) {
             FrameOwner owner = frames[index];
+
+            // --- NEW: Calculate Real Physical Address ---
+            // Each frame is 4096 bytes (0x1000)
+            int realAddress = index * PagedMemoryManager.PAGE_SIZE;
+
             if (owner == null) {
-                tooltip.setText(String.format("Frame %d: Free", index));
+                tooltip.setText(String.format(
+                        "Frame: %d\n" +
+                                "Status: Free\n" +
+                                "Real Address: 0x%08X",
+                        index, realAddress));
             } else if (owner.pid == -1) {
-                tooltip.setText(String.format("Frame %d: Page Table", index));
+                tooltip.setText(String.format(
+                        "Frame: %d\n" +
+                                "Status: Page Table\n" +
+                                "Real Address: 0x%08X",
+                        index, realAddress));
             } else {
-                tooltip.setText(String.format("Frame %d\nPID: %d\nVPN: 0x%X", index, owner.pid, owner.vpn));
+                boolean hasData = !pmm.isFrameEmpty(index);
+                String dataStatus = hasData ? "YES (non-zero)" : "NO (all zeros)";
+                tooltip.setText(String.format(
+                        "Frame: %d\n" +
+                                "Real Address: 0x%08X\n" +
+                                "-----------------\n" +
+                                "Mapped to PID: %d\n" +
+                                "Virtual Page: 0x%X\n" +
+                                "-----------------\n" +
+                                "Has Data: %s",
+                        index, realAddress, owner.pid, owner.vpn, dataStatus));
             }
             tooltip.show(canvas, e.getScreenX() + 10, e.getScreenY() + 10);
         } else {

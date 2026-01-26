@@ -12,7 +12,7 @@ public class SystemCallDemo {
 
     public static void main(String[] args) {
         try {
-            System.out.println("=== System Call Integration Demo ===\n");
+            cse311.Logger.FileLogger.log("=== System Call Integration Demo ===\n");
 
             // Create memory
             SimpleMemory simpleMemory = new SimpleMemory(64 * 1024 * 1024);
@@ -25,41 +25,42 @@ public class SystemCallDemo {
             // Configure for cooperative scheduling to see system calls clearly
             kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.COOPERATIVE);
 
-            System.out.println("1. Testing ECALL detection...");
+            cse311.Logger.FileLogger.log("1. Testing ECALL detection...");
             testEcallDetection(cpu);
 
-            System.out.println("\n2. Testing system call handling...");
+            cse311.Logger.FileLogger.log("\n2. Testing system call handling...");
             testSystemCallHandling(kernel, cpu, memory);
 
-            System.out.println("\n3. Testing kernel integration...");
+            cse311.Logger.FileLogger.log("\n3. Testing kernel integration...");
             testKernelIntegration(kernel);
 
-            System.out.println("\n=== Demo Complete ===");
+            cse311.Logger.FileLogger.log("\n=== Demo Complete ===");
 
         } catch (Exception e) {
-            System.err.println("Demo error: " + e.getMessage());
-            e.printStackTrace();
+            cse311.Logger.FileLogger.log("Demo error: " + e.getMessage());
+            cse311.Logger.FileLogger.log(e);
         }
     }
 
     private static void testEcallDetection(RV32Cpu cpu) {
-        System.out.println("   - Resetting CPU flags");
+        cse311.Logger.FileLogger.log("   - Resetting CPU flags");
         cpu.resetFlags();
 
-        System.out.println("   - Initial ECALL state: " + cpu.isEcall());
+        cse311.Logger.FileLogger.log("   - Initial ECALL state: " + cpu.isEcall());
 
-        System.out.println("   - Executing ECALL instruction (0x73)");
+        cse311.Logger.FileLogger.log("   - Executing ECALL instruction (0x73)");
         cpu.testExecuteInstruction(0x00000073); // ECALL instruction
 
-        System.out.println("   - ECALL detected: " + cpu.isEcall());
-        System.out.println("   - ECALL flag after check: " + cpu.isEcall() + " (should be false - auto-reset)");
+        cse311.Logger.FileLogger.log("   - ECALL detected: " + cpu.isEcall());
+        cse311.Logger.FileLogger
+                .log("   - ECALL flag after check: " + cpu.isEcall() + " (should be false - auto-reset)");
     }
 
     private static void testSystemCallHandling(Kernel kernel, RV32Cpu cpu, MemoryManager memory) throws Exception {
-        System.out.println("   - Creating test task");
+        cse311.Logger.FileLogger.log("   - Creating test task");
         Task task = new Task(1, "test_task", 0x1000, 4096, 0x7000, null);
 
-        System.out.println("   - Setting up write system call");
+        cse311.Logger.FileLogger.log("   - Setting up write system call");
         // Set up write system call: write("Hello", 5) to stdout
         task.getRegisters()[17] = SystemCallHandler.SYS_WRITE; // a7 = write
         task.getRegisters()[10] = 1; // a0 = stdout
@@ -72,29 +73,29 @@ public class SystemCallDemo {
             memory.writeByte(0x2000 + i, (byte) testData.charAt(i));
         }
 
-        System.out.println("   - Executing ECALL");
+        cse311.Logger.FileLogger.log("   - Executing ECALL");
         cpu.resetFlags();
         cpu.testExecuteInstruction(0x00000073); // ECALL
 
         if (cpu.isEcall()) {
-            System.out.println("   - ECALL detected, handling system call");
+            cse311.Logger.FileLogger.log("   - ECALL detected, handling system call");
             kernel.getSystemCallHandler().handleSystemCall(task, cpu);
-            System.out.println("   - System call completed, return value: " + task.getRegisters()[10]);
+            cse311.Logger.FileLogger.log("   - System call completed, return value: " + task.getRegisters()[10]);
         } else {
-            System.out.println("   - ERROR: ECALL not detected!");
+            cse311.Logger.FileLogger.log("   - ERROR: ECALL not detected!");
         }
     }
 
     private static void testKernelIntegration(Kernel kernel) throws Exception {
-        System.out.println("   - Creating task with exit program");
+        cse311.Logger.FileLogger.log("   - Creating task with exit program");
         byte[] exitProgram = createExitProgram();
         Task task = kernel.createTask(exitProgram, "exit_demo");
 
-        System.out.println("   - Task created: " + task.getName() + " (PID: " + task.getId() + ")");
-        System.out.println("   - Task state: " + task.getState());
+        cse311.Logger.FileLogger.log("   - Task created: " + task.getName() + " (PID: " + task.getId() + ")");
+        cse311.Logger.FileLogger.log("   - Task state: " + task.getState());
 
         // Simulate one execution cycle
-        System.out.println("   - Simulating kernel execution cycle...");
+        cse311.Logger.FileLogger.log("   - Simulating kernel execution cycle...");
 
         // The kernel would normally handle this in its main loop
         // Here we'll simulate what happens when a task makes a system call
@@ -105,12 +106,12 @@ public class SystemCallDemo {
         try {
             kernel.getCpu().step();
             if (kernel.getCpu().isEcall()) {
-                System.out.println("   - System call detected by kernel");
+                cse311.Logger.FileLogger.log("   - System call detected by kernel");
                 kernel.getSystemCallHandler().handleSystemCall(task, kernel.getCpu());
-                System.out.println("   - Task state after system call: " + task.getState());
+                cse311.Logger.FileLogger.log("   - Task state after system call: " + task.getState());
             }
         } catch (Exception e) {
-            System.out.println("   - Execution completed or encountered issue: " + e.getMessage());
+            cse311.Logger.FileLogger.log("   - Execution completed or encountered issue: " + e.getMessage());
         }
     }
 

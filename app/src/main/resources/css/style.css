@@ -67,60 +67,187 @@
 }
 
 .datapath-root {
-    -fx-background-color: #f8fafc;
+    -fx-background-color: linear-gradient(to bottom right, #f8fafc, #e2e8f0);
 }
 
 .datapath-component {
     -fx-fill: #ffffff;
     -fx-stroke: #64748b;
     -fx-stroke-width: 2;
-    -fx-arc-width: 6;
-    -fx-arc-height: 6;
+    -fx-arc-width: 8;
+    -fx-arc-height: 8;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.15), 4, 0, 1, 1);
 }
 
 .datapath-component:hover {
-    -fx-stroke: #94a3b8;
-    -fx-stroke-width: 2.5;
+    -fx-stroke: #475569;
+    -fx-stroke-width: 3;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.25), 6, 0, 2, 2);
 }
 
 .datapath-active {
     -fx-stroke: #f43f5e !important;
-    /* rose-500 */
-    -fx-stroke-width: 5 !important;
+    -fx-stroke-width: 4 !important;
+    -fx-effect: dropshadow(gaussian, rgba(244, 63, 94, 0.4), 8, 0, 0, 0) !important;
 }
 
 .datapath-active-light {
     -fx-fill: #fecdd3;
-    /* rose-100/200 */
 }
 
+/* Component type colors */
 .datapath-memory {
     -fx-stroke: #10b981;
-    /* emerald-600 */
+    -fx-fill: linear-gradient(to bottom, #ffffff, #ecfdf5);
 }
 
 .datapath-alu {
     -fx-stroke: #d97706;
-    /* amber-700 */
+    -fx-fill: linear-gradient(to bottom, #ffffff, #fffbeb);
 }
 
 .datapath-pc {
     -fx-stroke: #7c3aed;
-    /* violet-600 */
+    -fx-fill: linear-gradient(to bottom, #ffffff, #f5f3ff);
 }
 
-.value-label {
+.datapath-imm {
+    -fx-stroke: #0891b2;
+    -fx-fill: linear-gradient(to bottom, #ffffff, #ecfeff);
+}
+
+.datapath-reg {
+    -fx-stroke: #0d9488;
+    -fx-fill: linear-gradient(to bottom, #ffffff, #f0fdfa);
+}
+
+.datapath-mux {
+    -fx-stroke: #6366f1;
+    -fx-fill: linear-gradient(to bottom, #ffffff, #eef2ff);
+}
+
+.datapath-control {
+    -fx-stroke: #dc2626;
+    -fx-fill: linear-gradient(to bottom, #ffffff, #fef2f2);
+}
+
+.datapath-adder {
+    -fx-stroke: #8b5cf6;
+    -fx-fill: linear-gradient(to bottom, #ffffff, #f5f3ff);
+}
+
+/* Control signal wires (dashed) */
+.wire-control {
+    -fx-stroke: #dc2626;
+    -fx-stroke-width: 1.5;
+    -fx-stroke-dash-array: 5 3;
+}
+
+/* Control signal labels */
+.control-signal-label {
+    -fx-font-size: 9px;
     -fx-font-family: "Consolas", "Monaco", monospace;
-    -fx-font-size: 11px;
-    -fx-fill: #1e40af;
+    -fx-text-fill: #6b7280;
 }
 
+.control-signal-active {
+    -fx-text-fill: #16a34a;
+    -fx-font-weight: bold;
+}
+
+.control-signal-inactive {
+    -fx-text-fill: #d1d5db;
+}
+
+.value-label-small {
+    -fx-font-family: "Consolas", "Monaco", monospace;
+    -fx-font-size: 9px;
+    -fx-fill: #6b7280;
+}
+
+/* Wire styles */
 .wire-inactive {
-    -fx-stroke: #cbd5e1;
-    -fx-stroke-width: 3;
+    -fx-stroke: #94a3b8;
+    -fx-stroke-width: 2.5;
 }
 
 .wire-dataflow {
     -fx-stroke: #ec4899;
-    -fx-stroke-width: 6;
+    -fx-stroke-width: 5;
+}
+
+/* Arrow styles */
+.arrow-head {
+    -fx-fill: #94a3b8;
+    -fx-stroke: none;
+}
+
+.arrow-active {
+    -fx-fill: #f43f5e !important;
+}
+
+/* Value labels */
+.value-label {
+    -fx-font-family: "Consolas", "Monaco", monospace;
+    -fx-font-size: 10px;
+    -fx-fill: #1e40af;
+}
+
+.control-label {
+    -fx-font-family: "Consolas", "Monaco", monospace;
+    -fx-font-size: 13px;
+    -fx-fill: #334155;
+}
+
+/* Component labels */
+.component-label {
+    -fx-font-size: 10px;
+    -fx-text-fill: #64748b;
+    -fx-text-alignment: center;
+}
+
+.component-label-inside {
+    -fx-font-size: 12px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #1e293b;
+}
+
+.component-sublabel {
+    -fx-font-size: 9px;
+    -fx-text-fill: #94a3b8;
+}
+
+/* Port labels */
+.port-label {
+    -fx-font-size: 9px;
+    -fx-font-family: "Consolas", "Monaco", monospace;
+    -fx-text-fill: #64748b;
+}
+
+/* Legend styles */
+.legend-box {
+    -fx-background-color: rgba(255, 255, 255, 0.95);
+    -fx-background-radius: 8;
+    -fx-border-color: #e2e8f0;
+    -fx-border-radius: 8;
+    -fx-border-width: 1;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.1), 8, 0, 0, 2);
+}
+
+.legend-title {
+    -fx-font-size: 13px;
+    -fx-font-weight: bold;
+    -fx-text-fill: #1e293b;
+}
+
+.legend-label {
+    -fx-font-size: 11px;
+    -fx-text-fill: #475569;
+}
+
+.legend-swatch {
+    -fx-fill: #ffffff;
+    -fx-stroke-width: 2;
+    -fx-arc-width: 3;
+    -fx-arc-height: 3;
 }

@@ -81,7 +81,7 @@ public class Kernel {
         // --------------------------------------------------------
         if (memory instanceof PagedMemoryManager) {
             // --- PAGING MODE ---
-            System.out.println("Kernel: Detected Paging Mode.");
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG, "Kernel: Detected Paging Mode.");
 
             PagedMemoryManager pm = (PagedMemoryManager) memory;
             PagingMapper mapper = new PagingMapper(pm);
@@ -92,7 +92,7 @@ public class Kernel {
 
         } else if (memory instanceof ContiguousMemoryManager) {
             // --- CONTIGUOUS MODE ---
-            System.out.println("Kernel: Detected Contiguous Mode.");
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG, "Kernel: Detected Contiguous Mode.");
 
             ContiguousMemoryManager cmm = (ContiguousMemoryManager) memory;
 
@@ -102,13 +102,13 @@ public class Kernel {
 
         } else {
             // --- LEGACY MODE ---
-            System.out.println("Kernel: Warning - Legacy Memory Mode (No Coordinator).");
+            cse311.Logger.FileLogger.log("Kernel: Warning - Legacy Memory Mode (No Coordinator).");
             this.memoryCoordinator = null;
         }
         taskManager.setMemoryCoordinator(this.memoryCoordinator);
 
-        System.out.println("RV32IM Java Kernel initialized");
-        System.out.println("Scheduler: " + scheduler.getClass().getSimpleName());
+        cse311.Logger.FileLogger.log("RV32IM Java Kernel initialized");
+        cse311.Logger.FileLogger.log("Scheduler: " + scheduler.getClass().getSimpleName());
     }
 
     /**
@@ -137,7 +137,7 @@ public class Kernel {
         }
 
         running = true;
-        System.out.println("Kernel starting...");
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG, "Kernel starting...");
 
         // 1. Launch Maintenance Thread (Handles Interrupts/Timers)
         new Thread(this::maintenanceLoop, "Kernel-Maintenance").start();
@@ -145,7 +145,7 @@ public class Kernel {
         // 2. Launch Bootstrap Processor (BSP) - Core 0
         RV32Cpu bsp = cpus.get(0);
         new Thread(() -> {
-            System.out.println("BSP (Core 0) booting...");
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG, "BSP (Core 0) booting...");
             cpuRunLoop(bsp);
         }, "CPU-Core-0").start();
 
@@ -159,7 +159,7 @@ public class Kernel {
                 Thread.sleep(1000); // Simulate BSP initialization time
                 startOthers();
             } catch (InterruptedException e) {
-                e.printStackTrace();
+                cse311.Logger.FileLogger.log(e);
             }
         }).start();
     }
@@ -169,7 +169,8 @@ public class Kernel {
      * In xv6, this is done by the BSP in main() calling startothers()
      */
     private void startOthers() {
-        System.out.println("BSP: Starting Application Processors (APs)...");
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                "BSP: Starting Application Processors (APs)...");
         // Set the flag to allow APs to proceed
         started = true;
 
@@ -188,14 +189,14 @@ public class Kernel {
      */
     public void stop() {
         running = false;
-        System.out.println("Kernel stopped");
+        cse311.Logger.FileLogger.log("Kernel stopped");
     }
 
     /**
      * [Thread 1..N] The Main Execution Loop for each CPU Core
      */
     private void cpuRunLoop(RV32Cpu cpu) {
-        System.out.println("Core " + cpu.getId() + " online.");
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG, "Core " + cpu.getId() + " online.");
         // Only start the keyboard input thread on the BSP (Core 0)
         // This prevents multiple threads from contending for System.in
         if (cpu.getId() == 0) {
@@ -252,7 +253,7 @@ public class Kernel {
                     String error = "DOUBLE SCHEDULE DETECTED! Task " + currentTask.getId()
                             + " is already running on Hart " + otherHart
                             + " but Hart " + cpu.getId() + " tried to run it!";
-                    System.err.println(error);
+                    cse311.Logger.FileLogger.log(error);
                     throw new RuntimeException(error);
                 }
 
@@ -272,8 +273,8 @@ public class Kernel {
                 // or cleared in the 'if (currentTask == null)' block above.
 
             } catch (Exception e) {
-                System.err.println("Core " + cpu.getId() + " error: " + e.getMessage());
-                e.printStackTrace();
+                cse311.Logger.FileLogger.log("Core " + cpu.getId() + " error: " + e.getMessage());
+                cse311.Logger.FileLogger.log(e);
             }
         }
     }
@@ -288,7 +289,7 @@ public class Kernel {
                 checkDeviceInterrupts();
                 Thread.sleep(10); // Prevent burning host CPU
             } catch (Exception e) {
-                e.printStackTrace();
+                cse311.Logger.FileLogger.log(e);
             }
         }
     }
@@ -325,8 +326,8 @@ public class Kernel {
                     task.setState(TaskState.READY);
                 }
             } catch (Exception e) {
-                System.err.println("JavaTask " + task.getId() + " error: " + e.getMessage());
-                e.printStackTrace();
+                cse311.Logger.FileLogger.log("JavaTask " + task.getId() + " error: " + e.getMessage());
+                cse311.Logger.FileLogger.log(e);
                 task.setState(TaskState.TERMINATED);
             }
 
@@ -376,11 +377,11 @@ public class Kernel {
                     }
 
                 } catch (BreakpointException e) {
-                    System.out.println("Kernel: " + e.getMessage());
+                    cse311.Logger.FileLogger.log("Kernel: " + e.getMessage());
                     this.pause();
                     break;
                 } catch (Exception e) {
-                    System.err.println("Task " + task.getId() + " error: " + e.getMessage());
+                    cse311.Logger.FileLogger.log("Task " + task.getId() + " error: " + e.getMessage());
                     task.setState(TaskState.TERMINATED);
                     break;
                 }
@@ -414,13 +415,14 @@ public class Kernel {
                         t.wakeup(); // Set state to READY
                         scheduler.addTask(t); // Move to Ready Queue
                         it.remove(); // Remove from I/O Wait Queue
-                        System.out.println("Kernel: Woke up Task " + t.getId() + " (UART)");
+                        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                                "Kernel: Woke up Task " + t.getId() + " (UART)");
                     }
                 }
             }
         } catch (Exception e) {
-            System.err.println("Kernel: UART check error: " + e.getMessage());
-            e.printStackTrace();
+            cse311.Logger.FileLogger.log("Kernel: UART check error: " + e.getMessage());
+            cse311.Logger.FileLogger.log(e);
         }
 
         // B. Check Timer (Interrupt Wait Queue)
@@ -429,7 +431,8 @@ public class Kernel {
             Task t = sleepWaitQueue.poll(); // Remove from Interrupt Wait Queue
             t.wakeup();
             scheduler.addTask(t); // Move to Ready Queue
-            System.out.println("Kernel: Woke up Task " + t.getId() + " (Timer)");
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                    "Kernel: Woke up Task " + t.getId() + " (Timer)");
         }
     }
 
@@ -522,9 +525,9 @@ public class Kernel {
             // and perform the actual cleanup.
             parent.wakeup();
             scheduler.addTask(parent);
-            System.out.println("Kernel: Zombie Task " + pid + " woke up Parent " + parent.getId());
+            cse311.Logger.FileLogger.log("Kernel: Zombie Task " + pid + " woke up Parent " + parent.getId());
         } else {
-            System.out.println("Kernel: Task " + pid + " became a Zombie (Parent not waiting).");
+            cse311.Logger.FileLogger.log("Kernel: Task " + pid + " became a Zombie (Parent not waiting).");
         }
 
         // We must leave the task in memory as a ZOMBIE so the parent can read the exit
@@ -548,7 +551,7 @@ public class Kernel {
         try {
             syscallHandler.handleSystemCall(task, cpu);
         } catch (Exception e) {
-            System.err.println("System call error for task " + task.getId() + ": " + e.getMessage());
+            cse311.Logger.FileLogger.log("System call error for task " + task.getId() + ": " + e.getMessage());
             task.setState(TaskState.TERMINATED);
         }
     }
@@ -557,7 +560,7 @@ public class Kernel {
      * Handle exception from a task
      */
     private void handleException(Task task) {
-        System.err.println("Task " + task.getId() + " caused an exception");
+        cse311.Logger.FileLogger.log("Task " + task.getId() + " caused an exception");
         // For now, terminate the task
         task.setState(TaskState.TERMINATED);
     }
@@ -571,7 +574,7 @@ public class Kernel {
         tasks.put(pid, task);
         scheduler.addTask(task);
 
-        System.out.println("Created task " + pid + " from " + elfPath);
+        cse311.Logger.FileLogger.log("Created task " + pid + " from " + elfPath);
         return task;
     }
 
@@ -584,7 +587,7 @@ public class Kernel {
         tasks.put(pid, task);
         scheduler.addTask(task);
 
-        System.out.println("Created task " + pid + " (" + name + ")");
+        cse311.Logger.FileLogger.log("Created task " + pid + " (" + name + ")");
         return task;
     }
 
@@ -598,7 +601,7 @@ public class Kernel {
             scheduler.removeTask(task);
             taskManager.cleanupTask(task);
             tasks.remove(pid);
-            System.out.println("Terminated task " + pid);
+            cse311.Logger.FileLogger.log("Terminated task " + pid);
         }
     }
 
@@ -634,7 +637,8 @@ public class Kernel {
                 // Check if the task can be woken up
                 if (canWakeTask(task)) {
                     task.setState(TaskState.READY);
-                    System.out.println("Woke up task " + task.getId());
+                    cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                            "Woke up task " + task.getId());
                 }
             }
         }
@@ -702,17 +706,17 @@ public class Kernel {
     // --- Execution Control Methods ---
     public void pause() {
         this.paused = true;
-        System.out.println("Kernel: Execution Paused.");
+        cse311.Logger.FileLogger.log("Kernel: Execution Paused.");
     }
 
     public void resume() {
         this.paused = false;
-        System.out.println("Kernel: Execution Resumed.");
+        cse311.Logger.FileLogger.log("Kernel: Execution Resumed.");
     }
 
     public void setExecutionSpeed(int delayMs) {
         this.executionDelayMs = delayMs;
-        System.out.println("Kernel: Speed set to " + delayMs + "ms delay.");
+        cse311.Logger.FileLogger.log("Kernel: Speed set to " + delayMs + "ms delay.");
     }
 
     public boolean isPaused() {
@@ -774,14 +778,14 @@ public class Kernel {
      */
     public void printStatus() {
         KernelStats stats = getStats();
-        System.out.println("=== Kernel Status ===");
-        System.out.println("Total tasks: " + stats.totalProcesses);
-        System.out.println("Running: " + stats.runningProcesses);
-        System.out.println("Ready: " + stats.readyProcesses);
-        System.out.println("Waiting: " + stats.waitingProcesses);
-        System.out.println("Terminated: " + stats.terminatedProcesses);
-        System.out.println("Scheduler: " + scheduler.getClass().getSimpleName());
-        System.out.println("====================");
+        cse311.Logger.FileLogger.log("=== Kernel Status ===");
+        cse311.Logger.FileLogger.log("Total tasks: " + stats.totalProcesses);
+        cse311.Logger.FileLogger.log("Running: " + stats.runningProcesses);
+        cse311.Logger.FileLogger.log("Ready: " + stats.readyProcesses);
+        cse311.Logger.FileLogger.log("Waiting: " + stats.waitingProcesses);
+        cse311.Logger.FileLogger.log("Terminated: " + stats.terminatedProcesses);
+        cse311.Logger.FileLogger.log("Scheduler: " + scheduler.getClass().getSimpleName());
+        cse311.Logger.FileLogger.log("====================");
     }
 
     /**

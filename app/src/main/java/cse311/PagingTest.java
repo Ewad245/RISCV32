@@ -8,7 +8,7 @@ import cse311.kernel.process.Task;
 public class PagingTest {
     public static void main(String[] args) {
         try {
-            System.out.println("=== Testing Paging Implementation ===");
+            cse311.Logger.FileLogger.log("=== Testing Paging Implementation ===");
 
             // Create computer with paging
             RV32Computer computer = new RV32Computer(64 * 1024 * 1024); // 64MB
@@ -27,28 +27,28 @@ public class PagingTest {
             Task task = computer.createTask(simpleProgram, "test_paging");
 
             if (task != null) {
-                System.out.println("✓ Successfully created task with paging");
-                System.out.println("Task ID: " + task.getId());
-                System.out.println("Task Name: " + task.getName());
-                System.out.println("Entry Point: 0x" + Integer.toHexString(task.getProgramCounter()));
-                System.out.println("Stack Base: 0x" + Integer.toHexString(task.getStackBase()));
+                cse311.Logger.FileLogger.log("✓ Successfully created task with paging");
+                cse311.Logger.FileLogger.log("Task ID: " + task.getId());
+                cse311.Logger.FileLogger.log("Task Name: " + task.getName());
+                cse311.Logger.FileLogger.log("Entry Point: 0x" + Integer.toHexString(task.getProgramCounter()));
+                cse311.Logger.FileLogger.log("Stack Base: 0x" + Integer.toHexString(task.getStackBase()));
 
                 // Test that address space was created
                 if (task.getMemoryContext() != null) {
-                    System.out.println("✓ Address space created successfully");
+                    cse311.Logger.FileLogger.log("✓ Address space created successfully");
                 } else {
-                    System.out.println("⚠ Address space not found (may be using legacy memory manager)");
+                    cse311.Logger.FileLogger.log("⚠ Address space not found (may be using legacy memory manager)");
                 }
 
             } else {
-                System.out.println("✗ Failed to create task");
+                cse311.Logger.FileLogger.log("✗ Failed to create task");
             }
 
-            System.out.println("=== Paging Test Complete ===");
+            cse311.Logger.FileLogger.log("=== Paging Test Complete ===");
 
         } catch (Exception e) {
-            System.err.println("Error during paging test: " + e.getMessage());
-            e.printStackTrace();
+            cse311.Logger.FileLogger.log("Error during paging test: " + e.getMessage());
+            cse311.Logger.FileLogger.log(e);
         }
     }
 }

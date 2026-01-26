@@ -10,23 +10,23 @@ import cse311.kernel.scheduler.*;
 public class KernelSchedulerTest {
 
     public static void main(String[] args) {
-        System.out.println("=== Kernel Scheduler Comparison ===\n");
+        cse311.Logger.FileLogger.log("=== Kernel Scheduler Comparison ===\n");
 
         try {
             testRoundRobinScheduler();
-            System.out.println();
+            cse311.Logger.FileLogger.log("");
             testCooperativeScheduler();
-            System.out.println();
+            cse311.Logger.FileLogger.log("");
             testPriorityScheduler();
 
         } catch (Exception e) {
-            System.err.println("Test error: " + e.getMessage());
-            e.printStackTrace();
+            cse311.Logger.FileLogger.log("Test error: " + e.getMessage());
+            cse311.Logger.FileLogger.log(e);
         }
     }
 
     private static void testRoundRobinScheduler() throws Exception {
-        System.out.println("--- Round Robin Scheduler Test ---");
+        cse311.Logger.FileLogger.log("--- Round Robin Scheduler Test ---");
 
         // Create kernel with round robin scheduler
         SimpleMemory memory = new SimpleMemory(64 * 1024 * 1024);
@@ -41,7 +41,7 @@ public class KernelSchedulerTest {
 
         // Print scheduler info
         RoundRobinScheduler scheduler = (RoundRobinScheduler) kernel.getScheduler();
-        System.out.println("Ready queue size: " + scheduler.getReadyQueueSize());
+        cse311.Logger.FileLogger.log("Ready queue size: " + scheduler.getReadyQueueSize());
 
         kernel.printStatus();
 
@@ -49,12 +49,12 @@ public class KernelSchedulerTest {
         runKernelBriefly(kernel, 1000);
 
         SchedulerStats stats = scheduler.getStats();
-        System.out.println("Scheduler stats: " + stats.totalSchedules + " schedules, " +
+        cse311.Logger.FileLogger.log("Scheduler stats: " + stats.totalSchedules + " schedules, " +
                 stats.contextSwitches + " context switches");
     }
 
     private static void testCooperativeScheduler() throws Exception {
-        System.out.println("--- Cooperative Scheduler Test ---");
+        cse311.Logger.FileLogger.log("--- Cooperative Scheduler Test ---");
 
         SimpleMemory memory = new SimpleMemory(64 * 1024 * 1024);
         MemoryManager memManager = new MemoryManager(memory);
@@ -65,19 +65,19 @@ public class KernelSchedulerTest {
         createTestTasks(kernel, "COOP");
 
         CooperativeScheduler scheduler = (CooperativeScheduler) kernel.getScheduler();
-        System.out.println("Task count: " + scheduler.getTaskCount());
+        cse311.Logger.FileLogger.log("Task count: " + scheduler.getTaskCount());
 
         kernel.printStatus();
 
         runKernelBriefly(kernel, 1000);
 
         SchedulerStats stats = scheduler.getStats();
-        System.out.println("Scheduler stats: " + stats.totalSchedules + " schedules, " +
+        cse311.Logger.FileLogger.log("Scheduler stats: " + stats.totalSchedules + " schedules, " +
                 stats.contextSwitches + " context switches");
     }
 
     private static void testPriorityScheduler() throws Exception {
-        System.out.println("--- Priority Scheduler Test ---");
+        cse311.Logger.FileLogger.log("--- Priority Scheduler Test ---");
 
         SimpleMemory memory = new SimpleMemory(64 * 1024 * 1024);
         MemoryManager memManager = new MemoryManager(memory);
@@ -97,22 +97,22 @@ public class KernelSchedulerTest {
         t3.setPriority(1);
 
         PriorityScheduler scheduler = (PriorityScheduler) kernel.getScheduler();
-        System.out.println("Highest priority: " + scheduler.getHighestPriority());
-        System.out.println("Ready queue size: " + scheduler.getReadyQueueSize());
+        cse311.Logger.FileLogger.log("Highest priority: " + scheduler.getHighestPriority());
+        cse311.Logger.FileLogger.log("Ready queue size: " + scheduler.getReadyQueueSize());
 
         kernel.printStatus();
 
         runKernelBriefly(kernel, 1000);
 
         SchedulerStats stats = scheduler.getStats();
-        System.out.println("Scheduler stats: " + stats.totalSchedules + " schedules, " +
+        cse311.Logger.FileLogger.log("Scheduler stats: " + stats.totalSchedules + " schedules, " +
                 stats.contextSwitches + " context switches");
     }
 
     private static void createTestTasks(Kernel kernel, String prefix) throws Exception {
         for (int i = 1; i <= 3; i++) {
             Task task = kernel.createTask(createTestProgram(), prefix + "_TASK_" + i);
-            System.out.println("Created task: " + task.getName());
+            cse311.Logger.FileLogger.log("Created task: " + task.getName());
         }
     }
 

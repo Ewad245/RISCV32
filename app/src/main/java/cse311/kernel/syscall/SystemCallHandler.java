@@ -158,7 +158,8 @@ public class SystemCallHandler {
 
                 default:
                     handled = false;
-                    System.err.println("Unknown system call: " + syscallNumber + " from task " + task.getId());
+                    cse311.Logger.FileLogger
+                            .log("Unknown system call: " + syscallNumber + " from task " + task.getId());
                     result = -1; // ENOSYS
             }
 
@@ -176,7 +177,7 @@ public class SystemCallHandler {
             }
 
         } catch (Exception e) {
-            System.err.println("System call error: " + e.getMessage());
+            cse311.Logger.FileLogger.log("System call error: " + e.getMessage());
             cpu.setRegister(10, -1); // Return error
         }
     }
@@ -208,11 +209,11 @@ public class SystemCallHandler {
                 }
 
                 String output = sb.toString();
-                System.out.print(output);
+                cse311.Logger.FileLogger.print(output);
                 return output.length();
 
             } catch (Exception e) {
-                System.err.println("Write error: " + e.getMessage());
+                cse311.Logger.FileLogger.log("Write error: " + e.getMessage());
                 return -1;
             }
         }
@@ -247,7 +248,7 @@ public class SystemCallHandler {
                 return 1;
 
             } catch (Exception e) {
-                System.err.println("Read error: " + e.getMessage());
+                cse311.Logger.FileLogger.log("Read error: " + e.getMessage());
                 return -1;
             }
         }
@@ -278,8 +279,8 @@ public class SystemCallHandler {
             return child.getId();
 
         } catch (Exception e) {
-            System.err.println("SYS_FORK: Failed: " + e.getMessage());
-            e.printStackTrace();
+            cse311.Logger.FileLogger.log("SYS_FORK: Failed: " + e.getMessage());
+            cse311.Logger.FileLogger.log(e);
             return -1; // Return error code to parent
         }
     }
@@ -310,7 +311,7 @@ public class SystemCallHandler {
                         // WRITE to the parent's memory space at address 'statusAddr'
                         manager.writeWord(statusAddr, exitCode);
                     } catch (Exception e) {
-                        System.err.println("SYS_WAIT: Failed to write exit code to user memory.");
+                        cse311.Logger.FileLogger.log("SYS_WAIT: Failed to write exit code to user memory.");
                         return -1;
                     }
                 }
@@ -350,7 +351,7 @@ public class SystemCallHandler {
         ProcessMemoryCoordinator coordinator = kernel.getMemoryCoordinator();
 
         if (coordinator == null) {
-            System.err.println("SYS_EXEC: Memory Coordinator not initialized.");
+            cse311.Logger.FileLogger.log("SYS_EXEC: Memory Coordinator not initialized.");
             return -1;
         }
 
@@ -388,7 +389,7 @@ public class SystemCallHandler {
         try {
             elfData = Files.readAllBytes(Paths.get(fullPath));
         } catch (Exception e) {
-            System.err.println("SYS_EXEC: Failed to read file: " + fullPath);
+            cse311.Logger.FileLogger.log("SYS_EXEC: Failed to read file: " + fullPath);
             return -1;
         }
 
@@ -401,7 +402,7 @@ public class SystemCallHandler {
             try {
                 elfEndAddress = ElfLoader.calculateRequiredMemory(elfData);
             } catch (ElfException e) {
-                System.err.println("SYS_EXEC: Bad ELF format: " + e.getMessage());
+                cse311.Logger.FileLogger.log("SYS_EXEC: Bad ELF format: " + e.getMessage());
                 return -1;
             }
 
@@ -435,7 +436,7 @@ public class SystemCallHandler {
             return argvList.size();
 
         } catch (Exception e) {
-            System.err.println("SYS_EXEC: Failed: " + e.getMessage());
+            cse311.Logger.FileLogger.log("SYS_EXEC: Failed: " + e.getMessage());
             task.setState(TaskState.TERMINATED);
             return -1;
         }
@@ -453,7 +454,7 @@ public class SystemCallHandler {
                 sb.append((char) b);
             }
 
-            System.out.println(sb.toString());
+            cse311.Logger.FileLogger.log(sb.toString());
             return length;
 
         } catch (Exception e) {
@@ -478,7 +479,7 @@ public class SystemCallHandler {
     private int handleSleep(Task task, int milliseconds) {
         long wakeupTime = System.currentTimeMillis() + milliseconds;
         task.waitFor(WaitReason.TIMER, wakeupTime);
-        System.out.println("Task " + task.getId() + " sleeping for " + milliseconds + "ms");
+        cse311.Logger.FileLogger.log("Task " + task.getId() + " sleeping for " + milliseconds + "ms");
         return 0;
     }
 
@@ -504,13 +505,13 @@ public class SystemCallHandler {
 
                 // Add a safety break for very long or non-terminated strings
                 if (sb.length() > 4096) { // 4KB max path/arg length
-                    System.err.println("readStringFromTask: String too long or not terminated.");
+                    cse311.Logger.FileLogger.log("readStringFromTask: String too long or not terminated.");
                     return null;
                 }
             }
             return sb.toString();
         } catch (MemoryAccessException e) {
-            System.err.println("readStringFromTask: Memory access error at 0x" + Integer.toHexString(va));
+            cse311.Logger.FileLogger.log("readStringFromTask: Memory access error at 0x" + Integer.toHexString(va));
             return null;
         }
     }

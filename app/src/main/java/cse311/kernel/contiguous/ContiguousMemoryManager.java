@@ -163,7 +163,8 @@ public class ContiguousMemoryManager extends MemoryManager {
             // Check for External Fragmentation
             int totalFree = freeList.stream().mapToInt(b -> b.size).sum();
             if (totalFree >= size) {
-                System.out.println("External Fragmentation detected. Compacting...");
+                cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                        "External Fragmentation detected. Compacting...");
                 compact();
                 startAddr = allocator.findRegion(freeList, size);
             }
@@ -194,7 +195,9 @@ public class ContiguousMemoryManager extends MemoryManager {
         }
 
         if (parent == null || child == null) {
-            System.err.println("Contiguous Copy Failed: PIDs not found (P:" + parentPid + ", C:" + childPid + ")");
+            cse311.Logger.FileLogger
+                    .log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                            "Contiguous Copy Failed: PIDs not found (P:" + parentPid + ", C:" + childPid + ")");
             return false;
         }
 
@@ -210,7 +213,8 @@ public class ContiguousMemoryManager extends MemoryManager {
             System.arraycopy(ram, parent.start, ram, child.start, bytesToCopy);
             return true;
         } catch (Exception e) {
-            System.err.println("Contiguous Copy Error: " + e.getMessage());
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "Contiguous Copy Error: " + e.getMessage());
             return false;
         }
     }

@@ -178,9 +178,9 @@ public class MainController implements Initializable {
             java.io.PrintStream printStream = new java.io.PrintStream(guiOut, true);
             System.setOut(printStream);
             System.setErr(printStream);
-            System.out.println("GUI: Console Output Redirected.");
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.INFO, "GUI: Console Output Redirected.");
         } catch (Exception e) {
-            e.printStackTrace();
+            cse311.Logger.FileLogger.log(e);
         }
     }
 

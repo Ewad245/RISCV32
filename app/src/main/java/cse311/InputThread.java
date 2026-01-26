@@ -22,7 +22,8 @@ public class InputThread {
                 }
             }
         } catch (Exception e) {
-            System.err.println("InputThread error: " + e.getMessage());
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "InputThread error: " + e.getMessage());
         }
     }
 
