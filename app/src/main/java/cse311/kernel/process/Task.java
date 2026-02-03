@@ -5,6 +5,7 @@ import java.util.List;
 
 import cse311.RV32Cpu;
 import cse311.WaitReason;
+import cse311.kernel.fs.FileDescriptor;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -44,6 +45,10 @@ public class Task {
     private transient Object memoryContext;
 
     private volatile boolean killed = false;
+
+    // File System Support
+    public static final int NOFILE = 16; // Max open files per task
+    private FileDescriptor[] openFiles = new FileDescriptor[NOFILE];
 
     /**
      * Creates a new task with the specified ID and stack size.
@@ -482,5 +487,46 @@ public class Task {
      */
     public int getActiveHartId() {
         return activeHartId.get();
+    }
+
+    // --- File Descriptor Support ---
+
+    /**
+     * Allocates a new file descriptor index.
+     * 
+     * @return fd index (3..15) or -1 if full
+     */
+    public int allocFd(FileDescriptor fd) {
+        // 0, 1, 2 are reserved for Stdin/Stdout/Stderr
+        for (int i = 3; i < NOFILE; i++) {
+            if (openFiles[i] == null) {
+                openFiles[i] = fd;
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public FileDescriptor getFileDescriptor(int fd) {
+        if (fd < 0 || fd >= NOFILE)
+            return null;
+        return openFiles[fd];
+    }
+
+    public void closeFd(int fd) {
+        if (fd < 0 || fd >= NOFILE || openFiles[fd] == null)
+            return;
+        openFiles[fd].close();
+        openFiles[fd] = null;
+    }
+
+    // Copy FDs for Fork (dup)
+    public void dupFileDescriptors(Task parent) {
+        for (int i = 0; i < NOFILE; i++) {
+            if (parent.openFiles[i] != null) {
+                this.openFiles[i] = parent.openFiles[i];
+                this.openFiles[i].refCount++;
+            }
+        }
     }
 }

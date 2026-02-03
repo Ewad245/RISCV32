@@ -2,6 +2,13 @@
     "configurations": [
         {
             "type": "java",
+            "name": "Mkfs",
+            "request": "launch",
+            "mainClass": "cse311.Mkfs",
+            "projectName": "app"
+        },
+        {
+            "type": "java",
             "request": "attach",
             "name": "Attach to Gradle",
             "hostName": "localhost",

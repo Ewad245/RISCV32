@@ -11,6 +11,8 @@ import cse311.Exception.MemoryAccessException;
 import cse311.kernel.Kernel;
 import cse311.kernel.NonContiguous.paging.AddressSpace;
 import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
+import cse311.kernel.fs.FileDescriptor;
+import cse311.kernel.fs.Inode;
 import cse311.kernel.memory.ProcessMemoryCoordinator;
 import cse311.kernel.process.ProgramInfo;
 import cse311.kernel.process.Task;
@@ -40,6 +42,10 @@ public class SystemCallHandler {
     public static final int SYS_DEBUG_PRINT = 1000;
     public static final int SYS_GET_TIME = 1001;
     public static final int SYS_SLEEP = 1002;
+
+    // File system calls
+    public static final int SYS_OPEN = 56; // openat/open
+    public static final int SYS_CLOSE = 57;
 
     public SystemCallHandler(Kernel kernel) {
         this.kernel = kernel;
@@ -117,6 +123,14 @@ public class SystemCallHandler {
                     result = handleSleep(task, arg0);
                     break;
 
+                case SYS_OPEN:
+                    result = handleOpen(task, arg0, arg1); // arg0=pathAddr, arg1=flags
+                    break;
+
+                case SYS_CLOSE:
+                    result = handleClose(task, arg0); // arg0=fd
+                    break;
+
                 // Add case to switch(syscallNum)
                 case 20: // SYS_SHM_OPEN (a0 = key) -> returns shmid (frame index)
                     // Get parameter from register a0 (register 10) of task
@@ -191,7 +205,8 @@ public class SystemCallHandler {
     }
 
     private int handleWrite(Task task, int fd, int bufferAddr, int count) {
-        if (fd == 1 || fd == 2) { // stdout or stderr
+        // 1. Console Output (Stdout/Stderr)
+        if (fd == 1 || fd == 2) {
             try {
                 // Read string from task memory
                 StringBuilder sb = new StringBuilder();
@@ -217,11 +232,24 @@ public class SystemCallHandler {
                 return -1;
             }
         }
-        return -1; // Unsupported file descriptor
+
+        // 2. File Output
+        FileDescriptor file = task.getFileDescriptor(fd);
+        if (file == null || !file.writable)
+            return -1;
+
+        if (file.type == FileDescriptor.FD_INODE) {
+            // NOTE: You need to implement writei in FileSystem to support writing!
+            // For now, we can return error or implement it.
+            // int n = kernel.getFileSystem().writei(file.inode, ...);
+            return -1; // Write not yet fully implemented in FS
+        }
+        return -1;
     }
 
     private int handleRead(RV32Cpu cpu, Task task, int fd, int bufferAddr, int count) {
-        if (fd == 0) { // stdin
+        // 1. Console Input (Stdin)
+        if (fd == 0) {
             try {
                 // Check if UART has data
                 int status = kernel.getMemory().readByte(MemoryManager.UART_STATUS);
@@ -252,7 +280,32 @@ public class SystemCallHandler {
                 return -1;
             }
         }
-        return -1; // Unsupported file descriptor
+
+        // 2. File Input
+        FileDescriptor file = task.getFileDescriptor(fd);
+        if (file == null || !file.readable)
+            return -1;
+
+        if (file.type == FileDescriptor.FD_INODE) {
+            byte[] tempBuf = new byte[count];
+
+            // Read from Inode using current offset
+            int n = kernel.getFileSystem().readi(file.inode, tempBuf, file.offset, count);
+
+            if (n > 0) {
+                // Copy data to user memory
+                for (int i = 0; i < n; i++) {
+                    try {
+                        kernel.getMemory().writeByte(bufferAddr + i, tempBuf[i]);
+                    } catch (Exception e) {
+                        return -1;
+                    }
+                }
+                file.offset += n; // Advance cursor
+            }
+            return n;
+        }
+        return -1;
     }
 
     private int handleYield(Task task) {
@@ -359,7 +412,6 @@ public class SystemCallHandler {
         String path = readStringFromTask(task, pathPtr);
         if (path == null)
             return -1;
-        String fullPath = ".." + App.file_seperator + "User_Program_ELF" + App.file_seperator + path + ".elf";
 
         // Read argv (Logic remains same, just using generic memory)
         List<String> argvList = new ArrayList<>();
@@ -384,13 +436,37 @@ public class SystemCallHandler {
             return -1;
         }
 
-        // 2. Load the file bytes
-        byte[] elfData;
-        try {
-            elfData = Files.readAllBytes(Paths.get(fullPath));
-        } catch (Exception e) {
-            cse311.Logger.FileLogger.log("SYS_EXEC: Failed to read file: " + fullPath);
-            return -1;
+        // 2. Load the file bytes - first try fs.img, then fall back to host filesystem
+        byte[] elfData = null;
+
+        // Try loading from mounted file system first
+        if (kernel.getFileSystem() != null) {
+            // Build fs.img path (e.g., "/sh" or "/init")
+            String fsPath = "/" + path;
+            Inode inode = kernel.getFileSystem().namei(fsPath);
+
+            if (inode != null && inode.type == Inode.T_FILE) {
+                elfData = new byte[inode.size];
+                int bytesRead = kernel.getFileSystem().readi(inode, elfData, 0, inode.size);
+                if (bytesRead != inode.size) {
+                    cse311.Logger.FileLogger.log("SYS_EXEC: Partial read from fs.img: " + fsPath);
+                    elfData = null; // Fall back to host filesystem
+                } else {
+                    cse311.Logger.FileLogger.log("SYS_EXEC: Loaded " + bytesRead + " bytes from fs.img: " + fsPath);
+                }
+            }
+        }
+
+        // Fall back to host filesystem if not found in fs.img
+        if (elfData == null) {
+            String fullPath = ".." + App.file_seperator + "User_Program_ELF" + App.file_seperator + path + ".elf";
+            try {
+                elfData = Files.readAllBytes(Paths.get(fullPath));
+                cse311.Logger.FileLogger.log("SYS_EXEC: Loaded from host filesystem: " + fullPath);
+            } catch (Exception e) {
+                cse311.Logger.FileLogger.log("SYS_EXEC: Failed to read file: " + fullPath);
+                return -1;
+            }
         }
 
         try {
@@ -514,5 +590,46 @@ public class SystemCallHandler {
             cse311.Logger.FileLogger.log("readStringFromTask: Memory access error at 0x" + Integer.toHexString(va));
             return null;
         }
+    }
+
+    // --- File System Handlers ---
+
+    private int handleOpen(Task task, int pathAddr, int mode) {
+        // 1. Read path string from user memory
+        String path = readStringFromTask(task, pathAddr);
+        if (path == null)
+            return -1;
+
+        // 2. Resolve path to Inode
+        if (kernel.getFileSystem() == null)
+            return -1;
+        Inode ip = kernel.getFileSystem().namei(path);
+        if (ip == null) {
+            // Optional: If O_CREATE flag is set, create the file here (allocInode)
+            return -1;
+        }
+
+        // 3. Create FileDescriptor
+        FileDescriptor fd = new FileDescriptor(ip, true, (mode & 1) != 0);
+
+        // 4. Allocate FD in task
+        int fdIdx = task.allocFd(fd);
+        if (fdIdx < 0) {
+            // Table full
+            return -1;
+        }
+
+        return fdIdx;
+    }
+
+    private int handleClose(Task task, int fd) {
+        if (fd < 0 || fd >= Task.NOFILE)
+            return -1;
+        FileDescriptor file = task.getFileDescriptor(fd);
+        if (file == null)
+            return -1;
+
+        task.closeFd(fd);
+        return 0;
     }
 }

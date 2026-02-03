@@ -36,22 +36,27 @@ public class App {
             kernel.getScheduler().setTimeSlice(3);
 
             // --------------------------------------------------------
-            // 3. LAUNCH INIT PROCESS (PID 1)
+            // 3. MOUNT FILE SYSTEM
+            // --------------------------------------------------------
+            String imgPath = ".." + file_seperator + "fs.img";
+            File diskImage = new File(imgPath);
+            if (diskImage.exists()) {
+                kernel.mountFileSystem(imgPath);
+                cse311.Logger.FileLogger.log("Disk image 'fs.img' loaded.");
+            } else {
+                cse311.Logger.FileLogger.log("Warning: 'fs.img' not found. File system calls will fail.");
+                cse311.Logger.FileLogger.log("Run 'cse311.Mkfs' to generate the disk image.");
+            }
+
+            // --------------------------------------------------------
+            // 4. LAUNCH INIT PROCESS (PID 1)
             // Java Simulated Init Task or from ELF
             // --------------------------------------------------------
             cse311.Logger.FileLogger.log("Bootloader: Spawning Init process (PID 1)...");
-            // First Option: Simulated Init (Not tested yet)
-            // We only need to create InitTask manually.
-            // The InitTask code (InitTask.java) will automatically detect
-            // that the Shell is missing and spawn ShellTask for us.
-            // InitTask initTask = new InitTask(1, kernel);
-            // kernel.addTaskToScheduler(initTask);
 
-            // Second Option: Loading Init.elf
-            // Pass a filename (e.g., "init.elf"), we load it now.
-            // This is like adding a service to startup scripts.
-
-            String elfPath = ".." + file_seperator + "User_Program_ELF" + file_seperator + "init.elf";
+            // Load Init from ELF
+            String elfPath = "app" + file_seperator + "src" + file_seperator + "main" + file_seperator +
+                    "resources" + file_seperator + "user_programs" + file_seperator + "init.elf";
             cse311.Logger.FileLogger.log("Current working directory: " + System.getProperty("user.dir"));
             cse311.Logger.FileLogger.log("Looking for ELF at: " + elfPath);
             File f = new File(elfPath);
@@ -60,18 +65,19 @@ public class App {
             if (f.exists()) {
                 cse311.Logger.FileLogger.log("Bootloader: Pre-loading user ELF: " + elfPath);
                 kernel.createTask(elfPath);
+            } else {
+                // Fallback to old path for backwards compatibility
+                String oldPath = ".." + file_seperator + "User_Program_ELF" + file_seperator + "init.elf";
+                File oldFile = new File(oldPath);
+                if (oldFile.exists()) {
+                    cse311.Logger.FileLogger.log("Bootloader: Using legacy ELF path: " + oldPath);
+                    kernel.createTask(oldPath);
+                }
             }
-            // }
 
             // --------------------------------------------------------
-            // 4. START KERNEL
+            // 5. START KERNEL
             // --------------------------------------------------------
-            // This blocks forever in the mainLoop().
-            // 1. Scheduler picks InitTask -> InitTask spawns ShellTask
-            // 2. Scheduler picks ShellTask -> ShellTask prints "$" and waits for input
-            cse311.Logger.FileLogger.log("Bootloader: Starting Kernel scheduler...");
-            cse311.Logger.FileLogger.log("------------------------------------------");
-            kernel.start();
 
         } catch (NullPointerException e) {
             cse311.Logger.FileLogger.log("Path invalid: " + e.getMessage());

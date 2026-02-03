@@ -58,6 +58,7 @@ public class GuiApp extends Application {
     }
 
     private void initializeSimulation() {
+        String file_separator = System.getProperty("file.separator");
         // Same logic as App.java
         cse311.Logger.FileLogger.log("GUI: Initializing Simulation Hardware...");
 
@@ -72,10 +73,21 @@ public class GuiApp extends Application {
         kernel.getConfig().setTimeSlice(3);
         kernel.getScheduler().setTimeSlice(3);
 
+        // MOUNT FILE SYSTEM
+        String imgPath = ".." + file_separator + "fs.img";
+        File diskImage = new File(imgPath);
+        if (diskImage.exists()) {
+            kernel.mountFileSystem(imgPath);
+            cse311.Logger.FileLogger.log("GUI: Disk image '" + imgPath + "' mounted.");
+        } else {
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.INFO,
+                    "GUI: fs.img not found at " + imgPath + ". File system calls will fail.");
+        }
+
         // LAUNCH INIT PROCESS
-        String file_separator = System.getProperty("file.separator");
-        // Use "../User_Program_ELF" to point outside app folder
-        String elfPath = ".." + file_separator + "User_Program_ELF" + file_separator + "init.elf";
+        // Use user_programs folder inside resources
+        String elfPath = "app" + file_separator + "src" + file_separator + "main" + file_separator +
+                "resources" + file_separator + "user_programs" + file_separator + "init.elf";
         File f = new File(elfPath);
 
         cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
@@ -93,8 +105,22 @@ public class GuiApp extends Application {
                 cse311.Logger.FileLogger.log(e);
             }
         } else {
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
-                    "GUI: Error - init.elf NOT FOUND at " + f.getAbsolutePath());
+            // Fallback to old path for backwards compatibility
+            String oldPath = ".." + file_separator + "User_Program_ELF" + file_separator + "init.elf";
+            File oldFile = new File(oldPath);
+            if (oldFile.exists()) {
+                try {
+                    cse311.Logger.FileLogger.log("GUI: Using legacy ELF path: " + oldPath);
+                    kernel.createTask(oldPath);
+                    cse311.Logger.FileLogger.log("GUI: Init task created from legacy path.");
+                } catch (Exception e) {
+                    cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                            "GUI: Failed to create Init task: " + e.getMessage());
+                }
+            } else {
+                cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                        "GUI: Error - init.elf NOT FOUND at " + f.getAbsolutePath());
+            }
         }
     }
 

@@ -5,6 +5,7 @@ import cse311.Exception.BreakpointException;
 import cse311.kernel.scheduler.*;
 import cse311.kernel.syscall.*;
 import cse311.kernel.process.*;
+import cse311.kernel.fs.FileSystem;
 import cse311.kernel.NonContiguous.NonContiguousMemoryCoordinator;
 import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
 import cse311.kernel.NonContiguous.paging.PagingMapper;
@@ -28,6 +29,7 @@ public class Kernel {
     private final SystemCallHandler syscallHandler;
     private final KernelMemoryManager kernelMemory;
     private ProcessMemoryCoordinator memoryCoordinator;
+    private FileSystem fileSystem;
 
     // 1. I/O Wait Queue (FIFO)
     private final Queue<Task> ioWaitQueue = new ConcurrentLinkedQueue<>();
@@ -109,6 +111,21 @@ public class Kernel {
 
         cse311.Logger.FileLogger.log("RV32IM Java Kernel initialized");
         cse311.Logger.FileLogger.log("Scheduler: " + scheduler.getClass().getSimpleName());
+    }
+
+    /**
+     * Mount a file system from a disk image.
+     * This should be called by App/GuiApp after kernel creation.
+     */
+    public void mountFileSystem(String diskImagePath) {
+        try {
+            this.fileSystem = new FileSystem(diskImagePath);
+            cse311.Logger.FileLogger.log("FileSystem mounted: " + diskImagePath);
+        } catch (Exception e) {
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "Failed to mount FS: " + e.getMessage());
+            throw new RuntimeException("Could not mount file system", e);
+        }
     }
 
     /**
@@ -822,5 +839,9 @@ public class Kernel {
     public void setMemoryCoordinator(ProcessMemoryCoordinator memoryCoordinator) {
         this.memoryCoordinator = memoryCoordinator;
         this.taskManager.setMemoryCoordinator(memoryCoordinator);
+    }
+
+    public FileSystem getFileSystem() {
+        return fileSystem;
     }
 }
