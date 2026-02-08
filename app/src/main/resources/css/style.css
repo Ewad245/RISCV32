@@ -251,3 +251,55 @@
     -fx-arc-width: 3;
     -fx-arc-height: 3;
 }
+
+/* ========================================
+   Console/Terminal Styles (RichTextFX)
+   ======================================== */
+
+.console-area {
+    -fx-background-color: #1e1e1e;
+    -fx-font-family: "Courier New", "Consolas", monospace;
+    -fx-font-size: 13px;
+}
+
+.console-area .text {
+    -fx-fill: #d4d4d4;
+}
+
+/* RichTextFX uses .text for Text nodes */
+.console-area .caret {
+    -fx-stroke: #00ff00;
+}
+
+/* Style for user input text */
+.user-input {
+    -fx-fill: #4ec9b0;
+    -fx-font-weight: bold;
+}
+
+/* Style for kernel/system output */
+.kernel-output {
+    -fx-fill: #d4d4d4;
+}
+
+/* Style for errors */
+.kernel-error {
+    -fx-fill: #f14c4c;
+    -fx-font-weight: bold;
+}
+
+/* Style for warnings */
+.kernel-warning {
+    -fx-fill: #ce9178;
+}
+
+/* Style for success messages */
+.kernel-success {
+    -fx-fill: #6a9955;
+}
+
+/* Style for prompts */
+.shell-prompt {
+    -fx-fill: #569cd6;
+    -fx-font-weight: bold;
+}

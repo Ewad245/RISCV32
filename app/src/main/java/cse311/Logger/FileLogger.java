@@ -8,12 +8,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import cse311.App;
+import cse311.Constants.OSConstants;
 
 public class FileLogger {
-    private static Path path = Paths.get(".." + App.file_seperator + "LogFiles" + App.file_seperator + "log.txt");
+    private static Path path = Paths
+            .get(".." + OSConstants.file_seperator + "LogFiles" + OSConstants.file_seperator + "log.txt");
     private static Path exceptionPath = Paths
-            .get(".." + App.file_seperator + "LogFiles" + App.file_seperator + "exception_log.txt");
+            .get(".." + OSConstants.file_seperator + "LogFiles" + OSConstants.file_seperator + "exception_log.txt");
     private static OutputStream logOutputStream;
     private static OutputStream exceptionOutputStream;
     public static FileLogger instance;

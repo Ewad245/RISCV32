@@ -1,7 +1,7 @@
 package cse311.gui;
 
-import cse311.Enum.MemoryMode;
 import cse311.RV32Computer;
+import cse311.Constants.MemoryMode;
 import cse311.kernel.Kernel;
 import cse311.kernel.KernelConfig;
 import javafx.application.Application;

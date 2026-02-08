@@ -2,7 +2,7 @@ package cse311;
 
 import org.junit.jupiter.api.Test;
 
-import cse311.Enum.MemoryMode;
+import cse311.Constants.MemoryMode;
 
 import static org.junit.jupiter.api.Assertions.*;
 

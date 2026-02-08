@@ -3,14 +3,14 @@
  */
 package cse311;
 
-import cse311.Enum.MemoryMode;
+import cse311.Constants.MemoryMode;
+import cse311.Constants.OSConstants;
 import cse311.kernel.Kernel;
 import cse311.kernel.KernelConfig;
 import cse311.programs.InitTask;
 import java.io.File;
 
 public class App {
-    public static final String file_seperator = System.getProperty("file.separator");
 
     public static void main(String[] args) {
         cse311.Logger.FileLogger.log("==========================================");
@@ -38,7 +38,7 @@ public class App {
             // --------------------------------------------------------
             // 3. MOUNT FILE SYSTEM
             // --------------------------------------------------------
-            String imgPath = ".." + file_seperator + "fs.img";
+            String imgPath = ".." + OSConstants.file_seperator + "fs.img";
             File diskImage = new File(imgPath);
             if (diskImage.exists()) {
                 kernel.mountFileSystem(imgPath);
@@ -55,8 +55,10 @@ public class App {
             cse311.Logger.FileLogger.log("Bootloader: Spawning Init process (PID 1)...");
 
             // Load Init from ELF
-            String elfPath = "app" + file_seperator + "src" + file_seperator + "main" + file_seperator +
-                    "resources" + file_seperator + "user_programs" + file_seperator + "init.elf";
+            String elfPath = "app" + OSConstants.file_seperator + "src" + OSConstants.file_seperator + "main"
+                    + OSConstants.file_seperator +
+                    "resources" + OSConstants.file_seperator + "user_programs" + OSConstants.file_seperator
+                    + "init.elf";
             cse311.Logger.FileLogger.log("Current working directory: " + System.getProperty("user.dir"));
             cse311.Logger.FileLogger.log("Looking for ELF at: " + elfPath);
             File f = new File(elfPath);
@@ -67,7 +69,8 @@ public class App {
                 kernel.createTask(elfPath);
             } else {
                 // Fallback to old path for backwards compatibility
-                String oldPath = ".." + file_seperator + "User_Program_ELF" + file_seperator + "init.elf";
+                String oldPath = ".." + OSConstants.file_seperator + "User_Program_ELF" + OSConstants.file_seperator
+                        + "init.elf";
                 File oldFile = new File(oldPath);
                 if (oldFile.exists()) {
                     cse311.Logger.FileLogger.log("Bootloader: Using legacy ELF path: " + oldPath);

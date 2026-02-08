@@ -1,6 +1,6 @@
 package cse311;
 
-import cse311.Enum.MemoryMode;
+import cse311.Constants.MemoryMode;
 import cse311.kernel.Kernel;
 import cse311.kernel.NonContiguous.paging.*;
 import cse311.kernel.contiguous.AllocationStrategy;

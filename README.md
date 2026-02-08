@@ -42,6 +42,9 @@ This project uses **Gradle** (incompatible with Gradle < 8.0, supports Gradle 9.
 
 # Run the Simulator
 ./gradlew run
+
+# Debugging
+./gradlew run --debug-jvm
 ```
 
 ---

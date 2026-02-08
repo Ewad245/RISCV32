@@ -18,7 +18,7 @@ class RV32iComputerIntegrationTest {
     void setUp() {
         // We use the constructor that matches our memory mode manually
         // or recreate the computer wrapper if needed.
-        computer = new RV32Computer(8 * 1024 * 1024, 16, cse311.Enum.MemoryMode.CONTIGUOUS);
+        computer = new RV32Computer(8 * 1024 * 1024, 16, cse311.Constants.MemoryMode.CONTIGUOUS);
         kernel = computer.getKernel(); // Refreshed kernel from new computer
     }
 

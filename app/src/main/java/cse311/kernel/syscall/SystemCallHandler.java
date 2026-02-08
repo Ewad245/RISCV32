@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import cse311.*;
+import cse311.Constants.OSConstants;
 import cse311.Exception.ElfException;
 import cse311.Exception.MemoryAccessException;
 import cse311.kernel.Kernel;
@@ -33,10 +34,17 @@ public class SystemCallHandler {
     public static final int SYS_READ = 63;
     public static final int SYS_YIELD = 124;
     public static final int SYS_GETPID = 172;
-    public static final int SYS_FORK = 220;
+    public static final int SYS_CLONE = 220; // Replaces SYS_FORK; handles both fork and threads
     public static final int SYS_WAIT = 260;
     public static final int SYS_EXEC = 221;
     public static final int SYS_KILL = 129;
+
+    // Linux Clone Flags (Subset relevant to simulator)
+    public static final int CLONE_VM = 0x00000100; // Share memory (Thread vs Process)
+    public static final int CLONE_FS = 0x00000200; // Share filesystem info
+    public static final int CLONE_FILES = 0x00000400; // Share open file descriptors
+    public static final int CLONE_SIGHAND = 0x00000800; // Share signal handlers
+    public static final int CLONE_THREAD = 0x00010000; // Place in same thread group
 
     // Custom system calls
     public static final int SYS_DEBUG_PRINT = 1000;
@@ -91,8 +99,14 @@ public class SystemCallHandler {
                     result = handleGetPid(task);
                     break;
 
-                case SYS_FORK:
-                    result = handleFork(task);
+                case SYS_CLONE:
+                    // a0 = flags (e.g., CLONE_VM | CLONE_THREAD)
+                    // a1 = child_stack (if 0, use parent's stack)
+                    int cloneFlags = registers[10];
+                    int cloneStack = registers[11];
+
+                    result = handleClone(task, cloneFlags, cloneStack);
+                    // Parent receives Child's PID, Child receives 0 (set in handleClone)
                     break;
 
                 case SYS_WAIT:
@@ -318,23 +332,76 @@ public class SystemCallHandler {
         return task.getId();
     }
 
-    private int handleFork(Task task) {
-        // System.out.println("SYS_FORK: Task " + task.getId() + " (" + task.getName() +
-        // ") requesting fork.");
-
+    /**
+     * Handles the Linux clone() system call.
+     * This is the underlying implementation for both fork() and pthread_create().
+     * 
+     * @param parent       The parent task
+     * @param flags        Clone flags (CLONE_VM, CLONE_THREAD, etc.)
+     * @param userStackPtr Stack pointer for the child (0 = use parent's stack)
+     * @return Child's PID to parent, 0 to child, or -1 on failure
+     */
+    private int handleClone(Task parent, int flags, int userStackPtr) {
         try {
-            // The heavy lifting of copying memory and state is done by TaskManager
-            Task child = kernel.getTaskManager().forkTask(task);
+            boolean shareMemory = (flags & CLONE_VM) != 0;
+            boolean shareThread = (flags & CLONE_THREAD) != 0;
 
-            // To the PARENT, fork returns the child's PID
-            // System.out.println("SYS_FORK: Parent " + task.getId() + " received child PID
-            // " + child.getId());
-            return child.getId();
+            // 1. Create the new Task
+            Task child = new Task(
+                    kernel.getNextPid(),
+                    parent.getName() + (shareMemory ? "_th" : "_fk"),
+                    parent.getProgramCounter(), // Child starts at same instruction as parent
+                    parent.getStackSize(),
+                    parent.getStackBase(),
+                    parent.getProgramInfo());
+
+            // 2. Memory Handling (The 'Linux' distinction)
+            if (shareMemory) {
+                // THREAD: Shared Virtual Memory
+                // Both tasks point to the exact same MemoryContext
+                child.setMemoryContext(parent.getMemoryContext());
+            } else {
+                // PROCESS (FORK): Copy Virtual Memory
+                // Use TaskManager's forkTask logic for deep copy
+                Task forkedChild = kernel.getTaskManager().forkTask(parent);
+                return forkedChild.getId();
+            }
+
+            // 3. Register State Copy (for threads)
+            System.arraycopy(parent.getRegisters(), 0, child.getRegisters(), 0, 32);
+
+            // 4. Set Child Return Value to 0 (POSIX convention)
+            // Parent gets PID, Child gets 0
+            child.getRegisters()[10] = 0;
+
+            // 5. Handle Stack Pointer
+            // If a custom stack was provided (standard for threads), set it
+            if (userStackPtr != 0) {
+                child.getRegisters()[2] = userStackPtr;
+            }
+
+            // 6. PC Adjustment
+            // CRITICAL: Advance Child's PC so it doesn't execute 'ecall' again
+            child.setProgramCounter(child.getProgramCounter() + 4);
+
+            // 7. Thread group relationship
+            if (shareThread) {
+                child.setTgid(parent.getTgid()); // Same thread group
+            }
+            parent.addChild(child);
+
+            // 8. Schedule
+            child.setState(TaskState.READY);
+            kernel.addTaskToScheduler(child);
+
+            cse311.Logger.FileLogger.log("Clone: Created " + (shareMemory ? "thread" : "process")
+                    + " PID " + child.getId() + " for Parent " + parent.getId());
+
+            return child.getId(); // Return PID to Parent
 
         } catch (Exception e) {
-            cse311.Logger.FileLogger.log("SYS_FORK: Failed: " + e.getMessage());
-            cse311.Logger.FileLogger.log(e);
-            return -1; // Return error code to parent
+            cse311.Logger.FileLogger.log("Clone failed: " + e.getMessage());
+            return -1;
         }
     }
 
@@ -459,7 +526,8 @@ public class SystemCallHandler {
 
         // Fall back to host filesystem if not found in fs.img
         if (elfData == null) {
-            String fullPath = ".." + App.file_seperator + "User_Program_ELF" + App.file_seperator + path + ".elf";
+            String fullPath = ".." + OSConstants.file_seperator + "User_Program_ELF" + OSConstants.file_seperator + path
+                    + ".elf";
             try {
                 elfData = Files.readAllBytes(Paths.get(fullPath));
                 cse311.Logger.FileLogger.log("SYS_EXEC: Loaded from host filesystem: " + fullPath);

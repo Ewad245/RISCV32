@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import javafx.geometry.Insets?>
-<?import javafx.scene.control.TextArea?>
 <?import javafx.scene.layout.VBox?>
+<?import org.fxmisc.richtext.StyleClassedTextArea?>
 
 <fx:root type="javafx.scene.layout.VBox" 
          xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1"
@@ -12,7 +12,7 @@
         <Insets top="5" right="5" bottom="5" left="5"/>
     </padding>
 
-    <TextArea fx:id="outputArea" editable="false" wrapText="true" VBox.vgrow="ALWAYS"
-              style="-fx-font-family: 'Courier New'; -fx-control-inner-background: black; -fx-text-fill: white;"/>
+    <StyleClassedTextArea fx:id="outputArea" wrapText="true" VBox.vgrow="ALWAYS"
+                          styleClass="console-area"/>
 
 </fx:root>

@@ -1,5 +1,6 @@
 package cse311;
 
+import cse311.Constants.OSConstants;
 import cse311.kernel.fs.*;
 import java.io.File;
 import java.io.FileInputStream;
@@ -37,7 +38,9 @@ public class Mkfs {
     public static void main(String[] args) throws Exception {
         // 1. Setup paths
         String fsPath = "fs.img";
-        File userDir = new File("app/src/main/resources/user_programs");
+        File userDir = new File("app" + OSConstants.file_seperator + "src" + OSConstants.file_seperator + "main"
+                + OSConstants.file_seperator +
+                "resources" + OSConstants.file_seperator + "user_programs");
 
         System.out.println("Creating " + fsPath + " with blocks=" + NBLOCKS);
 
