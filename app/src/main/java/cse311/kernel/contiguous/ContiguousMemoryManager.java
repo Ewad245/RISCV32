@@ -1,8 +1,10 @@
 package cse311.kernel.contiguous;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Collections;
 
@@ -33,6 +35,10 @@ public class ContiguousMemoryManager extends MemoryManager {
     // Synchronized lists for thread safety during allocation/free/compact
     private List<MemoryBlock> freeList = new ArrayList<>();
     private List<ProcessBlock> allocatedList = new ArrayList<>();
+
+    // Track PIDs that share another process's memory (CLONE_VM threads)
+    // These should NOT free the underlying memory when they exit
+    private final Set<Integer> sharedPids = new HashSet<>();
 
     private CpuContext getContext() {
         return contexts.computeIfAbsent(Thread.currentThread().getId(), k -> new CpuContext());
@@ -220,6 +226,13 @@ public class ContiguousMemoryManager extends MemoryManager {
     }
 
     public synchronized void freeMemory(int pid) {
+        // If this PID is a shared thread (CLONE_VM), just remove the alias
+        // Do NOT free the physical memory — the parent still owns it
+        if (sharedPids.remove(pid)) {
+            allocatedList.removeIf(b -> b.pid == pid);
+            return;
+        }
+
         allocatedList.removeIf(b -> {
             if (b.pid == pid) {
                 freeList.add(new MemoryBlock(b.start, b.size));
@@ -228,6 +241,23 @@ public class ContiguousMemoryManager extends MemoryManager {
             return false;
         });
         mergeHoles();
+    }
+
+    /**
+     * Register a child PID to share the parent's memory block (for CLONE_VM).
+     * The child gets the same Base/Limit registers but does NOT own the memory.
+     */
+    public synchronized void registerSharedBlock(int childPid, int parentPid) {
+        for (ProcessBlock pb : allocatedList) {
+            if (pb.pid == parentPid) {
+                // Create an alias block pointing to the same physical region
+                allocatedList.add(new ProcessBlock(childPid, pb.start, pb.size));
+                sharedPids.add(childPid);
+                return;
+            }
+        }
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                "registerSharedBlock: Parent PID " + parentPid + " not found in allocatedList");
     }
 
     public synchronized void compact() {

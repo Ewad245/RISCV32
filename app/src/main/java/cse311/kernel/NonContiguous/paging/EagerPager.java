@@ -52,7 +52,18 @@ public class EagerPager implements Pager {
             throw new MemoryAccessException("Page not found after mapping");
         }
 
-        as.updatePageAccess(vpn, false); // Update accessed bit
+        // Enforce memory protection (PTE permission flags)
+        AddressSpace.PageTableEntry pte = as.getPTEInternal(vpn);
+        if (pte != null && pte.V) {
+            if (access == VmAccess.WRITE && !pte.W) {
+                throw new MemoryAccessException("Segmentation Fault: Write to Read-Only page at VPN " + vpn);
+            }
+            if (access == VmAccess.EXEC && !pte.X) {
+                throw new MemoryAccessException("Segmentation Fault: Execute on Non-Executable page at VPN " + vpn);
+            }
+        }
+
+        as.updatePageAccess(vpn, access == VmAccess.WRITE);
         repl.onAccess(frame);
         return frame;
     }

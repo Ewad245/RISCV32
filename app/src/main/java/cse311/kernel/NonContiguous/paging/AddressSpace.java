@@ -1,11 +1,13 @@
 package cse311.kernel.NonContiguous.paging;
 
 import cse311.Exception.MemoryAccessException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class AddressSpace {
     // Root of a 2-level page table (Sv32-like): 4KB pages
     final int pid;
     final PageDirectory root;
+    private final AtomicInteger refCount = new AtomicInteger(1);
 
     AddressSpace(int pid) {
         this.pid = pid;
@@ -42,6 +44,21 @@ public final class AddressSpace {
     // Helper methods for pager - Abstract interface for paging policies
     public int getPid() {
         return pid;
+    }
+
+    /** Increment ref count (e.g. for CLONE_VM). Returns new count. */
+    public int incrementRefCount() {
+        return refCount.incrementAndGet();
+    }
+
+    /** Decrement ref count. Returns new count. */
+    public int decrementRefCount() {
+        return refCount.decrementAndGet();
+    }
+
+    /** Get current ref count. */
+    public int getRefCount() {
+        return refCount.get();
     }
 
     /**
@@ -141,7 +158,12 @@ public final class AddressSpace {
         if (l2Table == null)
             return false;
 
-        PageTableEntry pte = new PageTableEntry();
+        // Reuse existing PTE object to reduce GC pressure
+        PageTableEntry pte = l2Table.entries[l2Index];
+        if (pte == null) {
+            pte = new PageTableEntry();
+            l2Table.entries[l2Index] = pte;
+        }
         pte.ppn = frame;
         pte.V = true;
         pte.R = true;
@@ -149,8 +171,8 @@ public final class AddressSpace {
         pte.X = exec;
         pte.A = false;
         pte.D = false;
+        pte.shared = false;
 
-        l2Table.entries[l2Index] = pte;
         return true;
     }
 

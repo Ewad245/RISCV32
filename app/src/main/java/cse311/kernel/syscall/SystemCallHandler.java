@@ -46,10 +46,14 @@ public class SystemCallHandler {
     public static final int CLONE_SIGHAND = 0x00000800; // Share signal handlers
     public static final int CLONE_THREAD = 0x00010000; // Place in same thread group
 
+    // Standard Linux RISC-V system call
+    public static final int SYS_NANOSLEEP = 101;
+
     // Custom system calls
     public static final int SYS_DEBUG_PRINT = 1000;
     public static final int SYS_GET_TIME = 1001;
-    public static final int SYS_SLEEP = 1002;
+    // @Deprecated - Use SYS_NANOSLEEP instead
+    // public static final int SYS_SLEEP = 1002;
 
     // File system calls
     public static final int SYS_OPEN = 56; // openat/open
@@ -105,7 +109,7 @@ public class SystemCallHandler {
                     int cloneFlags = registers[10];
                     int cloneStack = registers[11];
 
-                    result = handleClone(task, cloneFlags, cloneStack);
+                    result = handleClone(cpu, task, cloneFlags, cloneStack);
                     // Parent receives Child's PID, Child receives 0 (set in handleClone)
                     break;
 
@@ -133,8 +137,10 @@ public class SystemCallHandler {
                     result = handleGetTime(task);
                     break;
 
-                case SYS_SLEEP:
-                    result = handleSleep(task, arg0);
+                case SYS_NANOSLEEP:
+                    // a0 = pointer to requested time struct
+                    // a1 = pointer to remaining time struct (output, can be ignored)
+                    result = handleNanoSleep(task, arg0, arg1);
                     break;
 
                 case SYS_OPEN:
@@ -341,7 +347,7 @@ public class SystemCallHandler {
      * @param userStackPtr Stack pointer for the child (0 = use parent's stack)
      * @return Child's PID to parent, 0 to child, or -1 on failure
      */
-    private int handleClone(Task parent, int flags, int userStackPtr) {
+    private int handleClone(RV32Cpu cpu, Task parent, int flags, int userStackPtr) {
         try {
             boolean shareMemory = (flags & CLONE_VM) != 0;
             boolean shareThread = (flags & CLONE_THREAD) != 0;
@@ -360,6 +366,23 @@ public class SystemCallHandler {
                 // THREAD: Shared Virtual Memory
                 // Both tasks point to the exact same MemoryContext
                 child.setMemoryContext(parent.getMemoryContext());
+
+                // Increment AddressSpace refCount to prevent premature destruction
+                // when the parent exits before its child threads
+                if (kernel.getMemory() instanceof PagedMemoryManager) {
+                    PagedMemoryManager pmm = (PagedMemoryManager) kernel.getMemory();
+                    AddressSpace as = pmm.getAddressSpace(parent.getId());
+                    if (as != null) {
+                        as.incrementRefCount();
+                        // Register the child PID to the same AddressSpace
+                        pmm.registerSharedAddressSpace(child.getId(), as);
+                    }
+                } else if (kernel.getMemory() instanceof cse311.kernel.contiguous.ContiguousMemoryManager) {
+                    // Register child to share parent's Base/Limit memory block
+                    cse311.kernel.contiguous.ContiguousMemoryManager cmm = (cse311.kernel.contiguous.ContiguousMemoryManager) kernel
+                            .getMemory();
+                    cmm.registerSharedBlock(child.getId(), parent.getId());
+                }
             } else {
                 // PROCESS (FORK): Copy Virtual Memory
                 // Use TaskManager's forkTask logic for deep copy
@@ -370,19 +393,34 @@ public class SystemCallHandler {
             // 3. Register State Copy (for threads)
             System.arraycopy(parent.getRegisters(), 0, child.getRegisters(), 0, 32);
 
+            child.dupFileDescriptors(parent);
+
             // 4. Set Child Return Value to 0 (POSIX convention)
             // Parent gets PID, Child gets 0
             child.getRegisters()[10] = 0;
 
             // 5. Handle Stack Pointer
             // If a custom stack was provided (standard for threads), set it
-            if (userStackPtr != 0) {
+            if (userStackPtr == 0) {
+                // If stack is 0, it means "fork": use the Parent's current SP
+                // Register 2 is the Stack Pointer (SP) in RISC-V
+                int parentSP = parent.getRegisters()[2];
+                child.getRegisters()[2] = parentSP;
+            } else {
+                // If stack is not 0, it means "thread/clone": use the provided stack
                 child.getRegisters()[2] = userStackPtr;
             }
 
             // 6. PC Adjustment
             // CRITICAL: Advance Child's PC so it doesn't execute 'ecall' again
-            child.setProgramCounter(child.getProgramCounter() + 4);
+            int currentPC = parent.getProgramCounter();
+            int nextPC = currentPC + 4;
+
+            // Wake up at the instruction AFTER ecall
+            child.setProgramCounter(nextPC);
+
+            // The scheduler will save the state of the Parent NOW.
+            parent.setProgramCounter(nextPC);
 
             // 7. Thread group relationship
             if (shareThread) {
@@ -620,11 +658,54 @@ public class SystemCallHandler {
         return (int) System.currentTimeMillis();
     }
 
-    private int handleSleep(Task task, int milliseconds) {
-        long wakeupTime = System.currentTimeMillis() + milliseconds;
-        task.waitFor(WaitReason.TIMER, wakeupTime);
-        cse311.Logger.FileLogger.log("Task " + task.getId() + " sleeping for " + milliseconds + "ms");
-        return 0;
+    /**
+     * Handles the Linux nanosleep() system call.
+     * Reads a timespec struct from memory and sleeps for the specified duration.
+     * 
+     * @param task   The task requesting sleep
+     * @param reqPtr Pointer to struct timespec (requested sleep time)
+     * @param remPtr Pointer to struct timespec (remaining time if interrupted,
+     *               ignored)
+     * @return 0 on success, negative error code on failure
+     */
+    private int handleNanoSleep(Task task, int reqPtr, int remPtr) {
+        MemoryManager mem = kernel.getMemory();
+
+        try {
+            // 1. Read the `timespec` struct from the address in a0 (reqPtr)
+            // Standard Layout: { long tv_sec; long tv_nsec; }
+
+            // Read seconds (offset 0)
+            int tv_sec = mem.readWord(reqPtr);
+
+            // Read nanoseconds (offset 4)
+            int tv_nsec = mem.readWord(reqPtr + 4);
+
+            // 2. Validate input (nanoseconds must be 0-999999999)
+            if (tv_nsec < 0 || tv_nsec >= 1_000_000_000 || tv_sec < 0) {
+                return -22; // -EINVAL (Invalid argument in Linux)
+            }
+
+            // 3. Convert to milliseconds for Java-based Scheduler
+            // (sec * 1000) + (nsec / 1,000,000)
+            long durationMs = (tv_sec * 1000L) + (tv_nsec / 1_000_000L);
+
+            // 4. Perform the sleep logic
+            long wakeupTime = System.currentTimeMillis() + durationMs;
+            task.waitFor(WaitReason.TIMER, wakeupTime);
+
+            cse311.Logger.FileLogger.log("SYS_NANOSLEEP: Task " + task.getId() +
+                    " sleeping for " + durationMs + "ms " +
+                    "(Sec: " + tv_sec + ", NSec: " + tv_nsec + ")");
+
+            // 5. Return 0 on success
+            return 0;
+
+        } catch (MemoryAccessException e) {
+            cse311.Logger.FileLogger.log("SYS_NANOSLEEP: Failed to read struct from 0x" +
+                    Integer.toHexString(reqPtr));
+            return -14; // -EFAULT (Bad address in Linux)
+        }
     }
 
     /**

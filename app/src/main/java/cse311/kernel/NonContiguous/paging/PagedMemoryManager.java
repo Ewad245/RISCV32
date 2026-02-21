@@ -70,10 +70,29 @@ public class PagedMemoryManager extends MemoryManager {
         return spaces.get(pid);
     }
 
+    /**
+     * Register a child PID to an existing shared AddressSpace (for CLONE_VM).
+     * This allows the child to be looked up by PID for context switching.
+     */
+    public synchronized void registerSharedAddressSpace(int childPid, AddressSpace as) {
+        spaces.put(childPid, as);
+    }
+
     public synchronized void destroyAddressSpace(int pid) {
         AddressSpace as = spaces.get(pid);
         if (as == null)
             return;
+
+        // Decrement reference count (for CLONE_VM shared address spaces)
+        // Only free memory when the last reference is released
+        if (as.decrementRefCount() > 0) {
+            // Other threads/processes still using this AddressSpace
+            spaces.remove(pid);
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                    "PagedMemoryManager: Detached PID " + pid + " from shared AddressSpace (refCount="
+                            + as.getRefCount() + ")");
+            return;
+        }
 
         // 1. Iterate over the Page Directory (Level 1)
         for (int i = 0; i < 1024; i++) {
@@ -206,7 +225,6 @@ public class PagedMemoryManager extends MemoryManager {
         int frame = pager.ensureResident(current, va, VmAccess.WRITE);
 
         int pa = (frame << 12) | (va & 0xFFF);
-        super.writeWord(pa, v);
         super.writeWord(pa, v);
     }
 
@@ -363,6 +381,17 @@ public class PagedMemoryManager extends MemoryManager {
 
     public void setFrameOwner(int frame, FrameOwner owner) {
         reverseMap[frame] = owner;
+    }
+
+    /**
+     * Get the reference count for a frame.
+     * Used by DemandPager to avoid evicting shared pages.
+     */
+    public int getFrameRefCount(int frame) {
+        if (frame >= 0 && frame < totalFrames) {
+            return frameRefCount[frame];
+        }
+        return 0;
     }
 
     // ---- Debug helpers ----

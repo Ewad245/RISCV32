@@ -2,6 +2,7 @@ package cse311.gui;
 
 import cse311.RV32Computer;
 import cse311.Constants.MemoryMode;
+import cse311.Constants.OSConstants;
 import cse311.kernel.Kernel;
 import cse311.kernel.KernelConfig;
 import javafx.application.Application;
@@ -10,6 +11,9 @@ import javafx.scene.Scene;
 import javafx.stage.Stage;
 
 import java.io.File;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.nio.file.Paths;
 
 public class GuiApp extends Application {
 
@@ -57,7 +61,7 @@ public class GuiApp extends Application {
         primaryStage.show();
     }
 
-    private void initializeSimulation() {
+    private void initializeSimulation() throws URISyntaxException {
         String file_separator = System.getProperty("file.separator");
         // Same logic as App.java
         cse311.Logger.FileLogger.log("GUI: Initializing Simulation Hardware...");
@@ -86,8 +90,10 @@ public class GuiApp extends Application {
 
         // LAUNCH INIT PROCESS
         // Use user_programs folder inside resources
-        String elfPath = "app" + file_separator + "src" + file_separator + "main" + file_separator +
-                "resources" + file_separator + "user_programs" + file_separator + "init.elf";
+        String resourcePath = "user_programs/init";
+
+        URL resourceUrl = getClass().getClassLoader().getResource(resourcePath);
+        String elfPath = Paths.get(resourceUrl.toURI()).toString();
         File f = new File(elfPath);
 
         cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,

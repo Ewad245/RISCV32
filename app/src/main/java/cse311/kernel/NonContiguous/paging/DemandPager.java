@@ -29,7 +29,7 @@ public class DemandPager implements Pager {
             // If Out Of Memory (OOM), we must evict a victim frame
             if (frame < 0) {
                 // 1. Pick a victim frame from ANY process (Global replacement)
-                frame = repl.pickVictim(i -> true);
+                frame = repl.pickVictim(i -> mm.getFrameRefCount(i) == 1);
 
                 if (frame >= 0) {
                     // 2. Identify the owner of this victim frame
@@ -90,6 +90,17 @@ public class DemandPager implements Pager {
 
         if (frame < 0) {
             throw new MemoryAccessException("Page not found after mapping");
+        }
+
+        // Enforce memory protection (PTE permission flags)
+        AddressSpace.PageTableEntry pte = as.getPTEInternal(vpn);
+        if (pte != null && pte.V) {
+            if (access == VmAccess.WRITE && !pte.W) {
+                throw new MemoryAccessException("Segmentation Fault: Write to Read-Only page at VPN " + vpn);
+            }
+            if (access == VmAccess.EXEC && !pte.X) {
+                throw new MemoryAccessException("Segmentation Fault: Execute on Non-Executable page at VPN " + vpn);
+            }
         }
 
         // Update access tracking

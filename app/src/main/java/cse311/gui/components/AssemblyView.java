@@ -99,7 +99,11 @@ public class AssemblyView extends VBox {
                     setText(item.assembly);
                     setStyle("-fx-font-weight: bold; -fx-text-fill: black; -fx-background-color: transparent;");
                 } else {
-                    setText(String.format("    %x:        %08x        %s", item.address, item.code, item.assembly));
+                    // Use 4-digit hex for compressed (16-bit) instructions, 8-digit for standard
+                    String hexCode = (item.code <= 0xFFFF && item.code >= 0)
+                            ? String.format("%04x", item.code)
+                            : String.format("%08x", item.code);
+                    setText(String.format("    %x:        %s        %s", item.address, hexCode, item.assembly));
 
                     if (item.address == currentPc) {
                         setStyle("-fx-background-color: #d4e157; -fx-text-fill: black;"); // Highlight
@@ -192,7 +196,8 @@ public class AssemblyView extends VBox {
 
         int listIndex = 0;
 
-        for (int addr = start; addr < end; addr += 4) {
+        int addr = start;
+        while (addr < end) {
             // Check for Symbol Label
             if (symbolMap != null && symbolMap.containsKey(addr)) {
                 String symName = symbolMap.get(addr);
@@ -202,14 +207,35 @@ public class AssemblyView extends VBox {
             }
 
             try {
-                // Read from task memory
-                int code = memory.debugReadWord(addr, pid);
+                // Read lower 16 bits first to check for compressed instruction
+                int lower16 = memory.debugReadWord(addr, pid) & 0xFFFF;
+
                 String asm;
-                if (code == 0) {
+                int code;
+                int step;
+
+                if (lower16 == 0) {
+                    // Zero instruction
+                    code = memory.debugReadWord(addr, pid);
                     asm = ".word 0";
+                    step = (code == 0) ? 4 : 4; // If whole word is 0, step 4
+                    // But check if only lower half is 0 (compressed NOP-like)
+                    if ((lower16 & 0x3) != 0x3) {
+                        step = 2;
+                        code = lower16;
+                    }
+                } else if ((lower16 & 0x3) != 0x3) {
+                    // Compressed (16-bit) instruction
+                    code = lower16;
+                    asm = Disassembler.disassembleCompressed(lower16, addr);
+                    step = 2;
                 } else {
+                    // Standard (32-bit) instruction
+                    code = memory.debugReadWord(addr, pid);
                     asm = Disassembler.disassemble(code, addr);
+                    step = 4;
                 }
+
                 asm = asm.replace(",", "");
 
                 if (asm.contains("ecall")) {
@@ -221,10 +247,12 @@ public class AssemblyView extends VBox {
                 // Map Address -> List Index
                 addressToIndexMap.put(addr, listIndex);
                 listIndex++;
+                addr += step;
 
             } catch (Exception e) {
                 instructions.add(new InstructionItem(addr, 0, "???", false));
                 listIndex++;
+                addr += 2; // Step by 2 on error to avoid skipping compressed instructions
             }
         }
     }

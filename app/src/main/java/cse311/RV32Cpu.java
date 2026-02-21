@@ -28,6 +28,7 @@ public class RV32Cpu {
     private int pc = 0;
     // private int[] instruction;
     private static final int INSTRUCTION_SIZE = 4; // 32-bit instructions
+    private int lastInstructionSize = 4; // Tracks size of current instruction (2 for RVC, 4 for standard)
 
     // Privilege levels
     public static final int PRIVILEGE_USER = 0; // U-mode
@@ -339,10 +340,10 @@ public class RV32Cpu {
             // displayRegisters();
         } catch (MemoryAccessException e) {
             // Handle memory access exception using the handleException method
-            handleException(7, pc - INSTRUCTION_SIZE); // 7 = store/AMO access fault
+            handleException(7, pc - lastInstructionSize); // 7 = store/AMO access fault
         } catch (Exception e) {
             // Handle other exceptions using the handleException method
-            handleException(2, pc - INSTRUCTION_SIZE); // 2 = illegal instruction
+            handleException(2, pc - lastInstructionSize); // 2 = illegal instruction
             cse311.Logger.FileLogger.log(e); // Log the exception for debugging
         }
     }
@@ -489,25 +490,37 @@ public class RV32Cpu {
             throw new cse311.Exception.BreakpointException("Breakpoint hit at " + Integer.toHexString(pc));
         }
 
-        // Read 32-bit instruction from memory at PC
         int instruction = 0;
 
-        // Read 4 bytes and combine them
         try {
+            // Step 1: Read the lower 16 bits (2 bytes) at PC
             byte byte0 = memory.readByte(pc);
             byte byte1 = memory.readByte(pc + 1);
-            byte byte2 = memory.readByte(pc + 2);
-            byte byte3 = memory.readByte(pc + 3);
+            int lower16 = ((byte1 & 0xFF) << 8) | (byte0 & 0xFF);
 
-            // Combine bytes into 32-bit instruction
-            instruction = (byte3 & 0xFF) << 24
-                    | (byte2 & 0xFF) << 16
-                    | (byte1 & 0xFF) << 8
-                    | (byte0 & 0xFF);
+            // Step 2: Check bits [1:0] to determine instruction length
+            if ((lower16 & 0x3) != 0x3) {
+                // --- COMPRESSED (16-bit) instruction ---
+                // Expand to 32-bit equivalent using the decompressor
+                instruction = RVCDecompressor.decompress(lower16);
+                lastInstructionSize = 2;
+                pc += 2;
+            } else {
+                // --- STANDARD (32-bit) instruction ---
+                // Read the upper 16 bits
+                byte byte2 = memory.readByte(pc + 2);
+                byte byte3 = memory.readByte(pc + 3);
 
-            // Increment PC by instruction size (4 bytes)
-            pc += INSTRUCTION_SIZE;
+                instruction = (byte3 & 0xFF) << 24
+                        | (byte2 & 0xFF) << 16
+                        | (byte1 & 0xFF) << 8
+                        | (byte0 & 0xFF);
 
+                lastInstructionSize = 4;
+                pc += INSTRUCTION_SIZE;
+            }
+        } catch (cse311.Exception.BreakpointException e) {
+            throw e; // Re-throw breakpoint exceptions
         } catch (Exception e) {
             throw new MemoryAccessException("Failed to fetch instruction at PC: " + pc);
         }
@@ -617,7 +630,7 @@ public class RV32Cpu {
                             regWrite = true;
                         } else {
                             // Illegal instruction
-                            handleException(2, pc - INSTRUCTION_SIZE);
+                            handleException(2, pc - lastInstructionSize);
                         }
                         break;
                     case 0b001: // SLL/MULH
@@ -898,7 +911,7 @@ public class RV32Cpu {
                         break;
                 }
                 if (takeBranch) {
-                    pc += imm_b - INSTRUCTION_SIZE;
+                    pc += imm_b - lastInstructionSize;
                 }
                 break;
 
@@ -910,7 +923,7 @@ public class RV32Cpu {
                     regWrite = true;
                 }
 
-                pc += imm_j - INSTRUCTION_SIZE;
+                pc += imm_j - lastInstructionSize;
                 break;
 
             case 0b1100111: // JALR
@@ -939,7 +952,7 @@ public class RV32Cpu {
             case 0b0010111: // AUIPC
                 aluSrcBSel = true;
                 lastImmVal = imm_u;
-                lastAluResult = pc - INSTRUCTION_SIZE + imm_u;
+                lastAluResult = pc - lastInstructionSize + imm_u;
                 x[rd] = lastAluResult;
                 regWrite = true;
                 break;
@@ -957,7 +970,7 @@ public class RV32Cpu {
                         // Return from M-mode trap
                         if (privilegeMode != PRIVILEGE_MACHINE) {
                             // Illegal instruction exception if executed in lower privilege mode
-                            handleException(2, pc - INSTRUCTION_SIZE);
+                            handleException(2, pc - lastInstructionSize);
                         } else {
                             returnFromException(PRIVILEGE_MACHINE);
                         }
@@ -965,7 +978,7 @@ public class RV32Cpu {
                         // Return from S-mode trap
                         if (privilegeMode < PRIVILEGE_SUPERVISOR) {
                             // Illegal instruction exception if executed in U-mode
-                            handleException(2, pc - INSTRUCTION_SIZE);
+                            handleException(2, pc - lastInstructionSize);
                         } else {
                             returnFromException(PRIVILEGE_SUPERVISOR);
                         }

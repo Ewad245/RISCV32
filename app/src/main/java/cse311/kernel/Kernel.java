@@ -2,6 +2,8 @@ package cse311.kernel;
 
 import cse311.*;
 import cse311.Exception.BreakpointException;
+import cse311.Logger.FileLogger;
+import cse311.Logger.FileLogger.LogLevel;
 import cse311.kernel.scheduler.*;
 import cse311.kernel.syscall.*;
 import cse311.kernel.process.*;
@@ -733,7 +735,7 @@ public class Kernel {
 
     public void setExecutionSpeed(int delayMs) {
         this.executionDelayMs = delayMs;
-        cse311.Logger.FileLogger.log("Kernel: Speed set to " + delayMs + "ms delay.");
+        FileLogger.log(LogLevel.DEBUG, "Kernel: Speed set to " + delayMs + "ms delay.");
     }
 
     public boolean isPaused() {

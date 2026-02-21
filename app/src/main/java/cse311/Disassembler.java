@@ -3,7 +3,7 @@ package cse311;
 /**
  * RISC-V Disassembler
  * Converts 32-bit machine code into human-readable assembly.
- * Supports RV32I + M-extension.
+ * Supports RV32I + M-extension + RVC (Compressed).
  */
 public class Disassembler {
 
@@ -13,6 +13,208 @@ public class Disassembler {
             "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7",
             "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"
     };
+
+    /**
+     * Disassemble a 16-bit compressed instruction into human-readable assembly.
+     * 
+     * @param inst16 The 16-bit compressed instruction
+     * @param pc     The program counter of this instruction
+     * @return Human-readable assembly string
+     */
+    public static String disassembleCompressed(int inst16, int pc) {
+        try {
+            inst16 = inst16 & 0xFFFF;
+            int quadrant = inst16 & 0x3;
+            int funct3 = (inst16 >> 13) & 0x7;
+
+            switch (quadrant) {
+                case 0: // Quadrant 0
+                    switch (funct3) {
+                        case 0: { // C.ADDI4SPN
+                            int rd = ((inst16 >> 2) & 0x7) + 8;
+                            int nzuimm = ((inst16 >> 6) & 0x1) << 2
+                                    | ((inst16 >> 5) & 0x1) << 3
+                                    | ((inst16 >> 11) & 0x3) << 4
+                                    | ((inst16 >> 7) & 0xF) << 6;
+                            return String.format("c.addi4spn %s, sp, %d", reg(rd), nzuimm);
+                        }
+                        case 2: { // C.LW
+                            int rd = ((inst16 >> 2) & 0x7) + 8;
+                            int rs1 = ((inst16 >> 7) & 0x7) + 8;
+                            int off = ((inst16 >> 6) & 0x1) << 2
+                                    | ((inst16 >> 10) & 0x7) << 3
+                                    | ((inst16 >> 5) & 0x1) << 6;
+                            return String.format("c.lw    %s, %d(%s)", reg(rd), off, reg(rs1));
+                        }
+                        case 6: { // C.SW
+                            int rs2 = ((inst16 >> 2) & 0x7) + 8;
+                            int rs1 = ((inst16 >> 7) & 0x7) + 8;
+                            int off = ((inst16 >> 6) & 0x1) << 2
+                                    | ((inst16 >> 10) & 0x7) << 3
+                                    | ((inst16 >> 5) & 0x1) << 6;
+                            return String.format("c.sw    %s, %d(%s)", reg(rs2), off, reg(rs1));
+                        }
+                    }
+                    break;
+
+                case 1: // Quadrant 1
+                    switch (funct3) {
+                        case 0: { // C.NOP / C.ADDI
+                            int rd = (inst16 >> 7) & 0x1F;
+                            int imm = ((inst16 >> 2) & 0x1F) | (((inst16 >> 12) & 0x1) << 5);
+                            imm = (imm << 26) >> 26;
+                            if (rd == 0)
+                                return "c.nop";
+                            return String.format("c.addi  %s, %d", reg(rd), imm);
+                        }
+                        case 1: { // C.JAL
+                            int off = decodeCJOffset(inst16);
+                            return String.format("c.jal   0x%x", pc + off);
+                        }
+                        case 2: { // C.LI
+                            int rd = (inst16 >> 7) & 0x1F;
+                            int imm = ((inst16 >> 2) & 0x1F) | (((inst16 >> 12) & 0x1) << 5);
+                            imm = (imm << 26) >> 26;
+                            return String.format("c.li    %s, %d", reg(rd), imm);
+                        }
+                        case 3: { // C.LUI / C.ADDI16SP
+                            int rd = (inst16 >> 7) & 0x1F;
+                            if (rd == 2) {
+                                int nzimm = ((inst16 >> 2) & 0x1) << 5
+                                        | ((inst16 >> 3) & 0x3) << 7
+                                        | ((inst16 >> 5) & 0x1) << 6
+                                        | ((inst16 >> 6) & 0x1) << 4
+                                        | ((inst16 >> 12) & 0x1) << 9;
+                                nzimm = (nzimm << 22) >> 22;
+                                return String.format("c.addi16sp sp, %d", nzimm);
+                            } else {
+                                int imm = ((inst16 >> 2) & 0x1F) | (((inst16 >> 12) & 0x1) << 5);
+                                imm = (imm << 26) >> 26;
+                                return String.format("c.lui   %s, 0x%x", reg(rd), imm & 0xFFFFF);
+                            }
+                        }
+                        case 4: { // ALU ops
+                            int funct2 = (inst16 >> 10) & 0x3;
+                            int rd = ((inst16 >> 7) & 0x7) + 8;
+                            switch (funct2) {
+                                case 0: {
+                                    int shamt = ((inst16 >> 2) & 0x1F) | (((inst16 >> 12) & 0x1) << 5);
+                                    return String.format("c.srli  %s, %d", reg(rd), shamt);
+                                }
+                                case 1: {
+                                    int shamt = ((inst16 >> 2) & 0x1F) | (((inst16 >> 12) & 0x1) << 5);
+                                    return String.format("c.srai  %s, %d", reg(rd), shamt);
+                                }
+                                case 2: {
+                                    int imm = ((inst16 >> 2) & 0x1F) | (((inst16 >> 12) & 0x1) << 5);
+                                    imm = (imm << 26) >> 26;
+                                    return String.format("c.andi  %s, %d", reg(rd), imm);
+                                }
+                                case 3: {
+                                    int funct1 = (inst16 >> 12) & 0x1;
+                                    int funct2b = (inst16 >> 5) & 0x3;
+                                    int rs2 = ((inst16 >> 2) & 0x7) + 8;
+                                    if (funct1 == 0) {
+                                        switch (funct2b) {
+                                            case 0:
+                                                return String.format("c.sub   %s, %s", reg(rd), reg(rs2));
+                                            case 1:
+                                                return String.format("c.xor   %s, %s", reg(rd), reg(rs2));
+                                            case 2:
+                                                return String.format("c.or    %s, %s", reg(rd), reg(rs2));
+                                            case 3:
+                                                return String.format("c.and   %s, %s", reg(rd), reg(rs2));
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                            break;
+                        }
+                        case 5: { // C.J
+                            int off = decodeCJOffset(inst16);
+                            return String.format("c.j     0x%x", pc + off);
+                        }
+                        case 6: { // C.BEQZ
+                            int rs1 = ((inst16 >> 7) & 0x7) + 8;
+                            int off = decodeCBOffset(inst16);
+                            return String.format("c.beqz  %s, 0x%x", reg(rs1), pc + off);
+                        }
+                        case 7: { // C.BNEZ
+                            int rs1 = ((inst16 >> 7) & 0x7) + 8;
+                            int off = decodeCBOffset(inst16);
+                            return String.format("c.bnez  %s, 0x%x", reg(rs1), pc + off);
+                        }
+                    }
+                    break;
+
+                case 2: // Quadrant 2
+                    switch (funct3) {
+                        case 0: { // C.SLLI
+                            int rd = (inst16 >> 7) & 0x1F;
+                            int shamt = ((inst16 >> 2) & 0x1F) | (((inst16 >> 12) & 0x1) << 5);
+                            return String.format("c.slli  %s, %d", reg(rd), shamt);
+                        }
+                        case 2: { // C.LWSP
+                            int rd = (inst16 >> 7) & 0x1F;
+                            int off = ((inst16 >> 2) & 0x3) << 6
+                                    | ((inst16 >> 4) & 0x7) << 2
+                                    | ((inst16 >> 12) & 0x1) << 5;
+                            return String.format("c.lwsp  %s, %d(sp)", reg(rd), off);
+                        }
+                        case 4: { // C.JR / C.MV / C.EBREAK / C.JALR / C.ADD
+                            int rd = (inst16 >> 7) & 0x1F;
+                            int rs2 = (inst16 >> 2) & 0x1F;
+                            int bit12 = (inst16 >> 12) & 0x1;
+                            if (bit12 == 0) {
+                                if (rs2 == 0)
+                                    return String.format("c.jr    %s", reg(rd));
+                                return String.format("c.mv    %s, %s", reg(rd), reg(rs2));
+                            } else {
+                                if (rs2 == 0 && rd == 0)
+                                    return "c.ebreak";
+                                if (rs2 == 0)
+                                    return String.format("c.jalr  %s", reg(rd));
+                                return String.format("c.add   %s, %s", reg(rd), reg(rs2));
+                            }
+                        }
+                        case 6: { // C.SWSP
+                            int rs2 = (inst16 >> 2) & 0x1F;
+                            int off = ((inst16 >> 7) & 0x3) << 6
+                                    | ((inst16 >> 9) & 0xF) << 2;
+                            return String.format("c.swsp  %s, %d(sp)", reg(rs2), off);
+                        }
+                    }
+                    break;
+            }
+            return String.format("c.unk   0x%04x", inst16);
+        } catch (Exception e) {
+            return "c.de-err";
+        }
+    }
+
+    // Helper: decode CJ-type offset for disassembler
+    private static int decodeCJOffset(int inst) {
+        int offset = ((inst >> 2) & 0x1) << 5
+                | ((inst >> 3) & 0x7) << 1
+                | ((inst >> 6) & 0x1) << 7
+                | ((inst >> 7) & 0x1) << 6
+                | ((inst >> 8) & 0x1) << 10
+                | ((inst >> 9) & 0x3) << 8
+                | ((inst >> 11) & 0x1) << 4
+                | ((inst >> 12) & 0x1) << 11;
+        return (offset << 20) >> 20;
+    }
+
+    // Helper: decode CB-type offset for disassembler
+    private static int decodeCBOffset(int inst) {
+        int offset = ((inst >> 2) & 0x1) << 5
+                | ((inst >> 3) & 0x3) << 1
+                | ((inst >> 5) & 0x3) << 6
+                | ((inst >> 10) & 0x3) << 3
+                | ((inst >> 12) & 0x1) << 8;
+        return (offset << 23) >> 23;
+    }
 
     public static String disassemble(int instruction, int pc) {
         try {
