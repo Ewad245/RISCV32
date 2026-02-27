@@ -530,7 +530,7 @@ public class Kernel {
             Task p = task.getParent();
             if (p.getState() == TaskState.WAITING &&
                     p.getWaitReason() == WaitReason.PROCESS_EXIT &&
-                    p.getWaitingForPid() == -1) {
+                    p.getWaitingForPid() <= 0) {
                 parent = p;
                 // Remove from generic wait queue if it was stored there
                 ioWaitQueue.remove(parent);

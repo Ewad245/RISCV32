@@ -114,7 +114,27 @@ public class SystemCallHandler {
                     break;
 
                 case SYS_WAIT:
-                    result = handleWait(cpu, task, arg0);
+                    // Compatibility with older syscall.c:
+                    // wait(status) -> args: a0=status
+                    // waitpid(pid, st) -> args: a0=pid, a1=status
+                    // Since wait() in old syscall.c passes status in a0 and 0 in a1,
+                    // we must check if arg0 looks like a pointer (large positive)
+                    // or a PID (small positive / -1).
+                    // In the simulator, PIDs are small integers, while user pointers are very large
+                    // positive numbers (0x40000000+ or heap).
+                    int waitPid;
+                    int waitStatusAddr;
+
+                    if (arg0 > 10000 || arg0 < -2) {
+                        // It's definitely a memory address (status pointer), so this is wait(&status)
+                        waitPid = -1; // Wait for ANY child
+                        waitStatusAddr = arg0;
+                    } else {
+                        // It's a PID, so this is waitpid(pid, &status)
+                        waitPid = arg0;
+                        waitStatusAddr = arg1;
+                    }
+                    result = handleWait(cpu, task, waitPid, waitStatusAddr);
                     break;
 
                 case SYS_EXEC:
@@ -412,15 +432,13 @@ public class SystemCallHandler {
             }
 
             // 6. PC Adjustment
-            // CRITICAL: Advance Child's PC so it doesn't execute 'ecall' again
             int currentPC = parent.getProgramCounter();
-            int nextPC = currentPC + 4;
 
-            // Wake up at the instruction AFTER ecall
-            child.setProgramCounter(nextPC);
+            // Wake up at the instruction AFTER ecall (which is already currentPC)
+            child.setProgramCounter(currentPC);
 
             // The scheduler will save the state of the Parent NOW.
-            parent.setProgramCounter(nextPC);
+            parent.setProgramCounter(currentPC);
 
             // 7. Thread group relationship
             if (shareThread) {
@@ -443,60 +461,83 @@ public class SystemCallHandler {
         }
     }
 
-    // Replace your handleWait stub
-    private int handleWait(RV32Cpu cpu, Task task, int statusAddr) {
+    /**
+     * Handles the wait4() system call (Linux RISC-V syscall 260).
+     *
+     * @param cpu        The CPU executing the syscall
+     * @param task       The calling (parent) task
+     * @param targetPid  -1 = wait for any child, >0 = wait for specific child PID
+     * @param statusAddr User-space pointer to write the exit code (0 = ignore)
+     * @return PID of the reaped child, 0 if blocking, or -1 on error
+     */
+    private int handleWait(RV32Cpu cpu, Task task, int targetPid, int statusAddr) {
 
-        boolean hasChildren = false;
-        for (Task child : task.getChildren()) {
-            if (child.getState() != TaskState.TERMINATED) {
-                hasChildren = true;
+        boolean hasMatchingChildren = false;
+
+        List<Task> children = task.getChildren();
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                "handleWait: Task " + task.getId() + " has " + children.size() + " children. targetPid=" + targetPid);
+
+        for (Task child : children) {
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG, "  - Checking child " + child.getId()
+                    + ", isThread=" + child.isThread() + ", state=" + child.getState());
+
+            // If waiting for a specific PID, skip non-matching children
+            if (targetPid > 0 && child.getId() != targetPid) {
+                continue;
             }
 
-            // Found a ZOMBIE child (it exited, but we haven't cleaned it up yet)
-            if (child.getState() == TaskState.TERMINATED) {
-                int childPid = child.getId();
+            // NEW: If waiting for ANY child (-1), DO NOT reap threads!
+            // Threads must be specifically joined via waitpid(tid)
+            if (targetPid <= 0 && child.isThread()) {
+                continue;
+            }
 
-                // 1. Retrieve the exit code the child passed to exit()
-                // (You need to add a getExitCode() method to your Task class)
+            if (child.getState() != TaskState.TERMINATED) {
+                hasMatchingChildren = true;
+            } else {
+                // Found a ZOMBIE child (it exited, but we haven't cleaned it up yet)
+                int childPid = child.getId();
                 int exitCode = child.getExitCode();
 
-                // 2. If the parent provided a valid pointer (not NULL/0), write the code there
-                if (statusAddr != 0) {
-                    try {
-                        // Get the memory manager
-                        MemoryManager manager = kernel.getMemory();
-
-                        // WRITE to the parent's memory space at address 'statusAddr'
-                        manager.writeWord(statusAddr, exitCode);
-                    } catch (Exception e) {
-                        cse311.Logger.FileLogger.log("SYS_WAIT: Failed to write exit code to user memory.");
-                        return -1;
-                    }
-                }
-
-                // 3. Cleanup: Remove child from parent's list and kernel list
+                // Cleanup: Remove child from parent's list and kernel list BEFORE writing
+                // memory
                 task.removeChild(child);
                 kernel.getTaskManager().cleanupTask(child);
                 kernel.getAllTasks().remove(child);
 
-                // System.out.println("SYS_WAIT: Cleaned up child " + childPid + " with exit
-                // code " + exitCode);
+                // Write exit code to user memory if a valid pointer was provided
+                if (statusAddr != 0) {
+                    try {
+                        MemoryManager manager = kernel.getMemory();
+                        manager.writeWord(statusAddr, exitCode);
+                    } catch (Exception e) {
+                        cse311.Logger.FileLogger.log("SYS_WAIT: Failed to write exit code to user memory.");
+                        return childPid; // Return the PID anyway, without writing status
+                    }
+                }
+
                 return childPid; // Return the PID of the child we just cleaned up
             }
         }
 
-        if (!hasChildren) {
-            return -1; // Error: No children to wait for
+        if (!hasMatchingChildren) {
+            return -1; // Error: No (matching) children to wait for
         }
 
         // Children exist, but none are dead yet. Block the parent.
-        task.waitFor(WaitReason.PROCESS_EXIT);
+        if (targetPid > 0) {
+            // Waiting for a specific PID — uses waitForTask which correctly
+            // sets waitingForPid so the kernel's childTerminationWaitQueue works
+            task.waitForTask(targetPid);
+        } else {
+            // Waiting for any child (pid == -1)
+            task.waitFor(WaitReason.PROCESS_EXIT);
+        }
 
         // Rewind PC by 4 so the 'ecall' instruction is executed again when we wake up.
         int retryPC = cpu.getProgramCounter() - 4;
         cpu.setProgramCounter(retryPC);
-
-        // Manually sync the Task PC for the retry
         task.setProgramCounter(retryPC);
 
         return 0; // Parent will retry this syscall when it wakes up
