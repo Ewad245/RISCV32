@@ -120,4 +120,12 @@ public class ContiguousMemoryCoordinator implements ProcessMemoryCoordinator {
 
         return sp;
     }
+
+    @Override
+    public boolean expandHeap(int pid, int currentBreak, int newBreak) throws MemoryAccessException {
+        // In contiguous mode, the entire memory block is pre-allocated.
+        // The SyscallHandler already verified that newBreak < stackBase.
+        // Therefore, the physical memory is already there.
+        return true;
+    }
 }

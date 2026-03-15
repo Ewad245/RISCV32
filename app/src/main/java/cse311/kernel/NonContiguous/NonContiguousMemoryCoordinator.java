@@ -4,6 +4,8 @@ import cse311.kernel.memory.ProcessMemoryCoordinator;
 import cse311.kernel.process.ProgramInfo;
 import cse311.MemoryManager;
 import cse311.Exception.MemoryAccessException;
+import cse311.kernel.NonContiguous.paging.AddressSpace;
+import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +35,15 @@ public class NonContiguousMemoryCoordinator implements ProcessMemoryCoordinator 
         // Non-contiguous systems usually put stack at a fixed high virtual address
         int stackBase = mapper.mapStack(pid, stackSize);
 
+        // 3. Set stack bounds on the AddressSpace for access validation
+        MemoryManager mem = mapper.getMemoryInterface();
+        if (mem instanceof PagedMemoryManager) {
+            AddressSpace as = ((PagedMemoryManager) mem).getAddressSpace(pid);
+            if (as != null) {
+                as.setStackBase(stackBase);
+            }
+        }
+
         return new MemoryLayout(stackBase, stackSize);
     }
 
@@ -46,7 +57,48 @@ public class NonContiguousMemoryCoordinator implements ProcessMemoryCoordinator 
         ElfLoader loader = new ElfLoader(mapper.getMemoryInterface());
         loader.loadElf(elfData);
 
-        return loader.getProgramInfo();
+        ProgramInfo info = loader.getProgramInfo();
+
+        // Set initial heap limit on the AddressSpace so the pager
+        // knows the valid heap boundary from the start.
+        // The initial heap limit is heapStart page-aligned upward.
+        MemoryManager mem = mapper.getMemoryInterface();
+        if (mem instanceof PagedMemoryManager) {
+            AddressSpace as = ((PagedMemoryManager) mem).getAddressSpace(pid);
+            if (as != null) {
+                int initialHeapLimit = (info.heapStart + 4095) & ~4095;
+                as.setHeapLimit(initialHeapLimit);
+            }
+        }
+
+        return info;
+    }
+
+    @Override
+    public boolean expandHeap(int pid, int currentBreak, int newBreak) throws MemoryAccessException {
+        MemoryManager mem = mapper.getMemoryInterface();
+        if (!(mem instanceof PagedMemoryManager)) {
+            // Non-paged non-contiguous (e.g. segmentation) — assume memory is available
+            return true;
+        }
+
+        PagedMemoryManager pmm = (PagedMemoryManager) mem;
+        AddressSpace as = pmm.getAddressSpace(pid);
+        if (as == null) {
+            return false;
+        }
+
+        // Calculate page-aligned boundaries
+        int newPageLimit = (newBreak + 4095) & ~4095;
+
+        // Update the AddressSpace's heap limit so the pager knows
+        // these addresses are valid for demand allocation
+        as.setHeapLimit(newPageLimit);
+
+        // Demand paging: no frames are allocated here.
+        // The DemandPager will allocate physical frames on first access,
+        // and isValidAccess() will now permit these addresses.
+        return true;
     }
 
     @Override

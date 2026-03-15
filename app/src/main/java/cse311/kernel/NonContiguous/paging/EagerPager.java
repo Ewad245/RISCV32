@@ -23,6 +23,15 @@ public class EagerPager implements Pager {
         int vpn = AddressSpace.getVPN(va);
 
         if (!as.isPagePresent(vpn)) {
+
+            // Security check: reject accesses to invalid memory regions
+            // (e.g. NULL pointer dereferences, gap between heap and stack)
+            if (!as.isValidAccess(va)) {
+                throw new MemoryAccessException(
+                        "Segmentation Fault: Illegal access at 0x" + Integer.toHexString(va)
+                                + " by PID " + as.getPid());
+            }
+
             // Need to allocate a new page
             int frame = mm.allocateFrame();
             if (frame < 0) {

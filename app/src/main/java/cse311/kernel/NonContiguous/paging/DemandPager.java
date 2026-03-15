@@ -23,6 +23,15 @@ public class DemandPager implements Pager {
         int vpn = AddressSpace.getVPN(va);
 
         if (!as.isPagePresent(vpn)) {
+
+            // Security check: reject accesses to invalid memory regions
+            // (e.g. NULL pointer dereferences, gap between heap and stack)
+            if (!as.isValidAccess(va)) {
+                throw new MemoryAccessException(
+                        "Segmentation Fault: Illegal access at 0x" + Integer.toHexString(va)
+                                + " by PID " + as.getPid());
+            }
+
             // Page fault - need to allocate a frame
             int frame = mm.allocateFrame();
 

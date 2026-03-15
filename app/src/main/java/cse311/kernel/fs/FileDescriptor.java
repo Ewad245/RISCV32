@@ -24,7 +24,10 @@ public class FileDescriptor {
     }
 
     public void close() {
-        // In a real OS, we would decrement Inode ref count here
-        // inode.ref--;
+        if (type == FD_INODE && inode != null) {
+            inode.ref--;
+            // In a full implementation, if inode.ref == 0 and inode.nlink == 0, free the
+            // inode and its blocks.
+        }
     }
 }

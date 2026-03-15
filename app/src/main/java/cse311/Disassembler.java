@@ -448,6 +448,53 @@ public class Disassembler {
                 return "fence";
             }
 
+            // Atomic (RV32A)
+            if (opcode == 0x2F) {
+                if (func3 == 2) {
+                    int funct5 = func7 >> 2;
+                    int aq = (func7 >> 1) & 1;
+                    int rl = func7 & 1;
+                    String suffix = ".w" + (aq == 1 && rl == 1 ? ".aqrl" : (aq == 1 ? ".aq" : (rl == 1 ? ".rl" : "")));
+                    String op = "amo?";
+                    switch (funct5) {
+                        case 0x02:
+                            return String.format("%-7s %s, (%s)", "lr" + suffix, reg(rd), reg(rs1));
+                        case 0x03:
+                            return String.format("%-7s %s, %s, (%s)", "sc" + suffix, reg(rd), reg(rs2), reg(rs1));
+                        case 0x01:
+                            op = "amoswap";
+                            break;
+                        case 0x00:
+                            op = "amoadd";
+                            break;
+                        case 0x04:
+                            op = "amoxor";
+                            break;
+                        case 0x0C:
+                            op = "amoand";
+                            break;
+                        case 0x08:
+                            op = "amoor";
+                            break;
+                        case 0x10:
+                            op = "amomin";
+                            break;
+                        case 0x14:
+                            op = "amomax";
+                            break;
+                        case 0x18:
+                            op = "amominu";
+                            break;
+                        case 0x1C:
+                            op = "amomaxu";
+                            break;
+                    }
+                    if (!op.equals("amo?")) {
+                        return String.format("%-7s %s, %s, (%s)", op + suffix, reg(rd), reg(rs2), reg(rs1));
+                    }
+                }
+            }
+
             return String.format("unk 0x%08x", instruction);
 
         } catch (Exception e) {

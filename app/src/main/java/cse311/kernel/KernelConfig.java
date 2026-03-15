@@ -11,7 +11,7 @@ public class KernelConfig {
         PRIORITY
     }
 
-    private int CORE_COUNT = 1;
+    private int CORE_COUNT = 5;
 
     // Scheduling configuration
     private SchedulerType schedulerType = SchedulerType.ROUND_ROBIN;

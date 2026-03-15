@@ -81,10 +81,15 @@ public class Mkfs {
                 System.out.println("Warning: No user_programs directory found at " + userDir.getAbsolutePath());
             }
 
-            // 5. Write the final free block bitmap (Optional for simple readonly, but good
-            // practice)
-            // We won't implement full bitmap logic here to save space, assuming
-            // the kernel trusts the superblock or rebuilds usage on mount.
+            // 5. Write the final free block bitmap
+            // This is required for our balloc() implementation in FileSystem.java
+            System.out.println("Writing free block bitmap... Used blocks: " + freeblock);
+            byte[] bitmap = new byte[BSIZE * nbitmap];
+            for (int i = 0; i < freeblock; i++) {
+                bitmap[i / 8] |= (1 << (i % 8)); // Mark as used
+            }
+            disk.seek((long) bmapstart * BSIZE);
+            disk.write(bitmap);
 
             System.out.println("File System created successfully.");
         }

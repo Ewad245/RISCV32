@@ -48,6 +48,7 @@ public class SystemCallHandler {
 
     // Standard Linux RISC-V system call
     public static final int SYS_NANOSLEEP = 101;
+    public static final int SYS_BRK = 214;
 
     // Custom system calls
     public static final int SYS_DEBUG_PRINT = 1000;
@@ -56,8 +57,16 @@ public class SystemCallHandler {
     // public static final int SYS_SLEEP = 1002;
 
     // File system calls
+    public static final int SYS_DUP = 23;
+    public static final int SYS_MKDIR = 34;
+    public static final int SYS_UNLINK = 35;
+    public static final int SYS_LINK = 37;
+    public static final int SYS_CHDIR = 49;
     public static final int SYS_OPEN = 56; // openat/open
     public static final int SYS_CLOSE = 57;
+    public static final int SYS_FSTAT = 80;
+
+    public static final int O_CREATE = 64; // Linux O_CREAT flag
 
     public SystemCallHandler(Kernel kernel) {
         this.kernel = kernel;
@@ -171,6 +180,34 @@ public class SystemCallHandler {
                     result = handleClose(task, arg0); // arg0=fd
                     break;
 
+                case SYS_DUP:
+                    result = handleDup(task, arg0);
+                    break;
+
+                case SYS_FSTAT:
+                    result = handleFstat(task, arg0, arg1);
+                    break;
+
+                case SYS_LINK:
+                    result = handleLink(task, arg0, arg1);
+                    break;
+
+                case SYS_UNLINK:
+                    result = handleUnlink(task, arg0);
+                    break;
+
+                case SYS_MKDIR:
+                    result = handleMkdir(task, arg0, arg1);
+                    break;
+
+                case SYS_CHDIR:
+                    result = handleChdir(task, arg0);
+                    break;
+
+                case SYS_BRK:
+                    result = handleBrk(task, arg0);
+                    break;
+
                 // Add case to switch(syscallNum)
                 case 20: // SYS_SHM_OPEN (a0 = key) -> returns shmid (frame index)
                     // Get parameter from register a0 (register 10) of task
@@ -279,10 +316,27 @@ public class SystemCallHandler {
             return -1;
 
         if (file.type == FileDescriptor.FD_INODE) {
-            // NOTE: You need to implement writei in FileSystem to support writing!
-            // For now, we can return error or implement it.
-            // int n = kernel.getFileSystem().writei(file.inode, ...);
-            return -1; // Write not yet fully implemented in FS
+            byte[] tempBuf = new byte[count];
+            try {
+                for (int i = 0; i < count; i++) {
+                    byte b;
+                    if (kernel.getMemory() instanceof TaskAwareMemoryManager) {
+                        TaskAwareMemoryManager taskMemory = (TaskAwareMemoryManager) kernel
+                                .getMemory();
+                        b = taskMemory.readByteFromTask(task.getId(), bufferAddr + i);
+                    } else {
+                        b = kernel.getMemory().readByte(bufferAddr + i);
+                    }
+                    tempBuf[i] = b;
+                }
+            } catch (Exception e) {
+                return -1;
+            }
+
+            int written = kernel.getFileSystem().writei(file.inode, tempBuf, file.offset, count);
+            if (written > 0)
+                file.offset += written;
+            return written;
         }
         return -1;
     }
@@ -312,7 +366,11 @@ public class SystemCallHandler {
 
                 // Read one character from UART
                 byte data = kernel.getMemory().readByte(MemoryManager.UART_RX_DATA);
-                kernel.getMemory().writeByte(bufferAddr, data);
+                if (kernel.getMemory() instanceof TaskAwareMemoryManager) {
+                    ((TaskAwareMemoryManager) kernel.getMemory()).writeByteToTask(task.getId(), bufferAddr, data);
+                } else {
+                    kernel.getMemory().writeByte(bufferAddr, data);
+                }
                 return 1;
 
             } catch (Exception e) {
@@ -336,7 +394,12 @@ public class SystemCallHandler {
                 // Copy data to user memory
                 for (int i = 0; i < n; i++) {
                     try {
-                        kernel.getMemory().writeByte(bufferAddr + i, tempBuf[i]);
+                        if (kernel.getMemory() instanceof TaskAwareMemoryManager) {
+                            ((TaskAwareMemoryManager) kernel.getMemory()).writeByteToTask(task.getId(), bufferAddr + i,
+                                    tempBuf[i]);
+                        } else {
+                            kernel.getMemory().writeByte(bufferAddr + i, tempBuf[i]);
+                        }
                     } catch (Exception e) {
                         return -1;
                     }
@@ -414,6 +477,9 @@ public class SystemCallHandler {
             System.arraycopy(parent.getRegisters(), 0, child.getRegisters(), 0, 32);
 
             child.dupFileDescriptors(parent);
+
+            // Copy heap state
+            child.setProgramBreak(parent.getProgramBreak());
 
             // 4. Set Child Return Value to 0 (POSIX convention)
             // Parent gets PID, Child gets 0
@@ -652,10 +718,16 @@ public class SystemCallHandler {
             task.setStackSize(layout.stackSize);
             task.setAllocatedSize(requiredSize);
 
+            // Reset program break to new heap start
+            task.setProgramBreak(newInfo.heapStart);
+
             // Update SP (x2)
             task.getRegisters()[2] = newSp;
 
-            // Return argc (Convention: a0 = argc)
+            // Set a1 (x11) to argv pointer (newSp) for _start -> main(argc, argv)
+            task.getRegisters()[11] = newSp;
+
+            // Return argc (Convention: a0 = argc, handled by syscall return)
             return argvList.size();
 
         } catch (Exception e) {
@@ -750,6 +822,78 @@ public class SystemCallHandler {
     }
 
     /**
+     * Handles the Linux brk() system call (RISC-V syscall 214).
+     * 
+     * If newBreak is 0, returns the current program break.
+     * Otherwise, sets the program break to newBreak if it is valid:
+     * - Must be >= heapStart (cannot shrink below data/bss end)
+     * - Must be < stackBase (cannot collide with the stack)
+     * 
+     * @param task     The calling task
+     * @param newBreak The requested new program break address (0 = query only)
+     * @return The program break after the call (old break if request was refused)
+     */
+    private int handleBrk(Task task, int newBreak) {
+        int currentBreak = task.getProgramBreak();
+
+        // Query-only: if newBreak is 0, just return the current break
+        if (newBreak == 0) {
+            return currentBreak;
+        }
+
+        // Validate: new break must not go below the start of heap
+        ProgramInfo info = task.getProgramInfo();
+        int heapStart = (info != null) ? info.heapStart : 0;
+        if (Integer.compareUnsigned(newBreak, heapStart) < 0) {
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                    "SYS_BRK: Refused shrink below heapStart for PID " + task.getId()
+                            + " (requested=0x" + Integer.toHexString(newBreak)
+                            + ", heapStart=0x" + Integer.toHexString(heapStart) + ")");
+            return currentBreak;
+        }
+
+        // Validate: new break must not collide with the stack
+        int stackBase = task.getStackBase();
+        if (Integer.compareUnsigned(newBreak, stackBase) >= 0) {
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                    "SYS_BRK: Refused expansion into stack for PID " + task.getId()
+                            + " (requested=0x" + Integer.toHexString(newBreak)
+                            + ", stackBase=0x" + Integer.toHexString(stackBase) + ")");
+            return currentBreak;
+        }
+
+        // Ask the memory subsystem to physically back the new memory
+        // (In paged mode, this updates the AddressSpace's heapLimit so the
+        // pager knows these addresses are valid for demand allocation.
+        // In contiguous mode, this is a no-op since memory is pre-allocated.)
+        try {
+            ProcessMemoryCoordinator coordinator = kernel.getMemoryCoordinator();
+            if (coordinator != null) {
+                boolean success = coordinator.expandHeap(task.getId(), currentBreak, newBreak);
+                if (!success) {
+                    cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                            "SYS_BRK: Out of memory for PID " + task.getId());
+                    return currentBreak;
+                }
+            }
+        } catch (Exception e) {
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "SYS_BRK: expandHeap failed for PID " + task.getId() + ": " + e.getMessage());
+            return currentBreak;
+        }
+
+        // Accept the new program break
+        task.setProgramBreak(newBreak);
+
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                "SYS_BRK: PID " + task.getId() + " break moved 0x"
+                        + Integer.toHexString(currentBreak) + " -> 0x"
+                        + Integer.toHexString(newBreak));
+
+        return newBreak;
+    }
+
+    /**
      * Helper to read a null-terminated string from a task's address space.
      */
     private String readStringFromTask(Task task, int va) {
@@ -762,7 +906,12 @@ public class SystemCallHandler {
             StringBuilder sb = new StringBuilder();
             while (true) {
                 // We must use pm.readByte() which goes through the pager
-                byte b = mem.readByte(va); // This is the magic!
+                byte b;
+                if (mem instanceof TaskAwareMemoryManager) {
+                    b = ((TaskAwareMemoryManager) mem).readByteFromTask(task.getId(), va);
+                } else {
+                    b = mem.readByte(va);
+                }
                 if (b == 0) {
                     break; // End of string
                 }
@@ -784,6 +933,162 @@ public class SystemCallHandler {
 
     // --- File System Handlers ---
 
+    private int handleDup(Task task, int oldFd) {
+        return task.dupFd(oldFd);
+    }
+
+    private int handleChdir(Task task, int pathAddr) {
+        String path = readStringFromTask(task, pathAddr);
+        if (path == null)
+            return -1;
+
+        Inode ip = kernel.getFileSystem().namei(task, path);
+        if (ip == null || ip.type != Inode.T_DIR)
+            return -1;
+
+        task.cwd = ip;
+        return 0;
+    }
+
+    private int handleFstat(Task task, int fd, int statAddr) {
+        FileDescriptor file = task.getFileDescriptor(fd);
+        if (file == null || file.type != FileDescriptor.FD_INODE)
+            return -1;
+
+        Inode ip = file.inode;
+        MemoryManager mem = kernel.getMemory();
+
+        try {
+            mem.writeWord(statAddr, ip.inum); // ino
+            mem.writeWord(statAddr + 4, ip.type); // mode/type
+            mem.writeWord(statAddr + 8, ip.nlink); // nlink
+            mem.writeWord(statAddr + 12, ip.size); // size
+            return 0;
+        } catch (MemoryAccessException e) {
+            return -1;
+        }
+    }
+
+    private int handleMkdir(Task task, int pathAddr, int mode) {
+        String path = readStringFromTask(task, pathAddr);
+        cse311.Logger.FileLogger.log("SYS_MKDIR: path=" + path);
+        if (path == null)
+            return -1;
+
+        StringBuilder nameBuilder = new StringBuilder();
+        Inode dp = kernel.getFileSystem().nameiparent(task, path, nameBuilder);
+        cse311.Logger.FileLogger
+                .log("SYS_MKDIR: dp=" + (dp != null ? dp.inum : "null") + " name=" + nameBuilder.toString());
+        if (dp == null || nameBuilder.length() == 0) {
+            cse311.Logger.FileLogger.log("SYS_MKDIR: nameiparent failed");
+            return -1;
+        }
+
+        String name = nameBuilder.toString();
+        if (kernel.getFileSystem().dirlookup(dp, name) != null) {
+            cse311.Logger.FileLogger.log("SYS_MKDIR: dir already exists");
+            return -1;
+        }
+
+        Inode ip;
+        try {
+            ip = kernel.getFileSystem().ialloc(Inode.T_DIR);
+        } catch (Exception e) {
+            cse311.Logger.FileLogger.log("SYS_MKDIR: ialloc threw exception: " + e.getMessage());
+            return -1;
+        }
+
+        cse311.Logger.FileLogger.log("SYS_MKDIR: allocated inode " + (ip != null ? ip.inum : "null"));
+        if (ip == null)
+            return -1;
+
+        ip.nlink = 1; // for "." // In xv6, mkdir sets nlink to 1. But dirlink of "." increases this?
+                      // Wait.
+        // Wait, in xv6: ip->nlink = 1; ip->type = T_DIR; iupdate(ip);
+        kernel.getFileSystem().updateInode(ip);
+
+        cse311.Logger.FileLogger.log("SYS_MKDIR: linking . and ..");
+        kernel.getFileSystem().dirlink(ip, ".", ip.inum);
+        kernel.getFileSystem().dirlink(ip, "..", dp.inum);
+
+        dp.nlink++;
+        kernel.getFileSystem().updateInode(dp);
+
+        cse311.Logger.FileLogger.log("SYS_MKDIR: linking into parent");
+        if (kernel.getFileSystem().dirlink(dp, name, ip.inum) < 0) {
+            cse311.Logger.FileLogger.log("SYS_MKDIR: dirlink into parent failed");
+            return -1;
+        }
+
+        cse311.Logger.FileLogger.log("SYS_MKDIR: success!");
+        return 0;
+    }
+
+    private int handleLink(Task task, int oldPathAddr, int newPathAddr) {
+        String oldPath = readStringFromTask(task, oldPathAddr);
+        String newPath = readStringFromTask(task, newPathAddr);
+        if (oldPath == null || newPath == null)
+            return -1;
+
+        Inode ip = kernel.getFileSystem().namei(task, oldPath);
+        if (ip == null || ip.type == Inode.T_DIR)
+            return -1;
+
+        StringBuilder nameBuilder = new StringBuilder();
+        Inode dp = kernel.getFileSystem().nameiparent(task, newPath, nameBuilder);
+        if (dp == null || nameBuilder.length() == 0)
+            return -1;
+
+        String name = nameBuilder.toString();
+        if (kernel.getFileSystem().dirlink(dp, name, ip.inum) < 0)
+            return -1;
+
+        ip.nlink++;
+        kernel.getFileSystem().updateInode(ip);
+
+        return 0;
+    }
+
+    private int handleUnlink(Task task, int pathAddr) {
+        String path = readStringFromTask(task, pathAddr);
+        if (path == null)
+            return -1;
+
+        StringBuilder nameBuilder = new StringBuilder();
+        Inode dp = kernel.getFileSystem().nameiparent(task, path, nameBuilder);
+        if (dp == null || nameBuilder.length() == 0)
+            return -1;
+
+        String name = nameBuilder.toString();
+        if (name.equals(".") || name.equals(".."))
+            return -1;
+
+        Inode ip = kernel.getFileSystem().dirlookup(dp, name);
+        if (ip == null)
+            return -1;
+
+        byte[] buf = new byte[cse311.kernel.fs.DirectoryEntry.SIZE];
+        for (int off = 0; off < dp.size; off += cse311.kernel.fs.DirectoryEntry.SIZE) {
+            kernel.getFileSystem().readi(dp, buf, off, cse311.kernel.fs.DirectoryEntry.SIZE);
+            cse311.kernel.fs.DirectoryEntry de = cse311.kernel.fs.DirectoryEntry.fromBytes(buf);
+            if (de.inum == ip.inum && de.name.equals(name)) {
+                de.inum = 0;
+                kernel.getFileSystem().writei(dp, de.toBytes(), off, cse311.kernel.fs.DirectoryEntry.SIZE);
+                break;
+            }
+        }
+
+        if (ip.type == Inode.T_DIR) {
+            dp.nlink--;
+            kernel.getFileSystem().updateInode(dp);
+        }
+
+        ip.nlink--;
+        kernel.getFileSystem().updateInode(ip);
+
+        return 0;
+    }
+
     private int handleOpen(Task task, int pathAddr, int mode) {
         // 1. Read path string from user memory
         String path = readStringFromTask(task, pathAddr);
@@ -793,14 +1098,31 @@ public class SystemCallHandler {
         // 2. Resolve path to Inode
         if (kernel.getFileSystem() == null)
             return -1;
-        Inode ip = kernel.getFileSystem().namei(path);
+        Inode ip = kernel.getFileSystem().namei(task, path);
         if (ip == null) {
-            // Optional: If O_CREATE flag is set, create the file here (allocInode)
-            return -1;
+            if ((mode & O_CREATE) != 0) { // O_CREATE
+                StringBuilder nameBuilder = new StringBuilder();
+                Inode dp = kernel.getFileSystem().nameiparent(task, path, nameBuilder);
+                if (dp == null || nameBuilder.length() == 0)
+                    return -1;
+
+                ip = kernel.getFileSystem().ialloc(Inode.T_FILE);
+                if (ip == null)
+                    return -1;
+
+                ip.nlink = 1;
+                kernel.getFileSystem().updateInode(ip);
+
+                if (kernel.getFileSystem().dirlink(dp, nameBuilder.toString(), ip.inum) < 0) {
+                    return -1;
+                }
+            } else {
+                return -1;
+            }
         }
 
         // 3. Create FileDescriptor
-        FileDescriptor fd = new FileDescriptor(ip, true, (mode & 1) != 0);
+        FileDescriptor fd = new FileDescriptor(ip, true, (mode & 1) != 0 || (mode & 2) != 0);
 
         // 4. Allocate FD in task
         int fdIdx = task.allocFd(fd);

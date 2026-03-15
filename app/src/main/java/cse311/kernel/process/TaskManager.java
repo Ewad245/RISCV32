@@ -213,6 +213,9 @@ public class TaskManager {
         child.setProgramCounter(parent.getProgramCounter());
         System.arraycopy(parent.getRegisters(), 0, child.getRegisters(), 0, 32);
 
+        // Copy heap state
+        child.setProgramBreak(parent.getProgramBreak());
+
         // Set up parent relationship
         child.setParent(parent);
         parent.addChild(child);
@@ -269,7 +272,10 @@ public class TaskManager {
         // 6. Set Return Value (0 for child)
         child.getRegisters()[10] = 0; // a0 = 0
 
-        // 7. Hierarchy & Scheduler
+        // 7. Copy heap state
+        child.setProgramBreak(parent.getProgramBreak());
+
+        // 8. Hierarchy & Scheduler
         child.setAllocatedSize(childMemorySize);
         child.setParent(parent);
         parent.addChild(child);

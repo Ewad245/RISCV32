@@ -6,6 +6,7 @@ import java.util.List;
 import cse311.RV32Cpu;
 import cse311.WaitReason;
 import cse311.kernel.fs.FileDescriptor;
+import cse311.kernel.fs.Inode;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -40,6 +41,7 @@ public class Task {
     // Process memory information
     private ProgramInfo meminfo;
     private int allocatedSize;
+    private int programBreak; // Current top of heap (brk)
 
     // Generic context (AddressSpace or SegmentTable)
     private transient Object memoryContext;
@@ -49,6 +51,7 @@ public class Task {
     // File System Support
     public static final int NOFILE = 16; // Max open files per task
     private FileDescriptor[] openFiles = new FileDescriptor[NOFILE];
+    public Inode cwd; // Current Working Directory
 
     /**
      * Creates a new task with the specified ID and stack size.
@@ -82,9 +85,15 @@ public class Task {
         this.wakeupTime = 0;
         this.waitingForPid = -1;
         this.exitCode = 0;
+        this.programBreak = (info != null) ? info.heapStart : 0;
 
         // Initialize stack pointer (x2) to the top of the stack
         this.registers[2] = stackBase + stackSize;
+
+        // Note: cwd should be set after initialization, probably by the Kernel or
+        // during fork/exec,
+        // because we don't have access to FileSystem here easily. If this is init, it
+        // will set its own.
     }
 
     /**
@@ -288,6 +297,14 @@ public class Task {
 
     public void setAllocatedSize(int allocatedSize) {
         this.allocatedSize = allocatedSize;
+    }
+
+    public int getProgramBreak() {
+        return programBreak;
+    }
+
+    public void setProgramBreak(int programBreak) {
+        this.programBreak = programBreak;
     }
 
     public boolean isKilled() {
@@ -528,5 +545,24 @@ public class Task {
                 this.openFiles[i].refCount++;
             }
         }
+    }
+
+    /**
+     * Duplicates a file descriptor into the lowest available slot.
+     */
+    public int dupFd(int oldFd) {
+        if (oldFd < 0 || oldFd >= NOFILE || openFiles[oldFd] == null) {
+            return -1;
+        }
+
+        FileDescriptor fd = openFiles[oldFd];
+        for (int i = 3; i < NOFILE; i++) {
+            if (openFiles[i] == null) {
+                openFiles[i] = fd;
+                fd.refCount++;
+                return i;
+            }
+        }
+        return -1;
     }
 }
