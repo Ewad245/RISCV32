@@ -17,7 +17,10 @@ import cse311.kernel.memory.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executors;
 import java.util.concurrent.PriorityBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Main kernel class that coordinates all kernel subsystems
@@ -62,6 +65,9 @@ public class Kernel {
 
     // Configuration
     private final KernelConfig config;
+
+    // Heat decay for memory heatmap
+    private ScheduledExecutorService heatDecayExecutor;
 
     public Kernel(MemoryManager memory) {
         cpus = new ArrayList<>();
@@ -181,6 +187,18 @@ public class Kernel {
                 cse311.Logger.FileLogger.log(e);
             }
         }).start();
+
+        // 4. Start heat decay timer for memory heatmap visualization
+        heatDecayExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "heat-decay");
+            t.setDaemon(true);
+            return t;
+        });
+        heatDecayExecutor.scheduleAtFixedRate(() -> {
+            if (memory instanceof PagedMemoryManager pmm) {
+                pmm.decayHeat();
+            }
+        }, 500, 500, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -207,6 +225,7 @@ public class Kernel {
      * Stop the kernel
      */
     public void stop() {
+        if (heatDecayExecutor != null) heatDecayExecutor.shutdownNow();
         running = false;
         cse311.Logger.FileLogger.log("Kernel stopped");
     }
@@ -508,6 +527,11 @@ public class Kernel {
                 }
                 break;
 
+            case CONDITION_VARIABLE:
+                // Handled specifically by TaskManager.conditionVariables map
+                // Do not add to any kernel polling queues!
+                break;
+
             default:
                 // Generic wait
                 ioWaitQueue.add(task);
@@ -611,16 +635,23 @@ public class Kernel {
     }
 
     /**
-     * Terminate a task
+     * Terminate a task.
+     * Sets state to TERMINATED and reparents orphaned children to init,
+     * but does NOT free memory or remove from the tasks map.
+     * The zombie remains until the parent reaps it via wait().
+     * This follows the Unix process lifecycle: exit() -> zombie -> wait() -> cleanup.
      */
     public void terminateTask(int pid) {
         Task task = tasks.get(pid);
         if (task != null) {
             task.setState(TaskState.TERMINATED);
             scheduler.removeTask(task);
-            taskManager.cleanupTask(task);
-            tasks.remove(pid);
-            cse311.Logger.FileLogger.log("Terminated task " + pid);
+
+            // Reparent this task's children to init so they aren't lost.
+            // Do NOT free memory yet — parent must wait() to reap this zombie.
+            taskManager.reparentChildrenToInit(task);
+
+            cse311.Logger.FileLogger.log("Terminated task " + pid + " (zombie until reaped)");
         }
     }
 

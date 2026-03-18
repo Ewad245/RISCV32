@@ -19,6 +19,12 @@ public class PagedMemoryManager extends MemoryManager {
     private final int totalFrames;
     private final FrameOwner[] reverseMap; // reverse mapping for frame ownership
 
+    // Heat tracking for heatmap visualization
+    private final int[] frameHeat; // 0..255, decays over time
+    private static final int HEAT_MAX = 255;
+    private static final int HEAT_INC = 6;   // increment per access
+    private static final int HEAT_DECAY = 2; // decrement per decay tick
+
     // Page table management for 2-level structure
     private final Map<Integer, AddressSpace.PageTable> pageTableFrames = new HashMap<>();
     private final Map<Integer, AddressSpace.PageDirectory> pageDirectoryFrames = new HashMap<>();
@@ -50,6 +56,7 @@ public class PagedMemoryManager extends MemoryManager {
         this.reverseMap = new FrameOwner[totalFrames];
         this.freeFrames.set(0, totalFrames); // all free
         this.frameRefCount = new int[totalFrames];
+        this.frameHeat = new int[totalFrames];
     }
 
     /**
@@ -153,6 +160,7 @@ public class PagedMemoryManager extends MemoryManager {
         int frame = pager.ensureResident(current, va, VmAccess.WRITE);
 
         int pa = (frame << 12) | (va & 0xFFF);
+        bumpHeat(pa);
         super.writeByte(pa, val);
     }
 
@@ -166,6 +174,7 @@ public class PagedMemoryManager extends MemoryManager {
         int frame = pager.ensureResident(current, va, VmAccess.READ);
 
         int pa = (frame << 12) | (va & 0xFFF);
+        bumpHeat(pa);
         return super.readByte(pa);
     }
 
@@ -179,6 +188,7 @@ public class PagedMemoryManager extends MemoryManager {
         int frame = pager.ensureResident(current, va, VmAccess.READ);
 
         int pa = (frame << 12) | (va & 0xFFF);
+        bumpHeat(pa);
         return super.readHalfWord(pa);
     }
 
@@ -192,6 +202,7 @@ public class PagedMemoryManager extends MemoryManager {
         int frame = pager.ensureResident(current, va, VmAccess.READ);
 
         int pa = (frame << 12) | (va & 0xFFF);
+        bumpHeat(pa);
         return super.readWord(pa);
     }
 
@@ -211,6 +222,7 @@ public class PagedMemoryManager extends MemoryManager {
         int frame = pager.ensureResident(current, va, VmAccess.WRITE);
 
         int pa = (frame << 12) | (va & 0xFFF);
+        bumpHeat(pa);
         super.writeHalfWord(pa, v);
     }
 
@@ -225,6 +237,7 @@ public class PagedMemoryManager extends MemoryManager {
         int frame = pager.ensureResident(current, va, VmAccess.WRITE);
 
         int pa = (frame << 12) | (va & 0xFFF);
+        bumpHeat(pa);
         super.writeWord(pa, v);
     }
 
@@ -392,6 +405,39 @@ public class PagedMemoryManager extends MemoryManager {
             return frameRefCount[frame];
         }
         return 0;
+    }
+
+    // ---- Heat tracking for heatmap ----
+
+    /**
+     * Bump heat for the physical frame containing the given physical address.
+     * Called after VA→PA translation to correctly track physical frame accesses.
+     */
+    private void bumpHeat(int pa) {
+        int frame = pa >>> 12; // pa / PAGE_SIZE
+        if (frame >= 0 && frame < totalFrames) {
+            frameHeat[frame] = Math.min(HEAT_MAX, frameHeat[frame] + HEAT_INC);
+        }
+    }
+
+    /**
+     * Get the heat array for heatmap visualization.
+     * Each element is 0..255 indicating recent access frequency.
+     */
+    public int[] getFrameHeat() {
+        return frameHeat;
+    }
+
+    /**
+     * Decay all frame heat values. Called periodically by the Kernel.
+     * Prevents frames from staying permanently hot after a process exits.
+     */
+    public void decayHeat() {
+        for (int i = 0; i < frameHeat.length; i++) {
+            if (frameHeat[i] > 0) {
+                frameHeat[i] = Math.max(0, frameHeat[i] - HEAT_DECAY);
+            }
+        }
     }
 
     // ---- Debug helpers ----

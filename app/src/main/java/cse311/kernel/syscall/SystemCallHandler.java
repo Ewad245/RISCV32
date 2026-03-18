@@ -56,6 +56,11 @@ public class SystemCallHandler {
     // @Deprecated - Use SYS_NANOSLEEP instead
     // public static final int SYS_SLEEP = 1002;
 
+    // Condition Variables
+    public static final int SYS_CV_WAIT = 280;
+    public static final int SYS_CV_SIGNAL = 281;
+    public static final int SYS_CV_BROADCAST = 282;
+
     // File system calls
     public static final int SYS_DUP = 23;
     public static final int SYS_MKDIR = 34;
@@ -245,6 +250,18 @@ public class SystemCallHandler {
                     } else {
                         task.getRegisters()[10] = -1;
                     }
+                    break;
+
+                case SYS_CV_WAIT:
+                    result = handleCvWait(cpu, task, arg0, arg1);
+                    break;
+
+                case SYS_CV_SIGNAL:
+                    result = handleCvSignal(task, arg0);
+                    break;
+
+                case SYS_CV_BROADCAST:
+                    result = handleCvBroadcast(task, arg0);
                     break;
 
                 default:
@@ -1143,5 +1160,70 @@ public class SystemCallHandler {
 
         task.closeFd(fd);
         return 0;
+    }
+
+    /**
+     * Handles the condition variable wait system call.
+     * 
+     * @param cpu       The CPU executing the syscall
+     * @param task      The calling task
+     * @param cvId      The ID of the condition variable
+     * @param mutexAddr The user-space address of the mutex to unlock
+     * @return 0 on success, -1 on failure
+     */
+    private int handleCvWait(RV32Cpu cpu, Task task, int cvId, int mutexAddr) {
+        try {
+            // 1. Atomically release the user-space mutex
+            // The user-space mutex is typically a struct where 'locked' is an int.
+            MemoryManager mem = kernel.getMemory();
+            if (mem instanceof TaskAwareMemoryManager) {
+                ((TaskAwareMemoryManager) mem).writeWordToTask(task.getId(), mutexAddr, 0);
+            } else {
+                mem.writeWord(mutexAddr, 0); // Unlock = 0
+            }
+
+            // 2. Register the task in the CV's wait queue
+            kernel.getTaskManager().waitOnCondition(task, cvId);
+
+            // 3. Force the return value NOW.
+            // Because the task is going to sleep, the standard mechanism at the end 
+            // of handleSystemCall (which checks if the task is WAITING) will SKIP it.
+            cpu.setRegister(10, 0);
+            task.getRegisters()[10] = 0;
+
+            // 4. Important: Do NOT rewind the PC.
+            // When the task wakes up, it should proceed to the immediate next instruction,
+            // which in the C library wrapper will be a call to re-acquire the mutex.
+
+            return 0;
+
+        } catch (Exception e) {
+            cse311.Logger.FileLogger.log("CV_WAIT failed for task " + task.getId() + ": " + e.getMessage());
+            return -1;
+        }
+    }
+
+    /**
+     * Handles the condition variable signal system call (wakes up 1).
+     * 
+     * @param task The calling task
+     * @param cvId The ID of the condition variable
+     * @return 0 on success
+     */
+    private int handleCvSignal(Task task, int cvId) {
+        kernel.getTaskManager().signalCondition(cvId);
+        return 0; // Success even if nobody was waiting
+    }
+
+    /**
+     * Handles the condition variable broadcast system call (wakes up all).
+     * 
+     * @param task The calling task
+     * @param cvId The ID of the condition variable
+     * @return 0 on success
+     */
+    private int handleCvBroadcast(Task task, int cvId) {
+        kernel.getTaskManager().broadcastCondition(cvId);
+        return 0; // Success even if nobody was waiting
     }
 }

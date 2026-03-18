@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.Collections;
 
 import cse311.MemoryManager;
 import cse311.SimpleMemory;
@@ -326,11 +325,11 @@ public class ContiguousMemoryManager extends MemoryManager {
         }
     }
 
-    public List<ProcessBlock> getAllocatedBlocks() {
-        return Collections.unmodifiableList(allocatedList);
+    public synchronized List<ProcessBlock> getAllocatedBlocks() {
+        return new ArrayList<>(allocatedList);
     }
 
-    public List<MemoryBlock> getFreeBlocks() {
-        return Collections.unmodifiableList(freeList);
+    public synchronized List<MemoryBlock> getFreeBlocks() {
+        return new ArrayList<>(freeList);
     }
 }

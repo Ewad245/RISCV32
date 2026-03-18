@@ -37,5 +37,10 @@ public enum WaitReason {
     /**
      * Task is waiting for a custom condition
      */
-    CUSTOM
+    CUSTOM,
+    
+    /**
+     * Task is waiting for a condition variable signal
+     */
+    CONDITION_VARIABLE
 }

@@ -26,6 +26,10 @@ public class TaskManager {
     private ProcessMemoryCoordinator memoryCoordinator;
     private Task initTask; // The init process (PID 1)
 
+    // Condition Variables tracking
+    // Maps cvId -> Queue of Tasks waiting on that CV
+    private final Map<Integer, java.util.Queue<Task>> conditionVariables = new ConcurrentHashMap<>();
+
     public TaskManager(Kernel kernel, KernelMemoryManager kernelMemory) {
         this.kernel = kernel;
         this.kernelMemory = kernelMemory;
@@ -163,6 +167,18 @@ public class TaskManager {
             // D. Important: If the child was already ZOMBIE (TERMINATED),
             // Init needs to know so it can reap it immediately.
             // In a real OS, we might send a SIGCHLD signal here.
+            if (child.getState() == TaskState.TERMINATED) {
+                if (initTask.getState() == TaskState.WAITING &&
+                    initTask.getWaitReason() == cse311.WaitReason.PROCESS_EXIT) {
+                    
+                    int waitingFor = initTask.getWaitingForPid();
+                    if (waitingFor == -1 || waitingFor == child.getId()) {
+                        initTask.wakeup();
+                        kernel.addTaskToScheduler(initTask);
+                        cse311.Logger.FileLogger.log("TaskManager: Woke init to reap adopted zombie " + child.getId());
+                    }
+                }
+            }
         }
     }
 
@@ -376,6 +392,61 @@ public class TaskManager {
         }
 
         // System.out.println("Cleaned up task " + pid + " resources");
+    }
+
+    // --- Condition Variable Support ---
+
+    /**
+     * Blocks a task waiting for a Condition Variable
+     * 
+     * @param task The task to block
+     * @param cvId The ID of the condition variable
+     */
+    public void waitOnCondition(Task task, int cvId) {
+        conditionVariables.computeIfAbsent(cvId, k -> new java.util.LinkedList<>()).add(task);
+        task.waitFor(WaitReason.CONDITION_VARIABLE);
+    }
+
+    /**
+     * Wakes up one task waiting on a Condition Variable (Mesa semantics)
+     * 
+     * @param cvId The ID of the condition variable
+     * @return true if a task was woken up, false if no tasks were waiting
+     */
+    public boolean signalCondition(int cvId) {
+        java.util.Queue<Task> queue = conditionVariables.get(cvId);
+        if (queue != null && !queue.isEmpty()) {
+            Task awoken = queue.poll();
+            awoken.wakeup();
+            // The task is now READY but must wait its turn in the global Scheduler queue
+            kernel.addTaskToScheduler(awoken);
+            
+            // Clean up empty queues
+            if (queue.isEmpty()) {
+                conditionVariables.remove(cvId);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Wakes up all tasks waiting on a Condition Variable
+     * 
+     * @param cvId The ID of the condition variable
+     * @return the number of tasks woken up
+     */
+    public int broadcastCondition(int cvId) {
+        java.util.Queue<Task> queue = conditionVariables.remove(cvId); // Remove the entire queue
+        if (queue != null) {
+            int count = queue.size();
+            for (Task awoken : queue) {
+                awoken.wakeup();
+                kernel.addTaskToScheduler(awoken);
+            }
+            return count;
+        }
+        return 0;
     }
 
     /**
