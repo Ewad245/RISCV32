@@ -29,8 +29,8 @@ public class DatapathView extends AnchorPane {
     private RV32Cpu cpu;
 
     // Reference sizes for percentage calculations
-    private static final double REF_WIDTH = 1100.0;
-    private static final double REF_HEIGHT = 700.0;
+    private static final double REF_WIDTH = 1920.0;
+    private static final double REF_HEIGHT = 1080.0;
 
     // Component positions as percentages (x%, y%, width%, height%)
     private static final double[] PC_POS = { 8, 42, 4, 9 };
@@ -71,11 +71,12 @@ public class DatapathView extends AnchorPane {
 
     public DatapathView(RV32Cpu cpu) {
         this.cpu = cpu;
-        this.getStyleClass().add("datapath-root");
+        // this.getStyleClass().add("datapath-root"); // Removed to fix zooming issue
+        // with background scaling
         this.getStylesheets().add(getClass().getResource("/css/style.css").toExternalForm());
 
         setPrefSize(REF_WIDTH, REF_HEIGHT);
-        setMinSize(400, 300);
+        setMinSize(1280.0, 720.0);
 
         buildComponents();
         buildWires();
@@ -91,6 +92,16 @@ public class DatapathView extends AnchorPane {
 
         // Initial layout - use Platform.runLater to ensure proper sizing
         javafx.application.Platform.runLater(this::layoutComponents);
+        this.setOnMouseClicked(event -> {
+            double currentWidth = this.getWidth();
+            double currentHeight = this.getHeight();
+
+            // Calculate the percentage
+            double xPercent = (event.getX() / currentWidth) * 100.0;
+            double yPercent = (event.getY() / currentHeight) * 100.0;
+
+            System.out.printf("📍 Clicked Coordinate -> X: %.1f, Y: %.1f\n", xPercent, yPercent);
+        });
     }
 
     public void setCpu(RV32Cpu cpu) {
@@ -504,11 +515,12 @@ public class DatapathView extends AnchorPane {
         updateWire(wireDmMux, arrowDmMux, dmRight, dmOutY, muxLeft, muxInTopY, "right");
 
         // Wire: ALU -> MUX (bypass) - goes above components
-        double aboveComponentsY = h * 0.22;
+        double aboveComponentsY = h * 0.34;
         double muxInBottomY = muxWbPane.getLayoutY() + muxWbPane.getPrefHeight() * 0.7;
+        double aluStartUpY = aluCenterY - (h * 0.03);
         updateWireComplex(wireAluMux, arrowAluMux, "right",
-                aluRight, aluCenterY,
-                aluRight + w * 0.01, aluCenterY,
+                aluRight, aluStartUpY,
+                aluRight + w * 0.01, aluStartUpY,
                 aluRight + w * 0.01, aboveComponentsY,
                 muxLeft - w * 0.01, aboveComponentsY,
                 muxLeft - w * 0.01, muxInBottomY,

@@ -154,6 +154,7 @@ public class MainController implements Initializable {
 
             VBox datapathContainer = new VBox(10, new Label("CPU Datapath"), datapathViews[i]);
             VBox.setVgrow(datapathViews[i], Priority.ALWAYS);
+            datapathContainer.getStyleClass().add("datapath-root");
 
             VBox assemblyContainer = new VBox(10, new Label("Assembly Stream"), datapathAssemblyViews[i]);
             VBox.setVgrow(datapathAssemblyViews[i], Priority.ALWAYS);
