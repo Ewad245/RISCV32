@@ -15,6 +15,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 
 /**
  * Manages task creation, destruction, and lifecycle
@@ -169,8 +171,8 @@ public class TaskManager {
             // In a real OS, we might send a SIGCHLD signal here.
             if (child.getState() == TaskState.TERMINATED) {
                 if (initTask.getState() == TaskState.WAITING &&
-                    initTask.getWaitReason() == cse311.WaitReason.PROCESS_EXIT) {
-                    
+                        initTask.getWaitReason() == cse311.WaitReason.PROCESS_EXIT) {
+
                     int waitingFor = initTask.getWaitingForPid();
                     if (waitingFor == -1 || waitingFor == child.getId()) {
                         initTask.wakeup();
@@ -420,7 +422,7 @@ public class TaskManager {
             awoken.wakeup();
             // The task is now READY but must wait its turn in the global Scheduler queue
             kernel.addTaskToScheduler(awoken);
-            
+
             // Clean up empty queues
             if (queue.isEmpty()) {
                 conditionVariables.remove(cvId);
@@ -437,7 +439,7 @@ public class TaskManager {
      * @return the number of tasks woken up
      */
     public int broadcastCondition(int cvId) {
-        java.util.Queue<Task> queue = conditionVariables.remove(cvId); // Remove the entire queue
+        java.util.Queue<Task> queue = conditionVariables.remove(cvId);
         if (queue != null) {
             int count = queue.size();
             for (Task awoken : queue) {
@@ -447,6 +449,19 @@ public class TaskManager {
             return count;
         }
         return 0;
+    }
+
+    /**
+     * Gets all tasks currently waiting on any condition variable
+     * 
+     * @return Collection of all tasks waiting on condition variables
+     */
+    public Collection<Task> getAllConditionVariableWaiters() {
+        List<Task> allWaiters = new ArrayList<>();
+        for (java.util.Queue<Task> queue : conditionVariables.values()) {
+            allWaiters.addAll(queue);
+        }
+        return Collections.unmodifiableList(allWaiters);
     }
 
     /**

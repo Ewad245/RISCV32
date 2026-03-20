@@ -68,7 +68,7 @@ public class GuiApp extends Application {
 
         // Initialize 128MB RAM, CPU, Memory Management Techniques
         // We can make this configurable later via a "New Simulation" dialog
-        computer = new RV32Computer(1024 * 1024 * 12, Integer.MAX_VALUE, MemoryMode.CONTIGUOUS);
+        computer = new RV32Computer(1024 * 1024 * 12, Integer.MAX_VALUE, MemoryMode.PAGING);
 
         kernel = computer.getKernel();
 

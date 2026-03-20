@@ -67,11 +67,13 @@ public class ContiguousMemoryManager extends MemoryManager {
         CpuContext ctx = getContext();
         ctx.currentPid = pid;
         // Load Base and Limit registers for the current process
-        for (ProcessBlock pb : allocatedList) {
-            if (pb.pid == pid) {
-                ctx.baseRegister = pb.start;
-                ctx.limitRegister = pb.size;
-                return;
+        synchronized (this) {
+            for (ProcessBlock pb : allocatedList) {
+                if (pb.pid == pid) {
+                    ctx.baseRegister = pb.start;
+                    ctx.limitRegister = pb.size;
+                    return;
+                }
             }
         }
         // If kernel or not found, grant full access (or default to 0)

@@ -14,6 +14,7 @@ import cse311.kernel.NonContiguous.paging.PagingMapper;
 import cse311.kernel.contiguous.ContiguousMemoryCoordinator;
 import cse311.kernel.contiguous.ContiguousMemoryManager;
 import cse311.kernel.memory.*;
+import javafx.application.Platform;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -21,6 +22,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Main kernel class that coordinates all kernel subsystems
@@ -68,6 +70,12 @@ public class Kernel {
 
     // Heat decay for memory heatmap
     private ScheduledExecutorService heatDecayExecutor;
+
+    // Console for displaying warnings (GUI integration)
+    private cse311.gui.components.ConsoleView consoleView;
+
+    // Deadlock detection flag to prevent spamming
+    private final AtomicBoolean deadlockDetected = new AtomicBoolean(false);
 
     public Kernel(MemoryManager memory) {
         cpus = new ArrayList<>();
@@ -225,7 +233,8 @@ public class Kernel {
      * Stop the kernel
      */
     public void stop() {
-        if (heatDecayExecutor != null) heatDecayExecutor.shutdownNow();
+        if (heatDecayExecutor != null)
+            heatDecayExecutor.shutdownNow();
         running = false;
         cse311.Logger.FileLogger.log("Kernel stopped");
     }
@@ -280,8 +289,9 @@ public class Kernel {
                 }
 
                 if (currentTask == null) {
-                    cpu.setCurrentTask(null); // Explicitly mark as idle
+                    cpu.setCurrentTask(null);
                     idle();
+                    detectDeadlock();
                     continue;
                 }
 
@@ -639,7 +649,8 @@ public class Kernel {
      * Sets state to TERMINATED and reparents orphaned children to init,
      * but does NOT free memory or remove from the tasks map.
      * The zombie remains until the parent reaps it via wait().
-     * This follows the Unix process lifecycle: exit() -> zombie -> wait() -> cleanup.
+     * This follows the Unix process lifecycle: exit() -> zombie -> wait() ->
+     * cleanup.
      */
     public void terminateTask(int pid) {
         Task task = tasks.get(pid);
@@ -783,7 +794,11 @@ public class Kernel {
     }
 
     public Collection<Task> getReadyQueue() {
-        return scheduler.getReadyTasks(); // Needs to be implemented in Scheduler
+        return scheduler.getReadyTasks();
+    }
+
+    public Collection<Task> getConditionVariableWaitQueue() {
+        return taskManager.getAllConditionVariableWaiters();
     }
 
     // Getters for kernel subsystems
@@ -809,6 +824,47 @@ public class Kernel {
 
     public KernelConfig getConfig() {
         return config;
+    }
+
+    public void setConsoleView(cse311.gui.components.ConsoleView consoleView) {
+        this.consoleView = consoleView;
+    }
+
+    /**
+     * Detects if all tasks are blocked on condition variables (potential deadlock)
+     */
+    private void detectDeadlock() {
+        if (consoleView == null)
+            return;
+
+        boolean readyQueueEmpty = getReadyQueue().isEmpty();
+        if (!readyQueueEmpty) {
+            deadlockDetected.set(false);
+            return;
+        }
+
+        long waitingOnCv = tasks.values().stream()
+                .filter(t -> t.getState() == TaskState.WAITING && t.getWaitReason() == WaitReason.CONDITION_VARIABLE)
+                .count();
+
+        long totalWaiting = tasks.values().stream()
+                .filter(t -> t.getState() == TaskState.WAITING)
+                .count();
+
+        long totalTasks = tasks.values().stream()
+                .filter(t -> t.getState() != TaskState.TERMINATED)
+                .count();
+
+        if (totalTasks > 0 && waitingOnCv == totalWaiting && waitingOnCv == totalTasks && !deadlockDetected.get()) {
+            String message = "DEADLOCK DETECTED: All threads are blocked on condition variables.\n";
+            Platform.runLater(() -> {
+                consoleView.appendText(message, "kernel-error");
+            });
+            deadlockDetected.set(true);
+            FileLogger.log(FileLogger.LogLevel.ERROR, "DEADLOCK DETECTED: All " + totalTasks + " tasks blocked on CVs");
+        } else if (waitingOnCv < totalTasks) {
+            deadlockDetected.set(false);
+        }
     }
 
     /**

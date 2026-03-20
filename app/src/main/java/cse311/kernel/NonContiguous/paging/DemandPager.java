@@ -38,7 +38,12 @@ public class DemandPager implements Pager {
             // If Out Of Memory (OOM), we must evict a victim frame
             if (frame < 0) {
                 // 1. Pick a victim frame from ANY process (Global replacement)
-                frame = repl.pickVictim(i -> mm.getFrameRefCount(i) == 1);
+                // FIX: Ensure we only evict User Data frames, NEVER Page Table frames!
+                frame = repl.pickVictim(i -> {
+                    if (mm.getFrameRefCount(i) != 1) return false;
+                    FrameOwner owner = mm.getFrameOwner(i);
+                    return owner != null && owner.pid != -1;
+                });
 
                 if (frame >= 0) {
                     // 2. Identify the owner of this victim frame

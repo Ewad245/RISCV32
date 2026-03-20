@@ -92,16 +92,6 @@ public class DatapathView extends AnchorPane {
 
         // Initial layout - use Platform.runLater to ensure proper sizing
         javafx.application.Platform.runLater(this::layoutComponents);
-        this.setOnMouseClicked(event -> {
-            double currentWidth = this.getWidth();
-            double currentHeight = this.getHeight();
-
-            // Calculate the percentage
-            double xPercent = (event.getX() / currentWidth) * 100.0;
-            double yPercent = (event.getY() / currentHeight) * 100.0;
-
-            System.out.printf("📍 Clicked Coordinate -> X: %.1f, Y: %.1f\n", xPercent, yPercent);
-        });
     }
 
     public void setCpu(RV32Cpu cpu) {

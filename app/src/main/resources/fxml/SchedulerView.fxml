@@ -21,4 +21,7 @@
     <Label text="Sleep/Timer Queue:" style="-fx-font-weight: bold"/>
     <ListView fx:id="sleepList" VBox.vgrow="ALWAYS"/>
 
+    <Label text="Condition Variable Wait:" style="-fx-font-weight: bold"/>
+    <ListView fx:id="cvWaitList" VBox.vgrow="ALWAYS"/>
+
 </fx:root>

@@ -22,7 +22,7 @@ public class PagedMemoryManager extends MemoryManager {
     // Heat tracking for heatmap visualization
     private final int[] frameHeat; // 0..255, decays over time
     private static final int HEAT_MAX = 255;
-    private static final int HEAT_INC = 6;   // increment per access
+    private static final int HEAT_INC = 6; // increment per access
     private static final int HEAT_DECAY = 2; // decrement per decay tick
 
     // Page table management for 2-level structure
@@ -517,6 +517,14 @@ public class PagedMemoryManager extends MemoryManager {
                 }
 
                 int vpn = (l1Index << 10) | l2Index;
+
+                // Check if the child already has this VPN mapped
+                // (e.g., from mapStack during allocateMemory) and free it before overwriting
+                AddressSpace.PageTableEntry existingChildPTE = newAS.getPTEInternal(vpn);
+                if (existingChildPTE != null && existingChildPTE.V) {
+                    freeFrame(existingChildPTE.ppn);
+                }
+
                 int oldFrame = pte.ppn; // Physical frame of parent
 
                 // --- CHECK: IF IT'S A SHARED PAGE ---

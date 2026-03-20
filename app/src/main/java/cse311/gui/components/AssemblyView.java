@@ -105,12 +105,29 @@ public class AssemblyView extends VBox {
                             : String.format("%08x", item.code);
                     setText(String.format("    %x:        %s        %s", item.address, hexCode, item.assembly));
 
+                    // Check if this is an atomic instruction (amoswap, amoadd, etc.)
+                    boolean isAtomic = item.assembly.trim().startsWith("amo") || 
+                                      item.assembly.trim().startsWith("lr.") || 
+                                      item.assembly.trim().startsWith("sc.");
+
                     if (item.address == currentPc) {
-                        setStyle("-fx-background-color: #d4e157; -fx-text-fill: black;"); // Highlight
+                        if (isAtomic) {
+                            setStyle("-fx-background-color: #9c27b0; -fx-text-fill: white; -fx-font-weight: bold;");
+                        } else {
+                            setStyle("-fx-background-color: #d4e157; -fx-text-fill: black;");
+                        }
                     } else if (item.address == animationPreviousPc) {
-                        setStyle("-fx-background-color: #f0f4c3; -fx-text-fill: black;"); // Trail
+                        if (isAtomic) {
+                            setStyle("-fx-background-color: #ba68c8; -fx-text-fill: white; -fx-font-weight: bold;");
+                        } else {
+                            setStyle("-fx-background-color: #f0f4c3; -fx-text-fill: black;");
+                        }
                     } else {
-                        setStyle("-fx-background-color: transparent; -fx-text-fill: black;");
+                        if (isAtomic) {
+                            setStyle("-fx-background-color: #e1bee7; -fx-text-fill: #4a148c; -fx-font-weight: bold;");
+                        } else {
+                            setStyle("-fx-background-color: transparent; -fx-text-fill: black;");
+                        }
                     }
                 }
             }

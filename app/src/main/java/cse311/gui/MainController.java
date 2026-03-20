@@ -173,6 +173,9 @@ public class MainController implements Initializable {
         consoleView.setPrefHeight(200);
         consoleContainer.getChildren().add(consoleView);
 
+        // Pass ConsoleView reference to Kernel for deadlock warnings
+        kernel.setConsoleView(consoleView);
+
         // Redirect System.out and System.err to ConsoleView
         try {
             cse311.gui.util.GuiOutputStream guiOut = new cse311.gui.util.GuiOutputStream(consoleView.getOutputArea());
