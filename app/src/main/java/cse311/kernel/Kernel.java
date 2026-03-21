@@ -578,7 +578,7 @@ public class Kernel {
                     // This changes the state to READY so other cores will skip this block.
                     parent.wakeup();
                     scheduler.addTask(parent);
-                    FileLogger.log("Kernel: Zombie Task " + pid + " woke up Parent " + parent.getId());
+                    FileLogger.log(LogLevel.DEBUG, "Kernel: Zombie Task " + pid + " woke up Parent " + parent.getId());
                 }
             }
         }
@@ -590,9 +590,9 @@ public class Kernel {
             // and perform the actual cleanup.
             parent.wakeup();
             scheduler.addTask(parent);
-            FileLogger.log("Kernel: Zombie Task " + pid + " woke up Parent " + parent.getId());
+            FileLogger.log(LogLevel.DEBUG, "Kernel: Zombie Task " + pid + " woke up Parent " + parent.getId());
         } else {
-            FileLogger.log("Kernel: Task " + pid + " became a Zombie (Parent not waiting).");
+            FileLogger.log(LogLevel.DEBUG, "Kernel: Task " + pid + " became a Zombie (Parent not waiting).");
         }
 
         // We must leave the task in memory as a ZOMBIE so the parent can read the exit
@@ -674,7 +674,7 @@ public class Kernel {
             // Do NOT free memory yet — parent must wait() to reap this zombie.
             taskManager.reparentChildrenToInit(task);
 
-            FileLogger.log("Terminated task " + pid + " (zombie until reaped)");
+            FileLogger.log(LogLevel.DEBUG, "Terminated task " + pid + " (zombie until reaped)");
         }
     }
 

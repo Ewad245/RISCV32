@@ -10,6 +10,7 @@ public class FileDescriptor {
     public int refCount;
     public boolean readable;
     public boolean writable;
+    public boolean append;
 
     public Inode inode; // The underlying file
     public int offset; // Current read/write position
@@ -20,6 +21,7 @@ public class FileDescriptor {
         this.inode = inode;
         this.readable = readable;
         this.writable = writable;
+        this.append = false;
         this.offset = 0;
         this.refCount = 1;
     }

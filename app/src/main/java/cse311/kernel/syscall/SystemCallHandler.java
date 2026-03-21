@@ -341,6 +341,10 @@ public class SystemCallHandler {
             return -1;
 
         if (file.type == FileDescriptor.FD_INODE) {
+            if (file.append) {
+                file.offset = file.inode.size;
+            }
+
             byte[] tempBuf = new byte[count];
             try {
                 for (int i = 0; i < count; i++) {
@@ -1157,9 +1161,7 @@ public class SystemCallHandler {
         if (ip == null)
             return -1;
 
-        ip.nlink = 1; // for "." // In xv6, mkdir sets nlink to 1. But dirlink of "." increases this?
-                      // Wait.
-        // Wait, in xv6: ip->nlink = 1; ip->type = T_DIR; iupdate(ip);
+        ip.nlink = 2;
         kernel.getFileSystem().updateInode(ip);
 
         FileLogger.log("SYS_MKDIR: linking . and ..");
@@ -1245,17 +1247,15 @@ public class SystemCallHandler {
     }
 
     private int handleOpen(Task task, int pathAddr, int mode) {
-        // 1. Read path string from user memory
         String path = readStringFromTask(task, pathAddr);
         if (path == null)
             return -1;
 
-        // 2. Resolve path to Inode
         if (kernel.getFileSystem() == null)
             return -1;
         Inode ip = kernel.getFileSystem().namei(task, path);
         if (ip == null) {
-            if ((mode & O_CREATE) != 0) { // O_CREATE
+            if ((mode & O_CREATE) != 0) {
                 StringBuilder nameBuilder = new StringBuilder();
                 Inode dp = kernel.getFileSystem().nameiparent(task, path, nameBuilder);
                 if (dp == null || nameBuilder.length() == 0)
@@ -1276,13 +1276,18 @@ public class SystemCallHandler {
             }
         }
 
-        // 3. Create FileDescriptor
-        FileDescriptor fd = new FileDescriptor(ip, true, (mode & 1) != 0 || (mode & 2) != 0);
+        boolean isTruncate = (mode & 0x200) != 0;
+        boolean isAppend = (mode & 0x400) != 0;
 
-        // 4. Allocate FD in task
+        if (isTruncate && ip.type == Inode.T_FILE) {
+            kernel.getFileSystem().truncate(ip);
+        }
+
+        FileDescriptor fd = new FileDescriptor(ip, true, (mode & 1) != 0 || (mode & 2) != 0);
+        fd.append = isAppend;
+
         int fdIdx = task.allocFd(fd);
         if (fdIdx < 0) {
-            // Table full
             return -1;
         }
 

@@ -313,4 +313,50 @@ public class FileSystem {
         }
         return ip;
     }
+
+    public void truncate(Inode ip) {
+        // 1. Free direct blocks
+        for (int i = 0; i < Inode.NDIRECT; i++) {
+            if (ip.addrs[i] != 0) {
+                bfree(ip.addrs[i]);
+                ip.addrs[i] = 0;
+            }
+        }
+
+        // 2. Free indirect blocks
+        if (ip.addrs[Inode.NDIRECT] != 0) { // 1024-byte block / 4 bytes per int = 256
+            byte[] indirectData = new byte[DiskDevice.BSIZE];
+            disk.read(ip.addrs[Inode.NDIRECT], indirectData);
+            ByteBuffer buf = ByteBuffer.wrap(indirectData);
+            buf.order(ByteOrder.LITTLE_ENDIAN);
+
+            for (int i = 0; i < 256; i++) {
+                int blockNum = buf.getInt();
+                if (blockNum != 0) {
+                    bfree(blockNum);
+                }
+            }
+
+            // Free the indirect block itself
+            bfree(ip.addrs[Inode.NDIRECT]);
+            ip.addrs[Inode.NDIRECT] = 0;
+        }
+
+        ip.size = 0;
+        updateInode(ip); // Save the cleared inode back to disk
+    }
+
+    private void bfree(int blockNum) {
+        byte[] bitmap = new byte[DiskDevice.BSIZE];
+        int bitmapBlock = sb.bmapstart + blockNum / (DiskDevice.BSIZE * 8);
+        disk.read(bitmapBlock, bitmap);
+
+        int bitIndex = blockNum % (DiskDevice.BSIZE * 8);
+        bitmap[bitIndex / 8] &= (byte) ~(1 << (bitIndex % 8));
+
+        disk.write(bitmapBlock, bitmap);
+
+        byte[] zeros = new byte[DiskDevice.BSIZE];
+        disk.write(blockNum, zeros);
+    }
 }
