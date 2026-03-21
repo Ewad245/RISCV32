@@ -3,6 +3,7 @@ package cse311.gui;
 import cse311.RV32Computer;
 import cse311.Constants.MemoryMode;
 import cse311.Constants.OSConstants;
+import cse311.Logger.FileLogger;
 import cse311.kernel.Kernel;
 import cse311.kernel.KernelConfig;
 import javafx.application.Application;
@@ -64,7 +65,7 @@ public class GuiApp extends Application {
     private void initializeSimulation() throws URISyntaxException {
         String file_separator = System.getProperty("file.separator");
         // Same logic as App.java
-        cse311.Logger.FileLogger.log("GUI: Initializing Simulation Hardware...");
+        FileLogger.log("GUI: Initializing Simulation Hardware...");
 
         // Initialize 128MB RAM, CPU, Memory Management Techniques
         // We can make this configurable later via a "New Simulation" dialog
@@ -82,9 +83,9 @@ public class GuiApp extends Application {
         File diskImage = new File(imgPath);
         if (diskImage.exists()) {
             kernel.mountFileSystem(imgPath);
-            cse311.Logger.FileLogger.log("GUI: Disk image '" + imgPath + "' mounted.");
+            FileLogger.log("GUI: Disk image '" + imgPath + "' mounted.");
         } else {
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.INFO,
+            FileLogger.log(FileLogger.LogLevel.INFO,
                     "GUI: fs.img not found at " + imgPath + ". File system calls will fail.");
         }
 
@@ -96,19 +97,19 @@ public class GuiApp extends Application {
         String elfPath = Paths.get(resourceUrl.toURI()).toString();
         File f = new File(elfPath);
 
-        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+        FileLogger.log(FileLogger.LogLevel.DEBUG,
                 "GUI: Looking for Init ELF at: " + f.getAbsolutePath());
 
         if (f.exists()) {
             try {
-                cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                FileLogger.log(FileLogger.LogLevel.DEBUG,
                         "GUI: Found init.elf. Creating task...");
                 kernel.createTask(elfPath);
-                cse311.Logger.FileLogger.log("GUI: Init task created (PID 1).");
+                FileLogger.log("GUI: Init task created (PID 1).");
             } catch (Exception e) {
-                cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                FileLogger.log(FileLogger.LogLevel.ERROR,
                         "GUI: Failed to create Init task: " + e.getMessage());
-                cse311.Logger.FileLogger.log(e);
+                FileLogger.log(e);
             }
         } else {
             // Fallback to old path for backwards compatibility
@@ -116,15 +117,15 @@ public class GuiApp extends Application {
             File oldFile = new File(oldPath);
             if (oldFile.exists()) {
                 try {
-                    cse311.Logger.FileLogger.log("GUI: Using legacy ELF path: " + oldPath);
+                    FileLogger.log("GUI: Using legacy ELF path: " + oldPath);
                     kernel.createTask(oldPath);
-                    cse311.Logger.FileLogger.log("GUI: Init task created from legacy path.");
+                    FileLogger.log("GUI: Init task created from legacy path.");
                 } catch (Exception e) {
-                    cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    FileLogger.log(FileLogger.LogLevel.ERROR,
                             "GUI: Failed to create Init task: " + e.getMessage());
                 }
             } else {
-                cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                FileLogger.log(FileLogger.LogLevel.ERROR,
                         "GUI: Error - init.elf NOT FOUND at " + f.getAbsolutePath());
             }
         }

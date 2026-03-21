@@ -42,5 +42,15 @@ public enum WaitReason {
     /**
      * Task is waiting for a condition variable signal
      */
-    CONDITION_VARIABLE
+    CONDITION_VARIABLE,
+    
+    /**
+     * Task is waiting for pipe data to read
+     */
+    PIPE_READ,
+    
+    /**
+     * Task is waiting for pipe space to write
+     */
+    PIPE_WRITE
 }

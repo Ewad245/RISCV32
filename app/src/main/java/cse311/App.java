@@ -5,6 +5,7 @@ package cse311;
 
 import cse311.Constants.MemoryMode;
 import cse311.Constants.OSConstants;
+import cse311.Logger.FileLogger;
 import cse311.kernel.Kernel;
 import cse311.kernel.KernelConfig;
 import cse311.programs.InitTask;
@@ -13,9 +14,9 @@ import java.io.File;
 public class App {
 
     public static void main(String[] args) {
-        cse311.Logger.FileLogger.log("==========================================");
-        cse311.Logger.FileLogger.log("      RISC-V Java Kernel Bootloader       ");
-        cse311.Logger.FileLogger.log("==========================================");
+        FileLogger.log("==========================================");
+        FileLogger.log("      RISC-V Java Kernel Bootloader       ");
+        FileLogger.log("==========================================");
 
         try {
             // --------------------------------------------------------
@@ -42,30 +43,30 @@ public class App {
             File diskImage = new File(imgPath);
             if (diskImage.exists()) {
                 kernel.mountFileSystem(imgPath);
-                cse311.Logger.FileLogger.log("Disk image 'fs.img' loaded.");
+                FileLogger.log("Disk image 'fs.img' loaded.");
             } else {
-                cse311.Logger.FileLogger.log("Warning: 'fs.img' not found. File system calls will fail.");
-                cse311.Logger.FileLogger.log("Run 'cse311.Mkfs' to generate the disk image.");
+                FileLogger.log("Warning: 'fs.img' not found. File system calls will fail.");
+                FileLogger.log("Run 'cse311.Mkfs' to generate the disk image.");
             }
 
             // --------------------------------------------------------
             // 4. LAUNCH INIT PROCESS (PID 1)
             // Java Simulated Init Task or from ELF
             // --------------------------------------------------------
-            cse311.Logger.FileLogger.log("Bootloader: Spawning Init process (PID 1)...");
+            FileLogger.log("Bootloader: Spawning Init process (PID 1)...");
 
             // Load Init from ELF
             String elfPath = "app" + OSConstants.file_seperator + "src" + OSConstants.file_seperator + "main"
                     + OSConstants.file_seperator +
                     "resources" + OSConstants.file_seperator + "user_programs" + OSConstants.file_seperator
                     + "init.elf";
-            cse311.Logger.FileLogger.log("Current working directory: " + System.getProperty("user.dir"));
-            cse311.Logger.FileLogger.log("Looking for ELF at: " + elfPath);
+            FileLogger.log("Current working directory: " + System.getProperty("user.dir"));
+            FileLogger.log("Looking for ELF at: " + elfPath);
             File f = new File(elfPath);
-            cse311.Logger.FileLogger.log("File exists: " + f.exists());
-            cse311.Logger.FileLogger.log("Absolute path: " + f.getAbsolutePath());
+            FileLogger.log("File exists: " + f.exists());
+            FileLogger.log("Absolute path: " + f.getAbsolutePath());
             if (f.exists()) {
-                cse311.Logger.FileLogger.log("Bootloader: Pre-loading user ELF: " + elfPath);
+                FileLogger.log("Bootloader: Pre-loading user ELF: " + elfPath);
                 kernel.createTask(elfPath);
             } else {
                 // Fallback to old path for backwards compatibility
@@ -73,7 +74,7 @@ public class App {
                         + "init.elf";
                 File oldFile = new File(oldPath);
                 if (oldFile.exists()) {
-                    cse311.Logger.FileLogger.log("Bootloader: Using legacy ELF path: " + oldPath);
+                    FileLogger.log("Bootloader: Using legacy ELF path: " + oldPath);
                     kernel.createTask(oldPath);
                 }
             }
@@ -83,13 +84,13 @@ public class App {
             // --------------------------------------------------------
 
         } catch (NullPointerException e) {
-            cse311.Logger.FileLogger.log("Path invalid: " + e.getMessage());
-            cse311.Logger.FileLogger.log(e);
+            FileLogger.log("Path invalid: " + e.getMessage());
+            FileLogger.log(e);
         } catch (Exception e) {
-            cse311.Logger.FileLogger.log("\nKERNEL PANIC: " + e.getMessage());
-            cse311.Logger.FileLogger.log(e);
+            FileLogger.log("\nKERNEL PANIC: " + e.getMessage());
+            FileLogger.log(e);
         } finally {
-            cse311.Logger.FileLogger.log("\nSystem Halted.");
+            FileLogger.log("\nSystem Halted.");
         }
     }
 }

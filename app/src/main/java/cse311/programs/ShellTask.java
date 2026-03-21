@@ -9,6 +9,8 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Scanner;
 
+// This is not tested
+@Deprecated
 public class ShellTask extends JavaTask {
 
     // The shell's state machine

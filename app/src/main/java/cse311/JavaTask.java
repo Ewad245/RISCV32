@@ -8,6 +8,9 @@ import cse311.kernel.process.TaskState;
  * An abstract base class for tasks whose logic is written in Java,
  * not RISC-V ELF code.
  */
+
+// This is not tested
+@Deprecated
 public abstract class JavaTask extends Task {
 
     protected Kernel kernel;

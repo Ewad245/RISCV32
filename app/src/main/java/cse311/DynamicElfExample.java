@@ -3,6 +3,7 @@ package cse311;
 import java.io.IOException;
 
 import cse311.Exception.ElfException;
+import cse311.Logger.FileLogger;
 
 /**
  * Example demonstrating how to use the new dynamic ELF loading system
@@ -23,7 +24,7 @@ public class DynamicElfExample {
 
     public static void runElfProgram(String elfFile) {
         try {
-            cse311.Logger.FileLogger.log("Loading ELF program: " + elfFile);
+            FileLogger.log("Loading ELF program: " + elfFile);
 
             // Create memory manager with larger memory for ELF programs
             MemoryManager memory = new MemoryManager();
@@ -35,8 +36,8 @@ public class DynamicElfExample {
             elfLoader.loadElf(elfFile);
             int entryPoint = elfLoader.getEntryPoint();
 
-            cse311.Logger.FileLogger.log("ELF loaded successfully!");
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+            FileLogger.log("ELF loaded successfully!");
+            FileLogger.log(FileLogger.LogLevel.DEBUG,
                     "Entry point: 0x" + Integer.toHexString(entryPoint));
 
             // Create and configure CPU
@@ -47,9 +48,9 @@ public class DynamicElfExample {
             // For RISC-V programs, stack typically starts high in memory
             cpu.setRegister(2, 0x7C00000); // sp register (x2)
 
-            cse311.Logger.FileLogger.log("Starting program execution...");
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG, "Memory layout:");
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG, memory.getMemoryMap());
+            FileLogger.log("Starting program execution...");
+            FileLogger.log(FileLogger.LogLevel.DEBUG, "Memory layout:");
+            FileLogger.log(FileLogger.LogLevel.DEBUG, memory.getMemoryMap());
 
             // Start CPU execution
             cpu.turnOn();
@@ -62,15 +63,15 @@ public class DynamicElfExample {
             }
 
         } catch (IOException e) {
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+            FileLogger.log(FileLogger.LogLevel.ERROR,
                     "Failed to read ELF file: " + e.getMessage());
         } catch (ElfException e) {
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+            FileLogger.log(FileLogger.LogLevel.ERROR,
                     "Invalid ELF file: " + e.getMessage());
         } catch (Exception e) {
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+            FileLogger.log(FileLogger.LogLevel.ERROR,
                     "Execution failed: " + e.getMessage());
-            cse311.Logger.FileLogger.log(e);
+            FileLogger.log(e);
         }
     }
 
@@ -113,15 +114,15 @@ public class DynamicElfExample {
             cpu.setProgramCounterEntryPoint(loadAddress);
             cpu.setRegister(2, 0x7C00000); // Set stack pointer
 
-            cse311.Logger.FileLogger.log("Running test program...");
+            FileLogger.log("Running test program...");
             cpu.turnOn();
 
             Thread.sleep(100); // Let it run briefly
 
         } catch (Exception e) {
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+            FileLogger.log(FileLogger.LogLevel.ERROR,
                     "Test program failed: " + e.getMessage());
-            cse311.Logger.FileLogger.log(e);
+            FileLogger.log(e);
         }
     }
 }

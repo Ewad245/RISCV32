@@ -9,11 +9,14 @@ import cse311.*;
 import cse311.Constants.OSConstants;
 import cse311.Exception.ElfException;
 import cse311.Exception.MemoryAccessException;
+import cse311.Logger.FileLogger;
+import cse311.Logger.FileLogger.LogLevel;
 import cse311.kernel.Kernel;
 import cse311.kernel.NonContiguous.paging.AddressSpace;
 import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
 import cse311.kernel.fs.FileDescriptor;
 import cse311.kernel.fs.Inode;
+import cse311.kernel.fs.Pipe;
 import cse311.kernel.memory.ProcessMemoryCoordinator;
 import cse311.kernel.process.ProgramInfo;
 import cse311.kernel.process.Task;
@@ -70,6 +73,7 @@ public class SystemCallHandler {
     public static final int SYS_OPEN = 56; // openat/open
     public static final int SYS_CLOSE = 57;
     public static final int SYS_FSTAT = 80;
+    public static final int SYS_PIPE = 59; // Linux RISC-V pipe syscall
 
     public static final int O_CREATE = 64; // Linux O_CREAT flag
 
@@ -102,7 +106,7 @@ public class SystemCallHandler {
                     break;
 
                 case SYS_WRITE:
-                    result = handleWrite(task, arg0, arg1, arg2);
+                    result = handleWrite(cpu, task, arg0, arg1, arg2);
                     break;
 
                 case SYS_READ:
@@ -209,6 +213,10 @@ public class SystemCallHandler {
                     result = handleChdir(task, arg0);
                     break;
 
+                case SYS_PIPE:
+                    result = handlePipe(task, arg0);
+                    break;
+
                 case SYS_BRK:
                     result = handleBrk(task, arg0);
                     break;
@@ -266,7 +274,7 @@ public class SystemCallHandler {
 
                 default:
                     handled = false;
-                    cse311.Logger.FileLogger
+                    FileLogger
                             .log("Unknown system call: " + syscallNumber + " from task " + task.getId());
                     result = -1; // ENOSYS
             }
@@ -285,7 +293,7 @@ public class SystemCallHandler {
             }
 
         } catch (Exception e) {
-            cse311.Logger.FileLogger.log("System call error: " + e.getMessage());
+            FileLogger.log("System call error: " + e.getMessage());
             cpu.setRegister(10, -1); // Return error
         }
     }
@@ -298,7 +306,7 @@ public class SystemCallHandler {
         return exitCode;
     }
 
-    private int handleWrite(Task task, int fd, int bufferAddr, int count) {
+    private int handleWrite(RV32Cpu cpu, Task task, int fd, int bufferAddr, int count) {
         // 1. Console Output (Stdout/Stderr)
         if (fd == 1 || fd == 2) {
             try {
@@ -318,11 +326,11 @@ public class SystemCallHandler {
                 }
 
                 String output = sb.toString();
-                cse311.Logger.FileLogger.print(output);
+                FileLogger.print(output);
                 return output.length();
 
             } catch (Exception e) {
-                cse311.Logger.FileLogger.log("Write error: " + e.getMessage());
+                FileLogger.log("Write error: " + e.getMessage());
                 return -1;
             }
         }
@@ -355,6 +363,65 @@ public class SystemCallHandler {
                 file.offset += written;
             return written;
         }
+
+        // 3. Pipe Output
+        if (file.type == FileDescriptor.FD_PIPE) {
+            cse311.kernel.fs.Pipe pipe = file.pipe;
+            int bytesWritten = 0;
+
+            // If read end is closed, return -1 (broken pipe)
+            if (!pipe.isReadOpen()) {
+                FileLogger.log(FileLogger.LogLevel.DEBUG,
+                        "SYS_WRITE: Broken pipe (read end closed) for task " + task.getId());
+                return -1;
+            }
+
+            // If pipe is full -> BLOCK the task
+            if (pipe.isFull()) {
+                FileLogger.log(FileLogger.LogLevel.DEBUG,
+                        "SYS_WRITE: Blocking task " + task.getId() + " on pipe (full)");
+
+                task.waitFor(WaitReason.PIPE_WRITE);
+                task.setBlockedOnPipe(pipe);
+                kernel.getTaskManager().addTaskToPipeWaitQueue(pipe, task);
+
+                // Rewind PC to retry syscall when woken up
+                int retryPC = cpu.getProgramCounter() - 4;
+                cpu.setProgramCounter(retryPC);
+                task.setProgramCounter(retryPC);
+
+                return 0;
+            }
+
+            // Read data from user memory and write to pipe
+            MemoryManager mem = kernel.getMemory();
+            while (!pipe.isFull() && bytesWritten < count) {
+                byte data;
+                try {
+                    if (mem instanceof TaskAwareMemoryManager) {
+                        data = ((TaskAwareMemoryManager) mem).readByteFromTask(task.getId(), bufferAddr + bytesWritten);
+                    } else {
+                        data = mem.readByte(bufferAddr + bytesWritten);
+                    }
+                } catch (Exception e) {
+                    break;
+                }
+
+                if (!pipe.writeByte(data))
+                    break;
+                bytesWritten++;
+            }
+
+            // Wake up any readers that were blocked because pipe was empty
+            kernel.getTaskManager().wakeTasksBlockedOnPipe(pipe);
+
+            FileLogger.log(LogLevel.DEBUG,
+                    "SYS_WRITE: Wrote " + bytesWritten + " bytes to pipe for task " + task.getId() +
+                            " (pipe now has " + pipe.availableBytes() + " bytes)");
+
+            return bytesWritten;
+        }
+
         return -1;
     }
 
@@ -391,7 +458,7 @@ public class SystemCallHandler {
                 return 1;
 
             } catch (Exception e) {
-                cse311.Logger.FileLogger.log("Read error: " + e.getMessage());
+                FileLogger.log("Read error: " + e.getMessage());
                 return -1;
             }
         }
@@ -425,6 +492,71 @@ public class SystemCallHandler {
             }
             return n;
         }
+
+        // 3. Pipe Input
+        if (file.type == FileDescriptor.FD_PIPE) {
+            cse311.kernel.fs.Pipe pipe = file.pipe;
+            int bytesRead = 0;
+
+            // If pipe is empty and write end is closed, return 0 (EOF)
+            if (pipe.isEmpty() && !pipe.isWriteOpen()) {
+                FileLogger.log(FileLogger.LogLevel.DEBUG,
+                        "SYS_READ: Pipe EOF for task " + task.getId());
+                return 0;
+            }
+
+            // If pipe is empty but write end is open -> BLOCK the task
+            if (pipe.isEmpty()) {
+                FileLogger.log(FileLogger.LogLevel.DEBUG,
+                        "SYS_READ: Blocking task " + task.getId() + " on pipe (empty, writeOpen=" + pipe.isWriteOpen()
+                                + ")");
+
+                task.waitFor(WaitReason.PIPE_READ);
+                task.setBlockedOnPipe(pipe);
+                kernel.getTaskManager().addTaskToPipeWaitQueue(pipe, task);
+
+                // Rewind PC to retry syscall when woken up
+                int retryPC = cpu.getProgramCounter() - 4;
+                cpu.setProgramCounter(retryPC);
+                task.setProgramCounter(retryPC);
+
+                return 0;
+            }
+
+            // Read data from pipe into user memory
+            MemoryManager mem = kernel.getMemory();
+            FileLogger.log(LogLevel.DEBUG,
+                    "SYS_READ: Pipe has " + pipe.availableBytes() + " bytes, reading up to " + count);
+
+            while (!pipe.isEmpty() && bytesRead < count) {
+                int data = pipe.readByte();
+                if (data < 0)
+                    break;
+                try {
+                    if (mem instanceof TaskAwareMemoryManager) {
+                        ((TaskAwareMemoryManager) mem).writeByteToTask(task.getId(), bufferAddr + bytesRead,
+                                (byte) data);
+                    } else {
+                        mem.writeByte(bufferAddr + bytesRead, (byte) data);
+                    }
+                } catch (MemoryAccessException ex) {
+                    FileLogger.log(LogLevel.ERROR, ex);
+                    break;
+                }
+
+                bytesRead++;
+            }
+
+            // Wake up any writers that were blocked because pipe was full
+            kernel.getTaskManager().wakeTasksBlockedOnPipe(pipe);
+
+            FileLogger.log(LogLevel.DEBUG,
+                    "SYS_READ: Read " + bytesRead + " bytes from pipe for task " + task.getId() +
+                            " (pipe now has " + pipe.availableBytes() + " bytes)");
+
+            return bytesRead;
+        }
+
         return -1;
     }
 
@@ -502,6 +634,9 @@ public class SystemCallHandler {
             // Parent gets PID, Child gets 0
             child.getRegisters()[10] = 0;
 
+            FileLogger.log(FileLogger.LogLevel.DEBUG,
+                    "SYS_CLONE: Child PID=" + child.getId() + ", child.a0=0, parent.a0 will be=" + child.getId());
+
             // 5. Handle Stack Pointer
             // If a custom stack was provided (standard for threads), set it
             if (userStackPtr == 0) {
@@ -533,13 +668,16 @@ public class SystemCallHandler {
             child.setState(TaskState.READY);
             kernel.addTaskToScheduler(child);
 
-            cse311.Logger.FileLogger.log("Clone: Created " + (shareMemory ? "thread" : "process")
+            FileLogger.log(FileLogger.LogLevel.DEBUG,
+                    "SYS_CLONE: Scheduled child " + child.getId() + " (state=" + child.getState() + ")");
+
+            FileLogger.log("Clone: Created " + (shareMemory ? "thread" : "process")
                     + " PID " + child.getId() + " for Parent " + parent.getId());
 
             return child.getId(); // Return PID to Parent
 
         } catch (Exception e) {
-            cse311.Logger.FileLogger.log("Clone failed: " + e.getMessage());
+            FileLogger.log("Clone failed: " + e.getMessage());
             return -1;
         }
     }
@@ -558,11 +696,11 @@ public class SystemCallHandler {
         boolean hasMatchingChildren = false;
 
         List<Task> children = task.getChildren();
-        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+        FileLogger.log(FileLogger.LogLevel.DEBUG,
                 "handleWait: Task " + task.getId() + " has " + children.size() + " children. targetPid=" + targetPid);
 
         for (Task child : children) {
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG, "  - Checking child " + child.getId()
+            FileLogger.log(FileLogger.LogLevel.DEBUG, "  - Checking child " + child.getId()
                     + ", isThread=" + child.isThread() + ", state=" + child.getState());
 
             // If waiting for a specific PID, skip non-matching children
@@ -595,7 +733,7 @@ public class SystemCallHandler {
                         MemoryManager manager = kernel.getMemory();
                         manager.writeWord(statusAddr, exitCode);
                     } catch (Exception e) {
-                        cse311.Logger.FileLogger.log("SYS_WAIT: Failed to write exit code to user memory.");
+                        FileLogger.log("SYS_WAIT: Failed to write exit code to user memory.");
                         return childPid; // Return the PID anyway, without writing status
                     }
                 }
@@ -633,7 +771,7 @@ public class SystemCallHandler {
         ProcessMemoryCoordinator coordinator = kernel.getMemoryCoordinator();
 
         if (coordinator == null) {
-            cse311.Logger.FileLogger.log("SYS_EXEC: Memory Coordinator not initialized.");
+            FileLogger.log("SYS_EXEC: Memory Coordinator not initialized.");
             return -1;
         }
 
@@ -678,10 +816,10 @@ public class SystemCallHandler {
                 elfData = new byte[inode.size];
                 int bytesRead = kernel.getFileSystem().readi(inode, elfData, 0, inode.size);
                 if (bytesRead != inode.size) {
-                    cse311.Logger.FileLogger.log("SYS_EXEC: Partial read from fs.img: " + fsPath);
+                    FileLogger.log("SYS_EXEC: Partial read from fs.img: " + fsPath);
                     elfData = null; // Fall back to host filesystem
                 } else {
-                    cse311.Logger.FileLogger.log("SYS_EXEC: Loaded " + bytesRead + " bytes from fs.img: " + fsPath);
+                    FileLogger.log("SYS_EXEC: Loaded " + bytesRead + " bytes from fs.img: " + fsPath);
                 }
             }
         }
@@ -692,9 +830,9 @@ public class SystemCallHandler {
                     + ".elf";
             try {
                 elfData = Files.readAllBytes(Paths.get(fullPath));
-                cse311.Logger.FileLogger.log("SYS_EXEC: Loaded from host filesystem: " + fullPath);
+                FileLogger.log("SYS_EXEC: Loaded from host filesystem: " + fullPath);
             } catch (Exception e) {
-                cse311.Logger.FileLogger.log("SYS_EXEC: Failed to read file: " + fullPath);
+                FileLogger.log("SYS_EXEC: Failed to read file: " + fullPath);
                 return -1;
             }
         }
@@ -708,7 +846,7 @@ public class SystemCallHandler {
             try {
                 elfEndAddress = ElfLoader.calculateRequiredMemory(elfData);
             } catch (ElfException e) {
-                cse311.Logger.FileLogger.log("SYS_EXEC: Bad ELF format: " + e.getMessage());
+                FileLogger.log("SYS_EXEC: Bad ELF format: " + e.getMessage());
                 return -1;
             }
 
@@ -748,7 +886,7 @@ public class SystemCallHandler {
             return argvList.size();
 
         } catch (Exception e) {
-            cse311.Logger.FileLogger.log("SYS_EXEC: Failed: " + e.getMessage());
+            FileLogger.log("SYS_EXEC: Failed: " + e.getMessage());
             task.setState(TaskState.TERMINATED);
             return -1;
         }
@@ -766,7 +904,7 @@ public class SystemCallHandler {
                 sb.append((char) b);
             }
 
-            cse311.Logger.FileLogger.log(sb.toString());
+            FileLogger.log(sb.toString());
             return length;
 
         } catch (Exception e) {
@@ -824,7 +962,7 @@ public class SystemCallHandler {
             long wakeupTime = System.currentTimeMillis() + durationMs;
             task.waitFor(WaitReason.TIMER, wakeupTime);
 
-            cse311.Logger.FileLogger.log("SYS_NANOSLEEP: Task " + task.getId() +
+            FileLogger.log("SYS_NANOSLEEP: Task " + task.getId() +
                     " sleeping for " + durationMs + "ms " +
                     "(Sec: " + tv_sec + ", NSec: " + tv_nsec + ")");
 
@@ -832,7 +970,7 @@ public class SystemCallHandler {
             return 0;
 
         } catch (MemoryAccessException e) {
-            cse311.Logger.FileLogger.log("SYS_NANOSLEEP: Failed to read struct from 0x" +
+            FileLogger.log("SYS_NANOSLEEP: Failed to read struct from 0x" +
                     Integer.toHexString(reqPtr));
             return -14; // -EFAULT (Bad address in Linux)
         }
@@ -862,7 +1000,7 @@ public class SystemCallHandler {
         ProgramInfo info = task.getProgramInfo();
         int heapStart = (info != null) ? info.heapStart : 0;
         if (Integer.compareUnsigned(newBreak, heapStart) < 0) {
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+            FileLogger.log(FileLogger.LogLevel.DEBUG,
                     "SYS_BRK: Refused shrink below heapStart for PID " + task.getId()
                             + " (requested=0x" + Integer.toHexString(newBreak)
                             + ", heapStart=0x" + Integer.toHexString(heapStart) + ")");
@@ -872,7 +1010,7 @@ public class SystemCallHandler {
         // Validate: new break must not collide with the stack
         int stackBase = task.getStackBase();
         if (Integer.compareUnsigned(newBreak, stackBase) >= 0) {
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+            FileLogger.log(FileLogger.LogLevel.DEBUG,
                     "SYS_BRK: Refused expansion into stack for PID " + task.getId()
                             + " (requested=0x" + Integer.toHexString(newBreak)
                             + ", stackBase=0x" + Integer.toHexString(stackBase) + ")");
@@ -888,13 +1026,13 @@ public class SystemCallHandler {
             if (coordinator != null) {
                 boolean success = coordinator.expandHeap(task.getId(), currentBreak, newBreak);
                 if (!success) {
-                    cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                    FileLogger.log(FileLogger.LogLevel.DEBUG,
                             "SYS_BRK: Out of memory for PID " + task.getId());
                     return currentBreak;
                 }
             }
         } catch (Exception e) {
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+            FileLogger.log(FileLogger.LogLevel.ERROR,
                     "SYS_BRK: expandHeap failed for PID " + task.getId() + ": " + e.getMessage());
             return currentBreak;
         }
@@ -902,7 +1040,7 @@ public class SystemCallHandler {
         // Accept the new program break
         task.setProgramBreak(newBreak);
 
-        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+        FileLogger.log(FileLogger.LogLevel.DEBUG,
                 "SYS_BRK: PID " + task.getId() + " break moved 0x"
                         + Integer.toHexString(currentBreak) + " -> 0x"
                         + Integer.toHexString(newBreak));
@@ -937,13 +1075,13 @@ public class SystemCallHandler {
 
                 // Add a safety break for very long or non-terminated strings
                 if (sb.length() > 4096) { // 4KB max path/arg length
-                    cse311.Logger.FileLogger.log("readStringFromTask: String too long or not terminated.");
+                    FileLogger.log("readStringFromTask: String too long or not terminated.");
                     return null;
                 }
             }
             return sb.toString();
         } catch (MemoryAccessException e) {
-            cse311.Logger.FileLogger.log("readStringFromTask: Memory access error at 0x" + Integer.toHexString(va));
+            FileLogger.log("readStringFromTask: Memory access error at 0x" + Integer.toHexString(va));
             return null;
         }
     }
@@ -988,22 +1126,22 @@ public class SystemCallHandler {
 
     private int handleMkdir(Task task, int pathAddr, int mode) {
         String path = readStringFromTask(task, pathAddr);
-        cse311.Logger.FileLogger.log("SYS_MKDIR: path=" + path);
+        FileLogger.log("SYS_MKDIR: path=" + path);
         if (path == null)
             return -1;
 
         StringBuilder nameBuilder = new StringBuilder();
         Inode dp = kernel.getFileSystem().nameiparent(task, path, nameBuilder);
-        cse311.Logger.FileLogger
+        FileLogger
                 .log("SYS_MKDIR: dp=" + (dp != null ? dp.inum : "null") + " name=" + nameBuilder.toString());
         if (dp == null || nameBuilder.length() == 0) {
-            cse311.Logger.FileLogger.log("SYS_MKDIR: nameiparent failed");
+            FileLogger.log("SYS_MKDIR: nameiparent failed");
             return -1;
         }
 
         String name = nameBuilder.toString();
         if (kernel.getFileSystem().dirlookup(dp, name) != null) {
-            cse311.Logger.FileLogger.log("SYS_MKDIR: dir already exists");
+            FileLogger.log("SYS_MKDIR: dir already exists");
             return -1;
         }
 
@@ -1011,11 +1149,11 @@ public class SystemCallHandler {
         try {
             ip = kernel.getFileSystem().ialloc(Inode.T_DIR);
         } catch (Exception e) {
-            cse311.Logger.FileLogger.log("SYS_MKDIR: ialloc threw exception: " + e.getMessage());
+            FileLogger.log("SYS_MKDIR: ialloc threw exception: " + e.getMessage());
             return -1;
         }
 
-        cse311.Logger.FileLogger.log("SYS_MKDIR: allocated inode " + (ip != null ? ip.inum : "null"));
+        FileLogger.log("SYS_MKDIR: allocated inode " + (ip != null ? ip.inum : "null"));
         if (ip == null)
             return -1;
 
@@ -1024,20 +1162,20 @@ public class SystemCallHandler {
         // Wait, in xv6: ip->nlink = 1; ip->type = T_DIR; iupdate(ip);
         kernel.getFileSystem().updateInode(ip);
 
-        cse311.Logger.FileLogger.log("SYS_MKDIR: linking . and ..");
+        FileLogger.log("SYS_MKDIR: linking . and ..");
         kernel.getFileSystem().dirlink(ip, ".", ip.inum);
         kernel.getFileSystem().dirlink(ip, "..", dp.inum);
 
         dp.nlink++;
         kernel.getFileSystem().updateInode(dp);
 
-        cse311.Logger.FileLogger.log("SYS_MKDIR: linking into parent");
+        FileLogger.log("SYS_MKDIR: linking into parent");
         if (kernel.getFileSystem().dirlink(dp, name, ip.inum) < 0) {
-            cse311.Logger.FileLogger.log("SYS_MKDIR: dirlink into parent failed");
+            FileLogger.log("SYS_MKDIR: dirlink into parent failed");
             return -1;
         }
 
-        cse311.Logger.FileLogger.log("SYS_MKDIR: success!");
+        FileLogger.log("SYS_MKDIR: success!");
         return 0;
     }
 
@@ -1158,8 +1296,61 @@ public class SystemCallHandler {
         if (file == null)
             return -1;
 
-        task.closeFd(fd);
+        // If this is a pipe, we need to wake up tasks blocked on it before closing
+        if (file.type == FileDescriptor.FD_PIPE && file.pipe != null) {
+            Pipe pipe = file.pipe;
+            FileLogger.log(FileLogger.LogLevel.DEBUG,
+                    "SYS_CLOSE: Closing pipe fd " + fd + " for task " + task.getId());
+
+            // Close the file descriptor (which marks read/write ends as closed)
+            task.closeFd(fd);
+
+            // Wake up any tasks blocked on this pipe
+            kernel.getTaskManager().wakeTasksBlockedOnPipe(pipe);
+        } else {
+            task.closeFd(fd);
+        }
+
         return 0;
+    }
+
+    private int handlePipe(Task task, int fdArrayAddr) {
+        try {
+            Pipe pipe = new Pipe();
+            FileDescriptor readFd = new FileDescriptor(pipe, true, false);
+            FileDescriptor writeFd = new FileDescriptor(pipe, false, true);
+
+            int fd0 = task.allocFd(readFd);
+            int fd1 = task.allocFd(writeFd);
+
+            if (fd0 < 0 || fd1 < 0) {
+                if (fd0 >= 0)
+                    task.closeFd(fd0);
+                if (fd1 >= 0)
+                    task.closeFd(fd1);
+                return -1;
+            }
+
+            MemoryManager mem = kernel.getMemory();
+            try {
+                mem.writeWord(fdArrayAddr, fd0);
+                mem.writeWord(fdArrayAddr + 4, fd1);
+            } catch (MemoryAccessException e) {
+                FileLogger.log("SYS_PIPE: Memory write failed: " + e.getMessage());
+                task.closeFd(fd0);
+                task.closeFd(fd1);
+                return -1;
+            }
+
+            FileLogger.log(FileLogger.LogLevel.DEBUG,
+                    "SYS_PIPE: Created pipe with fds [" + fd0 + ", " + fd1 + "] for task " + task.getId());
+
+            return 0;
+        } catch (Exception e) {
+            FileLogger.log("SYS_PIPE failed: " + e.getMessage());
+            FileLogger.log(e);
+            return -1;
+        }
     }
 
     /**
@@ -1186,7 +1377,7 @@ public class SystemCallHandler {
             kernel.getTaskManager().waitOnCondition(task, cvId);
 
             // 3. Force the return value NOW.
-            // Because the task is going to sleep, the standard mechanism at the end 
+            // Because the task is going to sleep, the standard mechanism at the end
             // of handleSystemCall (which checks if the task is WAITING) will SKIP it.
             cpu.setRegister(10, 0);
             task.getRegisters()[10] = 0;
@@ -1198,7 +1389,7 @@ public class SystemCallHandler {
             return 0;
 
         } catch (Exception e) {
-            cse311.Logger.FileLogger.log("CV_WAIT failed for task " + task.getId() + ": " + e.getMessage());
+            FileLogger.log("CV_WAIT failed for task " + task.getId() + ": " + e.getMessage());
             return -1;
         }
     }

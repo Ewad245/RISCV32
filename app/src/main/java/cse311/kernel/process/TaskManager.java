@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import cse311.kernel.fs.Pipe;
 
 /**
  * Manages task creation, destruction, and lifecycle
@@ -31,6 +32,10 @@ public class TaskManager {
     // Condition Variables tracking
     // Maps cvId -> Queue of Tasks waiting on that CV
     private final Map<Integer, java.util.Queue<Task>> conditionVariables = new ConcurrentHashMap<>();
+
+    // Pipe wait queues
+    // Maps Pipe -> Queue of Tasks waiting on that Pipe
+    private final Map<Pipe, java.util.Queue<Task>> pipeWaitQueues = new ConcurrentHashMap<>();
 
     public TaskManager(Kernel kernel, KernelMemoryManager kernelMemory) {
         this.kernel = kernel;
@@ -169,15 +174,19 @@ public class TaskManager {
             // D. Important: If the child was already ZOMBIE (TERMINATED),
             // Init needs to know so it can reap it immediately.
             // In a real OS, we might send a SIGCHLD signal here.
-            if (child.getState() == TaskState.TERMINATED) {
-                if (initTask.getState() == TaskState.WAITING &&
-                        initTask.getWaitReason() == cse311.WaitReason.PROCESS_EXIT) {
+            synchronized (initTask) {
+                if (child.getState() == TaskState.TERMINATED) {
+                    if (initTask.getState() == TaskState.WAITING &&
+                            initTask.getWaitReason() == cse311.WaitReason.PROCESS_EXIT) {
 
-                    int waitingFor = initTask.getWaitingForPid();
-                    if (waitingFor == -1 || waitingFor == child.getId()) {
-                        initTask.wakeup();
-                        kernel.addTaskToScheduler(initTask);
-                        cse311.Logger.FileLogger.log("TaskManager: Woke init to reap adopted zombie " + child.getId());
+                        int waitingFor = initTask.getWaitingForPid();
+                        if (waitingFor == -1 || waitingFor == child.getId()) {
+                            kernel.removeFromWaitQueue(initTask);
+                            initTask.wakeup();
+                            kernel.addTaskToScheduler(initTask);
+                            cse311.Logger.FileLogger
+                                    .log("TaskManager: Woke init to reap adopted zombie " + child.getId());
+                        }
                     }
                 }
             }
@@ -292,6 +301,9 @@ public class TaskManager {
 
         // 7. Copy heap state
         child.setProgramBreak(parent.getProgramBreak());
+
+        // Copy file descriptors to child so it can use pipes/files!
+        child.dupFileDescriptors(parent);
 
         // 8. Hierarchy & Scheduler
         child.setAllocatedSize(childMemorySize);
@@ -462,6 +474,38 @@ public class TaskManager {
             allWaiters.addAll(queue);
         }
         return Collections.unmodifiableList(allWaiters);
+    }
+
+    // --- Pipe Support ---
+
+    /**
+     * Blocks a task waiting for a Pipe
+     * 
+     * @param pipe The pipe the task is waiting on
+     * @param task The task to block
+     */
+    public void addTaskToPipeWaitQueue(Pipe pipe, Task task) {
+        pipeWaitQueues.computeIfAbsent(pipe, k -> new java.util.LinkedList<>()).add(task);
+    }
+
+    /**
+     * Wakes up all tasks waiting on a Pipe
+     * 
+     * @param pipe The pipe to wake tasks from
+     */
+    public void wakeTasksBlockedOnPipe(Pipe pipe) {
+        java.util.Queue<Task> queue = pipeWaitQueues.remove(pipe);
+        if (queue != null) {
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                    "TaskManager: Waking " + queue.size() + " tasks blocked on pipe (pipe has " + pipe.availableBytes()
+                            + " bytes, writeOpen=" + pipe.isWriteOpen() + ")");
+
+            for (Task awoken : queue) {
+                awoken.wakeup();
+                awoken.clearBlockedOnPipe();
+                kernel.addTaskToScheduler(awoken);
+            }
+        }
     }
 
     /**

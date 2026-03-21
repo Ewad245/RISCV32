@@ -3,6 +3,8 @@ package cse311;
 import java.io.InputStream;
 import java.util.Scanner;
 
+import cse311.Logger.FileLogger;
+
 public class InputThread {
 
     public void getInput(MemoryManager manager) {
@@ -22,7 +24,7 @@ public class InputThread {
                 }
             }
         } catch (Exception e) {
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+            FileLogger.log(FileLogger.LogLevel.ERROR,
                     "InputThread error: " + e.getMessage());
         }
     }

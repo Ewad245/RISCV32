@@ -7,6 +7,7 @@ import cse311.RV32Cpu;
 import cse311.WaitReason;
 import cse311.kernel.fs.FileDescriptor;
 import cse311.kernel.fs.Inode;
+import cse311.kernel.fs.Pipe;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -52,6 +53,9 @@ public class Task {
     public static final int NOFILE = 16; // Max open files per task
     private FileDescriptor[] openFiles = new FileDescriptor[NOFILE];
     public Inode cwd; // Current Working Directory
+
+    // Pipe blocking support
+    private Pipe blockedOnPipe; // Pipe this task is waiting on
 
     /**
      * Creates a new task with the specified ID and stack size.
@@ -435,6 +439,7 @@ public class Task {
             waitReason = WaitReason.NONE;
             wakeupTime = 0;
             waitingForPid = -1;
+            blockedOnPipe = null;
         }
     }
 
@@ -556,7 +561,8 @@ public class Task {
         }
 
         FileDescriptor fd = openFiles[oldFd];
-        for (int i = 3; i < NOFILE; i++) {
+        // Start from 0 to allow reuse of closed stdin/stdout/stderr
+        for (int i = 0; i < NOFILE; i++) {
             if (openFiles[i] == null) {
                 openFiles[i] = fd;
                 fd.refCount++;
@@ -564,5 +570,17 @@ public class Task {
             }
         }
         return -1;
+    }
+
+    public Pipe getBlockedOnPipe() {
+        return blockedOnPipe;
+    }
+
+    public void setBlockedOnPipe(Pipe pipe) {
+        this.blockedOnPipe = pipe;
+    }
+
+    public void clearBlockedOnPipe() {
+        this.blockedOnPipe = null;
     }
 }
