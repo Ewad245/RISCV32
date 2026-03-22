@@ -125,6 +125,12 @@ public class TaskManager {
         memoryCoordinator.freeMemory(task.getId());
 
         TaskMemoryInfo memInfo = taskMemory.get(pid);
+
+        if (task.cwd != null) {
+            kernel.getFileSystem().iput(task.cwd);
+            task.cwd = null;
+        }
+
         if (memInfo != null) {
             kernelMemory.freeStack(pid, memInfo.stackBase, memInfo.stackSize);
             taskMemory.remove(pid);
@@ -304,6 +310,12 @@ public class TaskManager {
 
         // Copy file descriptors to child so it can use pipes/files!
         child.dupFileDescriptors(parent);
+        // Inherit the Current Working Directory using strict caching!
+        if (parent.cwd != null) {
+            child.cwd = kernel.getFileSystem().idup(parent.cwd);
+        } else {
+            child.cwd = null;
+        }
 
         // 8. Hierarchy & Scheduler
         child.setAllocatedSize(childMemorySize);

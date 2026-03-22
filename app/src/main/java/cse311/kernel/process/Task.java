@@ -535,10 +535,10 @@ public class Task {
         return openFiles[fd];
     }
 
-    public void closeFd(int fd) {
+    public void closeFd(int fd, cse311.kernel.fs.FileSystem fs) {
         if (fd < 0 || fd >= NOFILE || openFiles[fd] == null)
             return;
-        openFiles[fd].close();
+        openFiles[fd].close(fs);
         openFiles[fd] = null;
     }
 

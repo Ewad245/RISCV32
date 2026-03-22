@@ -592,6 +592,12 @@ public class PagedMemoryManager extends MemoryManager {
                 }
             }
         }
+
+        // Copy memory region bounds from parent to child
+        // This ensures the child has the same heap and stack boundaries
+        newAS.setHeapLimit(oldAS.getHeapLimit());
+        newAS.setStackBase(oldAS.getStackBase());
+
         // System.out.println("PagedMemoryManager: Finished copying address space.");
     }
 

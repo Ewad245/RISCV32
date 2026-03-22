@@ -35,14 +35,14 @@ public class FileDescriptor {
         this.refCount = 1;
     }
 
-    public void close() {
+    public void close(FileSystem fs) {
         // Only close the actual underlying resource if no one else is using it
         refCount--;
         if (refCount > 0) {
             return;
         }
         if (type == FD_INODE && inode != null) {
-            inode.ref--;
+            fs.iput(inode);
         } else if (type == FD_PIPE && pipe != null) {
             if (readable)
                 pipe.closeRead();

@@ -77,6 +77,9 @@ public class Kernel {
     // Deadlock detection flag to prevent spamming
     private final AtomicBoolean deadlockDetected = new AtomicBoolean(false);
 
+    // Devices
+    private final cse311.kernel.fs.Device[] devsw = new cse311.kernel.fs.Device[10];
+
     public Kernel(MemoryManager memory) {
         cpus = new ArrayList<>();
         this.memory = memory;
@@ -124,6 +127,9 @@ public class Kernel {
             this.memoryCoordinator = null;
         }
         taskManager.setMemoryCoordinator(this.memoryCoordinator);
+
+        // Register standard devices
+        registerDevice(1, new cse311.kernel.fs.ConsoleDevice(this));
 
         FileLogger.log("RV32IM Java Kernel initialized");
         FileLogger.log("Scheduler: " + scheduler.getClass().getSimpleName());
@@ -297,24 +303,29 @@ public class Kernel {
 
                 // DOUBLE-SCHEDULE CHECK
                 if (!currentTask.tryAcquireCpu(cpu.getId())) {
-                    int otherHart = currentTask.getActiveHartId();
-                    String error = "DOUBLE SCHEDULE DETECTED! Task " + currentTask.getId()
-                            + " is already running on Hart " + otherHart
-                            + " but Hart " + cpu.getId() + " tried to run it!";
-                    FileLogger.log(error);
-                    throw new RuntimeException(error);
+                    // Task was woken up concurrently but hasn't been released by its previous core
+                    // yet.
+                    // Safely requeue it to the scheduler to try again shortly.
+                    scheduler.addTask(currentTask);
+                    continue;
                 }
 
                 try {
                     // Execute the selected task on THIS cpu
                     executeTask(currentTask, cpu);
+
+                    // Decide where the task goes next (Ready, Wait, or Terminated)
+                    // MUST be called before releaseCpu to prevent other cores from modifying state
+                    dispatchTask(currentTask);
+
+                } catch (Exception e) {
+                    FileLogger.log("Core " + cpu.getId() + " execution error: " + e.getMessage());
+                    currentTask.setState(TaskState.TERMINATED);
+                    dispatchTask(currentTask);
                 } finally {
-                    // Release ownership
+                    // Release ownership AFTER dispatching to prevent other cores from snatching it
                     currentTask.releaseCpu();
                 }
-
-                // Decide where the task goes next (Ready, Wait, or Terminated)
-                dispatchTask(currentTask);
 
                 // Note: We do NOT clear currentTask here to avoid UI flickering.
                 // It will be updated in the next 'executeTask' call
@@ -639,6 +650,11 @@ public class Kernel {
         tasks.put(pid, task);
         scheduler.addTask(task);
 
+        if (fileSystem != null) {
+            // iget(1) safely grabs the root inode and increments its ref count!
+            task.cwd = fileSystem.iget(1);
+        }
+
         FileLogger.log("Created task " + pid + " from " + elfPath);
         return task;
     }
@@ -651,6 +667,11 @@ public class Kernel {
         Task task = taskManager.createTask(pid, elfData, name);
         tasks.put(pid, task);
         scheduler.addTask(task);
+
+        if (fileSystem != null) {
+            // iget(1) safely grabs the root inode and increments its ref count!
+            task.cwd = fileSystem.iget(1);
+        }
 
         FileLogger.log("Created task " + pid + " (" + name + ")");
         return task;
@@ -669,6 +690,11 @@ public class Kernel {
         if (task != null) {
             task.setState(TaskState.TERMINATED);
             scheduler.removeTask(task);
+
+            if (task.cwd != null) {
+                fileSystem.iput(task.cwd);
+                task.cwd = null;
+            }
 
             // Reparent this task's children to init so they aren't lost.
             // Do NOT free memory yet — parent must wait() to reap this zombie.
@@ -950,5 +976,18 @@ public class Kernel {
 
     public FileSystem getFileSystem() {
         return fileSystem;
+    }
+
+    public cse311.kernel.fs.Device getDevice(int major) {
+        if (major >= 0 && major < devsw.length) {
+            return devsw[major];
+        }
+        return null;
+    }
+
+    public void registerDevice(int major, cse311.kernel.fs.Device device) {
+        if (major >= 0 && major < devsw.length) {
+            devsw[major] = device;
+        }
     }
 }

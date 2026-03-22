@@ -16,7 +16,7 @@ import java.util.Arrays;
  */
 public class Mkfs {
     // Disk Configuration
-    static final int NBLOCKS = 1000; // Total disk size
+    static final int NBLOCKS = 2000; // Total disk size
     static final int NINODES = 200; // Max number of files
     static final int NLOG = 30;
     static final int BSIZE = 1024; // Block size

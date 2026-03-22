@@ -9,51 +9,99 @@ public class FileSystem {
     private DiskDevice disk;
     private SuperBlock sb;
 
+    // Inode Cache for strict reference counting
+    private static final int NINODE = 50;
+    private final Inode[] inodeCache = new Inode[NINODE];
+    private final Object inodeLock = new Object();
+
     public FileSystem(String diskPath) {
         this.disk = new DiskDevice(diskPath);
         // Assuming disk is already formatted (mkfs)
         this.sb = SuperBlock.read(disk);
+
+        // Initialize the cache
+        for (int i = 0; i < NINODE; i++) {
+            inodeCache[i] = new Inode();
+            inodeCache[i].ref = 0;
+        }
     }
 
     // --- Inode Operations ---
 
-    public Inode getInode(int inum) {
-        Inode ip = new Inode();
-        ip.inum = inum;
-        ip.ref = 1;
+    public Inode iget(int inum) {
+        synchronized (inodeLock) {
+            Inode empty = null;
+            // 1. Find cached active inode
+            for (Inode ip : inodeCache) {
+                if (ip.ref > 0 && ip.inum == inum) {
+                    ip.ref++;
+                    return ip;
+                }
+                if (ip.ref == 0 && empty == null) {
+                    empty = ip; // Remember a free slot just in case
+                }
+            }
 
-        // Calculate block number and offset
-        int blockNum = sb.inodestart + (inum / Inode.IPB);
-        int offset = (inum % Inode.IPB) * 64; // 64 bytes per inode
+            // 2. Allocate into an empty slot
+            if (empty == null) {
+                throw new RuntimeException("iget: no inodes available in cache");
+            }
 
-        byte[] buf = new byte[DiskDevice.BSIZE];
-        disk.read(blockNum, buf);
-        ByteBuffer bb = ByteBuffer.wrap(buf).order(ByteOrder.LITTLE_ENDIAN);
-        bb.position(offset);
+            empty.inum = inum;
+            empty.ref = 1;
 
-        ip.type = bb.getShort();
-        ip.major = bb.getShort();
-        ip.minor = bb.getShort();
-        ip.nlink = bb.getShort();
-        ip.size = bb.getInt();
-        for (int i = 0; i < Inode.NDIRECT + 1; i++) {
-            ip.addrs[i] = bb.getInt();
+            // 3. Read from disk into the cached object
+            int blockNum = sb.inodestart + (inum / Inode.IPB);
+            int offset = (inum % Inode.IPB) * 64; // 64 bytes per inode
+
+            byte[] buf = new byte[DiskDevice.BSIZE];
+            disk.read(blockNum, buf);
+            ByteBuffer bb = ByteBuffer.wrap(buf).order(ByteOrder.LITTLE_ENDIAN);
+            bb.position(offset);
+
+            empty.type = bb.getShort();
+            empty.major = bb.getShort();
+            empty.minor = bb.getShort();
+            empty.nlink = bb.getShort();
+            empty.size = bb.getInt();
+            for (int i = 0; i < Inode.NDIRECT + 1; i++) {
+                empty.addrs[i] = bb.getInt();
+            }
+
+            return empty;
         }
+    }
 
-        return ip;
+    public Inode idup(Inode ip) {
+        synchronized (inodeLock) {
+            ip.ref++;
+            return ip;
+        }
+    }
+
+    public void iput(Inode ip) {
+        synchronized (inodeLock) {
+            if (ip.ref == 1 && ip.nlink == 0 && ip.inum != 1) {
+                // Last reference closed and file is unlinked (and not root). Free disk blocks!
+                truncate(ip);
+                ip.type = 0;
+                updateInode(ip);
+            }
+            ip.ref--;
+        }
     }
 
     // Allocate a new inode with the given type
     public Inode ialloc(short type) {
         for (int inum = 1; inum < sb.ninodes; inum++) {
-            Inode ip = getInode(inum);
-            if (ip.type == 0) {
-                // Free inode found
+            Inode ip = iget(inum);
+            if (ip.type == 0) { // Free inode found
                 ip.type = type;
                 ip.size = 0;
                 updateInode(ip);
                 return ip;
             }
+            iput(ip); // Not free, release it back to the cache
         }
         throw new RuntimeException("ialloc: out of inodes");
     }
@@ -220,8 +268,8 @@ public class FileSystem {
                 continue; // Empty entry
 
             if (de.name.equals(name)) {
-                // Found it! Return the inode.
-                return getInode(de.inum);
+                // Found it! Return the newly cached instance
+                return iget(de.inum);
             }
         }
         return null;
@@ -262,9 +310,9 @@ public class FileSystem {
             return null;
         Inode ip;
         if (path.startsWith("/")) {
-            ip = getInode(1); // Root
+            ip = iget(1); // Root
         } else {
-            ip = (task != null && task.cwd != null) ? task.cwd : getInode(1);
+            ip = (task != null && task.cwd != null) ? idup(task.cwd) : iget(1);
         }
 
         String[] parts = path.split("/");
@@ -272,6 +320,8 @@ public class FileSystem {
             if (part.isEmpty() || part.equals("."))
                 continue;
             Inode next = dirlookup(ip, part);
+            iput(ip); // Release the parent before moving down
+
             if (next == null)
                 return null;
             ip = next;
@@ -292,9 +342,9 @@ public class FileSystem {
             return null;
         Inode ip;
         if (path.startsWith("/")) {
-            ip = getInode(1); // Root
+            ip = iget(1); // Root
         } else {
-            ip = (task != null && task.cwd != null) ? task.cwd : getInode(1);
+            ip = (task != null && task.cwd != null) ? idup(task.cwd) : iget(1);
         }
 
         String[] parts = path.split("/");
@@ -303,6 +353,7 @@ public class FileSystem {
             if (part.isEmpty() || part.equals("."))
                 continue;
             Inode next = dirlookup(ip, part);
+            iput(ip); // Release the parent before moving down
             if (next == null)
                 return null;
             ip = next;
@@ -315,6 +366,9 @@ public class FileSystem {
     }
 
     public void truncate(Inode ip) {
+        if (ip.type == Inode.T_DEV)
+            return; // Don't free device "blocks"
+
         // 1. Free direct blocks
         for (int i = 0; i < Inode.NDIRECT; i++) {
             if (ip.addrs[i] != 0) {

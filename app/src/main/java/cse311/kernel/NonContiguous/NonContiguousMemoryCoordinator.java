@@ -90,6 +90,24 @@ public class NonContiguousMemoryCoordinator implements ProcessMemoryCoordinator 
 
         // Calculate page-aligned boundaries
         int newPageLimit = (newBreak + 4095) & ~4095;
+        int oldPageLimit = (currentBreak + 4095) & ~4095;
+
+        // If shrinking heap, explicitly unmap pages and free frames
+        if (newPageLimit < oldPageLimit) {
+            int startVpn = newPageLimit >> 12;
+            int endVpn = oldPageLimit >> 12;
+
+            for (int vpn = startVpn; vpn < endVpn; vpn++) {
+                if (as.isPagePresent(vpn)) {
+                    // Get the physical frame number
+                    int ppn = as.getFrameNumber(vpn);
+                    // Unmap from the virtual address space
+                    as.unmapPage(vpn);
+                    // Free the physical frame back to the memory manager
+                    pmm.freeFrame(ppn);
+                }
+            }
+        }
 
         // Update the AddressSpace's heap limit so the pager knows
         // these addresses are valid for demand allocation

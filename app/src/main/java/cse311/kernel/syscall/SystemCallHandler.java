@@ -66,6 +66,7 @@ public class SystemCallHandler {
 
     // File system calls
     public static final int SYS_DUP = 23;
+    public static final int SYS_MKNOD = 33;
     public static final int SYS_MKDIR = 34;
     public static final int SYS_UNLINK = 35;
     public static final int SYS_LINK = 37;
@@ -191,6 +192,10 @@ public class SystemCallHandler {
 
                 case SYS_DUP:
                     result = handleDup(task, arg0);
+                    break;
+
+                case SYS_MKNOD:
+                    result = handleMknod(task, arg0, arg1, arg2);
                     break;
 
                 case SYS_FSTAT:
@@ -426,6 +431,15 @@ public class SystemCallHandler {
             return bytesWritten;
         }
 
+        // 4. Device Output
+        if (file.type == FileDescriptor.FD_DEVICE) {
+            cse311.kernel.fs.Device dev = kernel.getDevice(file.inode.major);
+            if (dev != null) {
+                return dev.write(task, bufferAddr, count);
+            }
+            return -1;
+        }
+
         return -1;
     }
 
@@ -561,6 +575,15 @@ public class SystemCallHandler {
             return bytesRead;
         }
 
+        // 4. Device Input
+        if (file.type == FileDescriptor.FD_DEVICE) {
+            cse311.kernel.fs.Device dev = kernel.getDevice(file.inode.major);
+            if (dev != null) {
+                return dev.read(task, cpu, bufferAddr, count);
+            }
+            return -1;
+        }
+
         return -1;
     }
 
@@ -630,6 +653,12 @@ public class SystemCallHandler {
             System.arraycopy(parent.getRegisters(), 0, child.getRegisters(), 0, 32);
 
             child.dupFileDescriptors(parent);
+            // Inherit the Current Working Directory using strict caching!
+            if (parent.cwd != null) {
+                child.cwd = kernel.getFileSystem().idup(parent.cwd);
+            } else {
+                child.cwd = null;
+            }
 
             // Copy heap state
             child.setProgramBreak(parent.getProgramBreak());
@@ -1102,10 +1131,17 @@ public class SystemCallHandler {
             return -1;
 
         Inode ip = kernel.getFileSystem().namei(task, path);
-        if (ip == null || ip.type != Inode.T_DIR)
-            return -1;
 
-        task.cwd = ip;
+        if (ip == null || ip.type != Inode.T_DIR) {
+            if (ip != null)
+                kernel.getFileSystem().iput(ip); // Cleanup on failure
+            return -1;
+        }
+
+        if (task.cwd != null) {
+            kernel.getFileSystem().iput(task.cwd); // Release the old directory
+        }
+        task.cwd = ip; // Keep the new one
         return 0;
     }
 
@@ -1174,10 +1210,43 @@ public class SystemCallHandler {
         FileLogger.log("SYS_MKDIR: linking into parent");
         if (kernel.getFileSystem().dirlink(dp, name, ip.inum) < 0) {
             FileLogger.log("SYS_MKDIR: dirlink into parent failed");
+            kernel.getFileSystem().iput(ip);
+            kernel.getFileSystem().iput(dp);
             return -1;
         }
 
         FileLogger.log("SYS_MKDIR: success!");
+        kernel.getFileSystem().iput(ip);
+        kernel.getFileSystem().iput(dp);
+        return 0;
+    }
+
+    private int handleMknod(Task task, int pathPtr, int major, int minor) {
+        String path = readStringFromTask(task, pathPtr);
+        if (path == null)
+            return -1;
+
+        if (kernel.getFileSystem().namei(task, path) != null)
+            return -1;
+
+        StringBuilder name = new StringBuilder();
+        Inode dp = kernel.getFileSystem().nameiparent(task, path, name);
+        if (dp == null)
+            return -1;
+
+        try {
+            Inode ip = kernel.getFileSystem().ialloc(Inode.T_DEV);
+            ip.major = (short) major;
+            ip.minor = (short) minor;
+            ip.nlink = 1;
+            kernel.getFileSystem().updateInode(ip);
+
+            if (kernel.getFileSystem().dirlink(dp, name.toString(), ip.inum) < 0) {
+                return -1;
+            }
+        } catch (Exception e) {
+            return -1;
+        }
         return 0;
     }
 
@@ -1197,11 +1266,17 @@ public class SystemCallHandler {
             return -1;
 
         String name = nameBuilder.toString();
-        if (kernel.getFileSystem().dirlink(dp, name, ip.inum) < 0)
+        if (kernel.getFileSystem().dirlink(dp, name, ip.inum) < 0) {
+            kernel.getFileSystem().iput(ip);
+            kernel.getFileSystem().iput(dp);
             return -1;
+        }
 
         ip.nlink++;
         kernel.getFileSystem().updateInode(ip);
+
+        kernel.getFileSystem().iput(ip);
+        kernel.getFileSystem().iput(dp);
 
         return 0;
     }
@@ -1243,6 +1318,9 @@ public class SystemCallHandler {
         ip.nlink--;
         kernel.getFileSystem().updateInode(ip);
 
+        kernel.getFileSystem().iput(ip);
+        kernel.getFileSystem().iput(dp);
+
         return 0;
     }
 
@@ -1269,8 +1347,11 @@ public class SystemCallHandler {
                 kernel.getFileSystem().updateInode(ip);
 
                 if (kernel.getFileSystem().dirlink(dp, nameBuilder.toString(), ip.inum) < 0) {
+                    kernel.getFileSystem().iput(ip);
+                    kernel.getFileSystem().iput(dp);
                     return -1;
                 }
+                kernel.getFileSystem().iput(dp);
             } else {
                 return -1;
             }
@@ -1285,6 +1366,10 @@ public class SystemCallHandler {
 
         FileDescriptor fd = new FileDescriptor(ip, true, (mode & 1) != 0 || (mode & 2) != 0);
         fd.append = isAppend;
+
+        if (ip.type == Inode.T_DEV) {
+            fd.type = FileDescriptor.FD_DEVICE;
+        }
 
         int fdIdx = task.allocFd(fd);
         if (fdIdx < 0) {
@@ -1308,12 +1393,12 @@ public class SystemCallHandler {
                     "SYS_CLOSE: Closing pipe fd " + fd + " for task " + task.getId());
 
             // Close the file descriptor (which marks read/write ends as closed)
-            task.closeFd(fd);
+            task.closeFd(fd, kernel.getFileSystem());
 
             // Wake up any tasks blocked on this pipe
             kernel.getTaskManager().wakeTasksBlockedOnPipe(pipe);
         } else {
-            task.closeFd(fd);
+            task.closeFd(fd, kernel.getFileSystem());
         }
 
         return 0;
@@ -1330,9 +1415,9 @@ public class SystemCallHandler {
 
             if (fd0 < 0 || fd1 < 0) {
                 if (fd0 >= 0)
-                    task.closeFd(fd0);
+                    task.closeFd(fd0, kernel.getFileSystem());
                 if (fd1 >= 0)
-                    task.closeFd(fd1);
+                    task.closeFd(fd1, kernel.getFileSystem());
                 return -1;
             }
 
@@ -1342,8 +1427,8 @@ public class SystemCallHandler {
                 mem.writeWord(fdArrayAddr + 4, fd1);
             } catch (MemoryAccessException e) {
                 FileLogger.log("SYS_PIPE: Memory write failed: " + e.getMessage());
-                task.closeFd(fd0);
-                task.closeFd(fd1);
+                task.closeFd(fd0, kernel.getFileSystem());
+                task.closeFd(fd1, kernel.getFileSystem());
                 return -1;
             }
 
