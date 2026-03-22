@@ -8,6 +8,7 @@ import cse311.kernel.scheduler.*;
 import cse311.kernel.syscall.*;
 import cse311.kernel.process.*;
 import cse311.kernel.fs.FileSystem;
+import cse311.kernel.fs.BufferCache;
 import cse311.kernel.NonContiguous.NonContiguousMemoryCoordinator;
 import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
 import cse311.kernel.NonContiguous.paging.PagingMapper;
@@ -37,6 +38,7 @@ public class Kernel {
     private final KernelMemoryManager kernelMemory;
     private ProcessMemoryCoordinator memoryCoordinator;
     private FileSystem fileSystem;
+    private BufferCache bufferCache;
 
     // 1. I/O Wait Queue (FIFO)
     private final Queue<Task> ioWaitQueue = new ConcurrentLinkedQueue<>();
@@ -142,7 +144,9 @@ public class Kernel {
     public void mountFileSystem(String diskImagePath) {
         try {
             this.fileSystem = new FileSystem(diskImagePath);
+            this.bufferCache = fileSystem.getBufferCache();
             FileLogger.log("FileSystem mounted: " + diskImagePath);
+            FileLogger.log("BufferCache initialized with " + BufferCache.NBUF + " buffers");
         } catch (Exception e) {
             FileLogger.log(FileLogger.LogLevel.ERROR,
                     "Failed to mount FS: " + e.getMessage());
@@ -976,6 +980,10 @@ public class Kernel {
 
     public FileSystem getFileSystem() {
         return fileSystem;
+    }
+
+    public BufferCache getBufferCache() {
+        return bufferCache;
     }
 
     public cse311.kernel.fs.Device getDevice(int major) {

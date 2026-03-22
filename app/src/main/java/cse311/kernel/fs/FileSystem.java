@@ -7,6 +7,7 @@ import cse311.kernel.process.Task;
 
 public class FileSystem {
     private DiskDevice disk;
+    private BufferCache bcache;
     private SuperBlock sb;
 
     // Inode Cache for strict reference counting
@@ -16,6 +17,7 @@ public class FileSystem {
 
     public FileSystem(String diskPath) {
         this.disk = new DiskDevice(diskPath);
+        this.bcache = new BufferCache(disk);
         // Assuming disk is already formatted (mkfs)
         this.sb = SuperBlock.read(disk);
 
@@ -24,6 +26,14 @@ public class FileSystem {
             inodeCache[i] = new Inode();
             inodeCache[i].ref = 0;
         }
+    }
+
+    public DiskDevice getDiskDevice() {
+        return disk;
+    }
+
+    public BufferCache getBufferCache() {
+        return bcache;
     }
 
     // --- Inode Operations ---
@@ -54,18 +64,25 @@ public class FileSystem {
             int blockNum = sb.inodestart + (inum / Inode.IPB);
             int offset = (inum % Inode.IPB) * 64; // 64 bytes per inode
 
-            byte[] buf = new byte[DiskDevice.BSIZE];
-            disk.read(blockNum, buf);
-            ByteBuffer bb = ByteBuffer.wrap(buf).order(ByteOrder.LITTLE_ENDIAN);
-            bb.position(offset);
+            try {
+                Buffer b = bcache.bread(blockNum);
+                try {
+                    ByteBuffer bb = ByteBuffer.wrap(b.data).order(ByteOrder.LITTLE_ENDIAN);
+                    bb.position(offset);
 
-            empty.type = bb.getShort();
-            empty.major = bb.getShort();
-            empty.minor = bb.getShort();
-            empty.nlink = bb.getShort();
-            empty.size = bb.getInt();
-            for (int i = 0; i < Inode.NDIRECT + 1; i++) {
-                empty.addrs[i] = bb.getInt();
+                    empty.type = bb.getShort();
+                    empty.major = bb.getShort();
+                    empty.minor = bb.getShort();
+                    empty.nlink = bb.getShort();
+                    empty.size = bb.getInt();
+                    for (int i = 0; i < Inode.NDIRECT + 1; i++) {
+                        empty.addrs[i] = bb.getInt();
+                    }
+                } finally {
+                    bcache.brelse(b);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("iget: failed to read inode block", e);
             }
 
             return empty;
@@ -110,22 +127,28 @@ public class FileSystem {
         int blockNum = sb.inodestart + (ip.inum / Inode.IPB);
         int offset = (ip.inum % Inode.IPB) * 64;
 
-        byte[] buf = new byte[DiskDevice.BSIZE];
-        disk.read(blockNum, buf); // Read-Modify-Write
+        try {
+            Buffer b = bcache.bread(blockNum);
+            try {
+                ByteBuffer bb = ByteBuffer.wrap(b.data).order(ByteOrder.LITTLE_ENDIAN);
+                bb.position(offset);
 
-        ByteBuffer bb = ByteBuffer.wrap(buf).order(ByteOrder.LITTLE_ENDIAN);
-        bb.position(offset);
-
-        bb.putShort(ip.type);
-        bb.putShort(ip.major);
-        bb.putShort(ip.minor);
-        bb.putShort(ip.nlink);
-        bb.putInt(ip.size);
-        for (int i = 0; i < Inode.NDIRECT + 1; i++) {
-            bb.putInt(ip.addrs[i]);
+                bb.putShort(ip.type);
+                bb.putShort(ip.major);
+                bb.putShort(ip.minor);
+                bb.putShort(ip.nlink);
+                bb.putInt(ip.size);
+                for (int i = 0; i < Inode.NDIRECT + 1; i++) {
+                    bb.putInt(ip.addrs[i]);
+                }
+                b.dirty = true;
+                bcache.bwrite(b);
+            } finally {
+                bcache.brelse(b);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("updateInode: failed to write inode block", e);
         }
-
-        disk.write(blockNum, buf);
     }
 
     // --- Data Operations ---
@@ -133,18 +156,35 @@ public class FileSystem {
     // Allocate a free disk block
     private int balloc() {
         for (int b = 0; b < sb.size; b += DiskDevice.BSIZE * 8) {
-            byte[] buf = new byte[DiskDevice.BSIZE];
-            disk.read(sb.bmapstart + b / (DiskDevice.BSIZE * 8), buf);
-            for (int bi = 0; bi < DiskDevice.BSIZE * 8 && b + bi < sb.size; bi++) {
-                int m = 1 << (bi % 8);
-                if ((buf[bi / 8] & m) == 0) {
-                    buf[bi / 8] |= (byte) m; // Mark as used
-                    disk.write(sb.bmapstart + b / (DiskDevice.BSIZE * 8), buf);
-                    // Also zero the block
-                    byte[] zeros = new byte[DiskDevice.BSIZE];
-                    disk.write(b + bi, zeros);
-                    return b + bi;
+            int bitmapBlockNum = sb.bmapstart + b / (DiskDevice.BSIZE * 8);
+            try {
+                Buffer bbuf = bcache.bread(bitmapBlockNum);
+                try {
+                    for (int bi = 0; bi < DiskDevice.BSIZE * 8 && b + bi < sb.size; bi++) {
+                        int m = 1 << (bi % 8);
+                        if ((bbuf.data[bi / 8] & m) == 0) {
+                            bbuf.data[bi / 8] |= (byte) m; // Mark as used
+                            bbuf.dirty = true;
+                            bcache.bwrite(bbuf);
+
+                            // Zero the allocated block
+                            Buffer newBlock = bcache.bread(b + bi);
+                            try {
+                                Arrays.fill(newBlock.data, (byte) 0);
+                                newBlock.dirty = true;
+                                bcache.bwrite(newBlock);
+                            } finally {
+                                bcache.brelse(newBlock);
+                            }
+
+                            return b + bi;
+                        }
+                    }
+                } finally {
+                    bcache.brelse(bbuf);
                 }
+            } catch (Exception e) {
+                throw new RuntimeException("balloc: failed to read bitmap block", e);
             }
         }
         throw new RuntimeException("balloc: out of blocks");
@@ -171,17 +211,24 @@ public class FileSystem {
             if (indirectBlock == 0)
                 return 0; // Hole
 
-            byte[] buf = new byte[DiskDevice.BSIZE];
-            disk.read(indirectBlock, buf);
-            ByteBuffer bb = ByteBuffer.wrap(buf).order(ByteOrder.LITTLE_ENDIAN);
-
-            int physBlock = bb.getInt(logicalBlock * 4);
-            if (allocate && physBlock == 0) {
-                physBlock = balloc();
-                bb.putInt(logicalBlock * 4, physBlock);
-                disk.write(indirectBlock, buf);
+            try {
+                Buffer b = bcache.bread(indirectBlock);
+                try {
+                    ByteBuffer bb = ByteBuffer.wrap(b.data).order(ByteOrder.LITTLE_ENDIAN);
+                    int physBlock = bb.getInt(logicalBlock * 4);
+                    if (allocate && physBlock == 0) {
+                        physBlock = balloc();
+                        bb.putInt(logicalBlock * 4, physBlock);
+                        b.dirty = true;
+                        bcache.bwrite(b);
+                    }
+                    return physBlock;
+                } finally {
+                    bcache.brelse(b);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("mapBlock: failed to read indirect block", e);
             }
-            return physBlock;
         }
         throw new RuntimeException("File too large (Doubly indirect not implemented)");
     }
@@ -203,9 +250,16 @@ public class FileSystem {
                 // Reading a hole, just zero the buffer
                 Arrays.fill(dst, tot, tot + bytesToCopy, (byte) 0);
             } else {
-                byte[] buf = new byte[DiskDevice.BSIZE];
-                disk.read(physBlock, buf);
-                System.arraycopy(buf, blockOff, dst, tot, bytesToCopy);
+                try {
+                    Buffer b = bcache.bread(physBlock);
+                    try {
+                        System.arraycopy(b.data, blockOff, dst, tot, bytesToCopy);
+                    } finally {
+                        bcache.brelse(b);
+                    }
+                } catch (Exception e) {
+                    throw new RuntimeException("readi: failed to read data block", e);
+                }
             }
             tot += bytesToCopy;
         }
@@ -231,12 +285,18 @@ public class FileSystem {
             if (physBlock == 0)
                 break; // Disk full
 
-            byte[] buf = new byte[DiskDevice.BSIZE];
-            if (bytesToCopy < DiskDevice.BSIZE) {
-                disk.read(physBlock, buf); // Read-modify-write
+            try {
+                Buffer b = bcache.bread(physBlock);
+                try {
+                    System.arraycopy(src, tot, b.data, blockOff, bytesToCopy);
+                    b.dirty = true;
+                    bcache.bwrite(b);
+                } finally {
+                    bcache.brelse(b);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("writei: failed to write data block", e);
             }
-            System.arraycopy(src, tot, buf, blockOff, bytesToCopy);
-            disk.write(physBlock, buf);
             tot += bytesToCopy;
         }
 
@@ -378,17 +438,24 @@ public class FileSystem {
         }
 
         // 2. Free indirect blocks
-        if (ip.addrs[Inode.NDIRECT] != 0) { // 1024-byte block / 4 bytes per int = 256
-            byte[] indirectData = new byte[DiskDevice.BSIZE];
-            disk.read(ip.addrs[Inode.NDIRECT], indirectData);
-            ByteBuffer buf = ByteBuffer.wrap(indirectData);
-            buf.order(ByteOrder.LITTLE_ENDIAN);
+        if (ip.addrs[Inode.NDIRECT] != 0) {
+            try {
+                Buffer b = bcache.bread(ip.addrs[Inode.NDIRECT]);
+                try {
+                    ByteBuffer buf = ByteBuffer.wrap(b.data);
+                    buf.order(ByteOrder.LITTLE_ENDIAN);
 
-            for (int i = 0; i < 256; i++) {
-                int blockNum = buf.getInt();
-                if (blockNum != 0) {
-                    bfree(blockNum);
+                    for (int i = 0; i < 256; i++) {
+                        int blockNum = buf.getInt();
+                        if (blockNum != 0) {
+                            bfree(blockNum);
+                        }
+                    }
+                } finally {
+                    bcache.brelse(b);
                 }
+            } catch (Exception e) {
+                throw new RuntimeException("truncate: failed to read indirect block", e);
             }
 
             // Free the indirect block itself
@@ -397,20 +464,33 @@ public class FileSystem {
         }
 
         ip.size = 0;
-        updateInode(ip); // Save the cleared inode back to disk
+        updateInode(ip);
     }
 
     private void bfree(int blockNum) {
-        byte[] bitmap = new byte[DiskDevice.BSIZE];
         int bitmapBlock = sb.bmapstart + blockNum / (DiskDevice.BSIZE * 8);
-        disk.read(bitmapBlock, bitmap);
+        try {
+            Buffer bbuf = bcache.bread(bitmapBlock);
+            try {
+                int bitIndex = blockNum % (DiskDevice.BSIZE * 8);
+                bbuf.data[bitIndex / 8] &= (byte) ~(1 << (bitIndex % 8));
+                bbuf.dirty = true;
+                bcache.bwrite(bbuf);
+            } finally {
+                bcache.brelse(bbuf);
+            }
 
-        int bitIndex = blockNum % (DiskDevice.BSIZE * 8);
-        bitmap[bitIndex / 8] &= (byte) ~(1 << (bitIndex % 8));
-
-        disk.write(bitmapBlock, bitmap);
-
-        byte[] zeros = new byte[DiskDevice.BSIZE];
-        disk.write(blockNum, zeros);
+            // Zero the freed block
+            Buffer b = bcache.bread(blockNum);
+            try {
+                Arrays.fill(b.data, (byte) 0);
+                b.dirty = true;
+                bcache.bwrite(b);
+            } finally {
+                bcache.brelse(b);
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("bfree: failed to free block", e);
+        }
     }
 }

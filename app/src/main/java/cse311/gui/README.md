@@ -16,10 +16,11 @@ When a wire turns red (with a thicker stroke and glow), it indicates:
 ### 🟡 Yellow Dots - Animated Data Packets  
 **Meaning:** Visual animation showing the **direction** of data movement.
 
-The small golden/yellow circles that move along wires:
+The small golden circles with orange borders that move along wires:
 - Show which **direction** data is flowing
 - Help visualize the **sequence** of operations
 - Appear on active (red) wires to illustrate data transfer
+- Animate once per instruction cycle, then disappear
 
 ### ⚪ Gray Lines - Inactive Wires
 **Meaning:** This wire is **not used** by the current instruction.
@@ -30,13 +31,18 @@ The small golden/yellow circles that move along wires:
 
 | Component | Color | Purpose |
 |-----------|-------|---------|
-| **PC** | Purple | Holds current instruction address |
-| **Control Unit** | Red | Decodes instruction, generates control signals |
-| **Memory** | Green | Stores instructions (I-Mem) and data (D-Mem) |
-| **Registers** | Teal | 32 general-purpose registers (x0-x31) |
-| **ALU** | Orange | Performs arithmetic/logic operations |
-| **Imm Gen** | Cyan | Extracts immediate values from instructions |
-| **MUX** | Indigo | Selects between multiple inputs |
+| **PC** | Purple stroke, white gradient fill | Holds current instruction address |
+| **Control Unit** | Red stroke, white gradient fill | Decodes instruction, generates control signals |
+| **Memory** | Green stroke, white gradient fill | Stores instructions (I-Mem) and data (D-Mem) |
+| **Registers** | Teal stroke, white gradient fill | 32 general-purpose registers (x0-x31) |
+| **ALU** | Orange stroke, white gradient fill | Performs arithmetic/logic operations |
+| **Imm Gen** | Cyan stroke, white gradient fill | Extracts immediate values from instructions |
+| **MUX** | Indigo stroke, white gradient fill | Selects between multiple inputs |
+
+> **Note:** All components have:
+> - White to light-tint gradient fills
+> - Drop shadow effects for depth
+> - Hover effects (stroke darkens, shadow intensifies when you mouse over)
 
 ---
 
@@ -158,6 +164,21 @@ This distinction helps you understand:
 
 > **Technical Detail:** The `isFrameEmpty()` method samples 64 words across each 4KB frame. If all sampled words are zero, the frame is considered "empty."
 
+### Brightness = Access Heat
+
+Solid-filled frames change **brightness** based on recent access frequency:
+
+| Brightness | Meaning |
+| :--- | :--- |
+| **Dimmer (55% brightness)** | Frame hasn't been accessed recently |
+| **Brighter (up to 110% brightness)** | Frame is being frequently accessed |
+
+The heat value ranges from 0-255 internally and modulates the frame's brightness in real-time. This helps you identify:
+- **Hot spots** in memory (frequently accessed data/code)
+- **Cold regions** (rarely accessed memory)
+
+> **Technical Detail:** Brightness = 0.55 + (heat / 255) × 0.55, so cold frames are at 55% brightness and hot frames reach up to 110% brightness.
+
 ---
 
 ## 2. GUI Logic (`MemoryView.java`)
@@ -183,7 +204,10 @@ if (owner == null) {
     // User frame - check if it has data
     boolean hasData = !pmm.isFrameEmpty(i);
     if (hasData) {
-        // Solid fill with process color
+        // Apply heat-based brightness modulation
+        double heatVal = heat[i] / 255.0;
+        Color displayColor = frameColor.deriveColor(0, 1.0, 0.55 + heatVal * 0.55, 1.0);
+        // Solid fill with heat-adjusted color
     } else {
         // Hollow outline with diagonal line
     }
@@ -219,6 +243,7 @@ Mapped to PID: 2
 Virtual Page: 0x7FFFD
 -----------------
 Has Data: NO (all zeros)
+Heat: 45/255
 ```
 
 ---
@@ -233,3 +258,42 @@ A common scenario is seeing **hollow frames in the stack region**:
 4. As the program executes (function calls, local variables), the frames fill with data and become solid
 
 This is **normal behavior**, not a bug!
+
+---
+
+## 5. Locality Strips (Bottom Section)
+
+Below the frame grid, you'll see **locality strips** for each process:
+
+### What They Show
+Each strip visualizes how **contiguously** a process's frames are allocated in physical memory:
+
+| Visual Element | Meaning |
+| :--- | :--- |
+| **Gray background bar** | Full span from lowest to highest frame owned by the process |
+| **Colored ticks** | Individual frames actually owned by the process |
+| **Badge (Good/Moderate/Poor)** | Locality score as a percentage |
+
+### Locality Score Calculation
+```
+Locality % = (Number of frames owned) / (Span of frames) × 100
+```
+
+| Score | Badge | Interpretation |
+| :--- | :--- | :--- |
+| **≥80%** | Good (Green) | Frames are tightly packed, efficient memory use |
+| **50-79%** | Moderate (Amber) | Some fragmentation |
+| **<50%** | Poor (Red) | Highly scattered frames, potential performance issue |
+
+### Example
+If Process 2 owns frames 10, 11, 12, 15, 18:
+- Span = 18 - 10 + 1 = 9 frames
+- Owned = 5 frames
+- Locality = 5/9 × 100 = **56% (Moderate)**
+
+> **Why it matters:** Good locality means the process's memory is concentrated, which can improve cache performance and reduce page table walk overhead. Poor locality indicates fragmentation.
+
+### Display Limitations
+- Only the **top processes by frame count** are shown (as many as fit in the view)
+- Processes are sorted by frame count (most significant first)
+- If there are more processes than space, a truncation indicator shows how many are hidden
