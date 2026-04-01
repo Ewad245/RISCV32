@@ -143,7 +143,7 @@ public class Kernel {
      */
     public void mountFileSystem(String diskImagePath) {
         try {
-            this.fileSystem = new FileSystem(diskImagePath);
+            this.fileSystem = new FileSystem(diskImagePath, this);
             this.bufferCache = fileSystem.getBufferCache();
             FileLogger.log("FileSystem mounted: " + diskImagePath);
             FileLogger.log("BufferCache initialized with " + BufferCache.NBUF + " buffers");

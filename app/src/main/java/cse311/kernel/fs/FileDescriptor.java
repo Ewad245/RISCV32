@@ -15,6 +15,7 @@ public class FileDescriptor {
     public Inode inode; // The underlying file
     public int offset; // Current read/write position
     public Pipe pipe; // For FD_PIPE type
+    public short major; // Device major number
 
     public FileDescriptor(Inode inode, boolean readable, boolean writable) {
         this.type = FD_INODE;

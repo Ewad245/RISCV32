@@ -3,19 +3,22 @@ package cse311.kernel.fs;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Arrays;
+
+import cse311.kernel.Kernel;
 import cse311.kernel.process.Task;
 
 public class FileSystem {
     private DiskDevice disk;
     private BufferCache bcache;
     private SuperBlock sb;
+    public Log log; // Transaction log for journaling
 
     // Inode Cache for strict reference counting
     private static final int NINODE = 50;
     private final Inode[] inodeCache = new Inode[NINODE];
     private final Object inodeLock = new Object();
 
-    public FileSystem(String diskPath) {
+    public FileSystem(String diskPath, Kernel kernel) {
         this.disk = new DiskDevice(diskPath);
         this.bcache = new BufferCache(disk);
         // Assuming disk is already formatted (mkfs)
@@ -26,6 +29,9 @@ public class FileSystem {
             inodeCache[i] = new Inode();
             inodeCache[i].ref = 0;
         }
+
+        // Initialize transaction log for journaling
+        this.log = new Log(kernel, this.bcache, sb.logstart, sb.nlog);
     }
 
     public DiskDevice getDiskDevice() {
@@ -142,7 +148,7 @@ public class FileSystem {
                     bb.putInt(ip.addrs[i]);
                 }
                 b.dirty = true;
-                bcache.bwrite(b);
+                log.write(b);
             } finally {
                 bcache.brelse(b);
             }
@@ -165,14 +171,14 @@ public class FileSystem {
                         if ((bbuf.data[bi / 8] & m) == 0) {
                             bbuf.data[bi / 8] |= (byte) m; // Mark as used
                             bbuf.dirty = true;
-                            bcache.bwrite(bbuf);
+                            log.write(bbuf);
 
                             // Zero the allocated block
                             Buffer newBlock = bcache.bread(b + bi);
                             try {
                                 Arrays.fill(newBlock.data, (byte) 0);
                                 newBlock.dirty = true;
-                                bcache.bwrite(newBlock);
+                                log.write(newBlock);
                             } finally {
                                 bcache.brelse(newBlock);
                             }
@@ -220,7 +226,7 @@ public class FileSystem {
                         physBlock = balloc();
                         bb.putInt(logicalBlock * 4, physBlock);
                         b.dirty = true;
-                        bcache.bwrite(b);
+                        log.write(b);
                     }
                     return physBlock;
                 } finally {
@@ -290,7 +296,7 @@ public class FileSystem {
                 try {
                     System.arraycopy(src, tot, b.data, blockOff, bytesToCopy);
                     b.dirty = true;
-                    bcache.bwrite(b);
+                    log.write(b);
                 } finally {
                     bcache.brelse(b);
                 }
@@ -475,7 +481,7 @@ public class FileSystem {
                 int bitIndex = blockNum % (DiskDevice.BSIZE * 8);
                 bbuf.data[bitIndex / 8] &= (byte) ~(1 << (bitIndex % 8));
                 bbuf.dirty = true;
-                bcache.bwrite(bbuf);
+                log.write(bbuf);
             } finally {
                 bcache.brelse(bbuf);
             }
@@ -485,7 +491,7 @@ public class FileSystem {
             try {
                 Arrays.fill(b.data, (byte) 0);
                 b.dirty = true;
-                bcache.bwrite(b);
+                log.write(b);
             } finally {
                 bcache.brelse(b);
             }

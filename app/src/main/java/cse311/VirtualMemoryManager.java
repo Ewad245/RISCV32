@@ -10,6 +10,7 @@ import java.util.Map;
  * Virtual Memory Manager that provides individual address spaces for each task
  * Uses a 2D array approach where each task has its own memory space
  */
+@Deprecated
 public class VirtualMemoryManager {
     // 2D array: [taskId][address] = byte value
     private final Map<Integer, byte[]> taskMemorySpaces = new ConcurrentHashMap<>();

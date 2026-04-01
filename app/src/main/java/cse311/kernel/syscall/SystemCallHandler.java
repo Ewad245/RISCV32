@@ -346,31 +346,36 @@ public class SystemCallHandler {
             return -1;
 
         if (file.type == FileDescriptor.FD_INODE) {
-            if (file.append) {
-                file.offset = file.inode.size;
-            }
-
-            byte[] tempBuf = new byte[count];
+            kernel.getFileSystem().log.beginOp();
             try {
-                for (int i = 0; i < count; i++) {
-                    byte b;
-                    if (kernel.getMemory() instanceof TaskAwareMemoryManager) {
-                        TaskAwareMemoryManager taskMemory = (TaskAwareMemoryManager) kernel
-                                .getMemory();
-                        b = taskMemory.readByteFromTask(task.getId(), bufferAddr + i);
-                    } else {
-                        b = kernel.getMemory().readByte(bufferAddr + i);
-                    }
-                    tempBuf[i] = b;
+                if (file.append) {
+                    file.offset = file.inode.size;
                 }
-            } catch (Exception e) {
-                return -1;
-            }
 
-            int written = kernel.getFileSystem().writei(file.inode, tempBuf, file.offset, count);
-            if (written > 0)
-                file.offset += written;
-            return written;
+                byte[] tempBuf = new byte[count];
+                try {
+                    for (int i = 0; i < count; i++) {
+                        byte b;
+                        if (kernel.getMemory() instanceof TaskAwareMemoryManager) {
+                            TaskAwareMemoryManager taskMemory = (TaskAwareMemoryManager) kernel
+                                    .getMemory();
+                            b = taskMemory.readByteFromTask(task.getId(), bufferAddr + i);
+                        } else {
+                            b = kernel.getMemory().readByte(bufferAddr + i);
+                        }
+                        tempBuf[i] = b;
+                    }
+                } catch (Exception e) {
+                    return -1;
+                }
+
+                int written = kernel.getFileSystem().writei(file.inode, tempBuf, file.offset, count);
+                if (written > 0)
+                    file.offset += written;
+                return written;
+            } finally {
+                kernel.getFileSystem().log.endOp();
+            }
         }
 
         // 3. Pipe Output
@@ -433,7 +438,7 @@ public class SystemCallHandler {
 
         // 4. Device Output
         if (file.type == FileDescriptor.FD_DEVICE) {
-            cse311.kernel.fs.Device dev = kernel.getDevice(file.inode.major);
+            cse311.kernel.fs.Device dev = kernel.getDevice(file.major);
             if (dev != null) {
                 return dev.write(task, bufferAddr, count);
             }
@@ -577,7 +582,7 @@ public class SystemCallHandler {
 
         // 4. Device Input
         if (file.type == FileDescriptor.FD_DEVICE) {
-            cse311.kernel.fs.Device dev = kernel.getDevice(file.inode.major);
+            cse311.kernel.fs.Device dev = kernel.getDevice(file.major);
             if (dev != null) {
                 return dev.read(task, cpu, bufferAddr, count);
             }
@@ -1154,10 +1159,17 @@ public class SystemCallHandler {
         MemoryManager mem = kernel.getMemory();
 
         try {
-            mem.writeWord(statAddr, ip.inum); // ino
-            mem.writeWord(statAddr + 4, ip.type); // mode/type
-            mem.writeWord(statAddr + 8, ip.nlink); // nlink
-            mem.writeWord(statAddr + 12, ip.size); // size
+            // align with C struct stat (total 20 bytes)
+            // short type (2 bytes) + 2 bytes padding
+            mem.writeWord(statAddr, ip.type);
+            // int dev (4 bytes)
+            mem.writeWord(statAddr + 4, 1); 
+            // int ino (4 bytes)
+            mem.writeWord(statAddr + 8, ip.inum); 
+            // int nlink (4 bytes)
+            mem.writeWord(statAddr + 12, ip.nlink); 
+            // int size (4 bytes)
+            mem.writeWord(statAddr + 16, ip.size); 
             return 0;
         } catch (MemoryAccessException e) {
             return -1;
@@ -1187,38 +1199,46 @@ public class SystemCallHandler {
 
         Inode ip;
         try {
+            kernel.getFileSystem().log.beginOp();
             ip = kernel.getFileSystem().ialloc(Inode.T_DIR);
         } catch (Exception e) {
             FileLogger.log("SYS_MKDIR: ialloc threw exception: " + e.getMessage());
+            kernel.getFileSystem().log.endOp();
             return -1;
         }
 
         FileLogger.log("SYS_MKDIR: allocated inode " + (ip != null ? ip.inum : "null"));
-        if (ip == null)
-            return -1;
-
-        ip.nlink = 2;
-        kernel.getFileSystem().updateInode(ip);
-
-        FileLogger.log("SYS_MKDIR: linking . and ..");
-        kernel.getFileSystem().dirlink(ip, ".", ip.inum);
-        kernel.getFileSystem().dirlink(ip, "..", dp.inum);
-
-        dp.nlink++;
-        kernel.getFileSystem().updateInode(dp);
-
-        FileLogger.log("SYS_MKDIR: linking into parent");
-        if (kernel.getFileSystem().dirlink(dp, name, ip.inum) < 0) {
-            FileLogger.log("SYS_MKDIR: dirlink into parent failed");
-            kernel.getFileSystem().iput(ip);
-            kernel.getFileSystem().iput(dp);
+        if (ip == null) {
+            kernel.getFileSystem().log.endOp();
             return -1;
         }
 
-        FileLogger.log("SYS_MKDIR: success!");
-        kernel.getFileSystem().iput(ip);
-        kernel.getFileSystem().iput(dp);
-        return 0;
+        try {
+            ip.nlink = 2;
+            kernel.getFileSystem().updateInode(ip);
+
+            FileLogger.log("SYS_MKDIR: linking . and ..");
+            kernel.getFileSystem().dirlink(ip, ".", ip.inum);
+            kernel.getFileSystem().dirlink(ip, "..", dp.inum);
+
+            dp.nlink++;
+            kernel.getFileSystem().updateInode(dp);
+
+            FileLogger.log("SYS_MKDIR: linking into parent");
+            if (kernel.getFileSystem().dirlink(dp, name, ip.inum) < 0) {
+                FileLogger.log("SYS_MKDIR: dirlink into parent failed");
+                kernel.getFileSystem().iput(ip);
+                kernel.getFileSystem().iput(dp);
+                return -1;
+            }
+
+            FileLogger.log("SYS_MKDIR: success!");
+            kernel.getFileSystem().iput(ip);
+            kernel.getFileSystem().iput(dp);
+            return 0;
+        } finally {
+            kernel.getFileSystem().log.endOp();
+        }
     }
 
     private int handleMknod(Task task, int pathPtr, int major, int minor) {
@@ -1234,6 +1254,7 @@ public class SystemCallHandler {
         if (dp == null)
             return -1;
 
+        kernel.getFileSystem().log.beginOp();
         try {
             Inode ip = kernel.getFileSystem().ialloc(Inode.T_DEV);
             ip.major = (short) major;
@@ -1242,12 +1263,17 @@ public class SystemCallHandler {
             kernel.getFileSystem().updateInode(ip);
 
             if (kernel.getFileSystem().dirlink(dp, name.toString(), ip.inum) < 0) {
+                kernel.getFileSystem().iput(ip);
+                kernel.getFileSystem().iput(dp);
                 return -1;
             }
-        } catch (Exception e) {
-            return -1;
+
+            kernel.getFileSystem().iput(ip);
+            kernel.getFileSystem().iput(dp);
+            return 0;
+        } finally {
+            kernel.getFileSystem().log.endOp();
         }
-        return 0;
     }
 
     private int handleLink(Task task, int oldPathAddr, int newPathAddr) {
@@ -1262,23 +1288,29 @@ public class SystemCallHandler {
 
         StringBuilder nameBuilder = new StringBuilder();
         Inode dp = kernel.getFileSystem().nameiparent(task, newPath, nameBuilder);
-        if (dp == null || nameBuilder.length() == 0)
-            return -1;
-
-        String name = nameBuilder.toString();
-        if (kernel.getFileSystem().dirlink(dp, name, ip.inum) < 0) {
+        if (dp == null || nameBuilder.length() == 0) {
             kernel.getFileSystem().iput(ip);
-            kernel.getFileSystem().iput(dp);
             return -1;
         }
 
-        ip.nlink++;
-        kernel.getFileSystem().updateInode(ip);
+        String name = nameBuilder.toString();
+        kernel.getFileSystem().log.beginOp();
+        try {
+            if (kernel.getFileSystem().dirlink(dp, name, ip.inum) < 0) {
+                kernel.getFileSystem().iput(ip);
+                kernel.getFileSystem().iput(dp);
+                return -1;
+            }
 
-        kernel.getFileSystem().iput(ip);
-        kernel.getFileSystem().iput(dp);
+            ip.nlink++;
+            kernel.getFileSystem().updateInode(ip);
 
-        return 0;
+            kernel.getFileSystem().iput(ip);
+            kernel.getFileSystem().iput(dp);
+            return 0;
+        } finally {
+            kernel.getFileSystem().log.endOp();
+        }
     }
 
     private int handleUnlink(Task task, int pathAddr) {
@@ -1299,29 +1331,33 @@ public class SystemCallHandler {
         if (ip == null)
             return -1;
 
-        byte[] buf = new byte[cse311.kernel.fs.DirectoryEntry.SIZE];
-        for (int off = 0; off < dp.size; off += cse311.kernel.fs.DirectoryEntry.SIZE) {
-            kernel.getFileSystem().readi(dp, buf, off, cse311.kernel.fs.DirectoryEntry.SIZE);
-            cse311.kernel.fs.DirectoryEntry de = cse311.kernel.fs.DirectoryEntry.fromBytes(buf);
-            if (de.inum == ip.inum && de.name.equals(name)) {
-                de.inum = 0;
-                kernel.getFileSystem().writei(dp, de.toBytes(), off, cse311.kernel.fs.DirectoryEntry.SIZE);
-                break;
+        kernel.getFileSystem().log.beginOp();
+        try {
+            byte[] buf = new byte[cse311.kernel.fs.DirectoryEntry.SIZE];
+            for (int off = 0; off < dp.size; off += cse311.kernel.fs.DirectoryEntry.SIZE) {
+                kernel.getFileSystem().readi(dp, buf, off, cse311.kernel.fs.DirectoryEntry.SIZE);
+                cse311.kernel.fs.DirectoryEntry de = cse311.kernel.fs.DirectoryEntry.fromBytes(buf);
+                if (de.inum == ip.inum && de.name.equals(name)) {
+                    de.inum = 0;
+                    kernel.getFileSystem().writei(dp, de.toBytes(), off, cse311.kernel.fs.DirectoryEntry.SIZE);
+                    break;
+                }
             }
+
+            if (ip.type == Inode.T_DIR) {
+                dp.nlink--;
+                kernel.getFileSystem().updateInode(dp);
+            }
+
+            ip.nlink--;
+            kernel.getFileSystem().updateInode(ip);
+
+            kernel.getFileSystem().iput(ip);
+            kernel.getFileSystem().iput(dp);
+            return 0;
+        } finally {
+            kernel.getFileSystem().log.endOp();
         }
-
-        if (ip.type == Inode.T_DIR) {
-            dp.nlink--;
-            kernel.getFileSystem().updateInode(dp);
-        }
-
-        ip.nlink--;
-        kernel.getFileSystem().updateInode(ip);
-
-        kernel.getFileSystem().iput(ip);
-        kernel.getFileSystem().iput(dp);
-
-        return 0;
     }
 
     private int handleOpen(Task task, int pathAddr, int mode) {
@@ -1334,24 +1370,29 @@ public class SystemCallHandler {
         Inode ip = kernel.getFileSystem().namei(task, path);
         if (ip == null) {
             if ((mode & O_CREATE) != 0) {
-                StringBuilder nameBuilder = new StringBuilder();
-                Inode dp = kernel.getFileSystem().nameiparent(task, path, nameBuilder);
-                if (dp == null || nameBuilder.length() == 0)
-                    return -1;
+                kernel.getFileSystem().log.beginOp();
+                try {
+                    StringBuilder nameBuilder = new StringBuilder();
+                    Inode dp = kernel.getFileSystem().nameiparent(task, path, nameBuilder);
+                    if (dp == null || nameBuilder.length() == 0)
+                        return -1;
 
-                ip = kernel.getFileSystem().ialloc(Inode.T_FILE);
-                if (ip == null)
-                    return -1;
+                    ip = kernel.getFileSystem().ialloc(Inode.T_FILE);
+                    if (ip == null)
+                        return -1;
 
-                ip.nlink = 1;
-                kernel.getFileSystem().updateInode(ip);
+                    ip.nlink = 1;
+                    kernel.getFileSystem().updateInode(ip);
 
-                if (kernel.getFileSystem().dirlink(dp, nameBuilder.toString(), ip.inum) < 0) {
-                    kernel.getFileSystem().iput(ip);
+                    if (kernel.getFileSystem().dirlink(dp, nameBuilder.toString(), ip.inum) < 0) {
+                        kernel.getFileSystem().iput(ip);
+                        kernel.getFileSystem().iput(dp);
+                        return -1;
+                    }
                     kernel.getFileSystem().iput(dp);
-                    return -1;
+                } finally {
+                    kernel.getFileSystem().log.endOp();
                 }
-                kernel.getFileSystem().iput(dp);
             } else {
                 return -1;
             }
@@ -1361,7 +1402,12 @@ public class SystemCallHandler {
         boolean isAppend = (mode & 0x400) != 0;
 
         if (isTruncate && ip.type == Inode.T_FILE) {
-            kernel.getFileSystem().truncate(ip);
+            kernel.getFileSystem().log.beginOp();
+            try {
+                kernel.getFileSystem().truncate(ip);
+            } finally {
+                kernel.getFileSystem().log.endOp();
+            }
         }
 
         FileDescriptor fd = new FileDescriptor(ip, true, (mode & 1) != 0 || (mode & 2) != 0);
@@ -1369,6 +1415,7 @@ public class SystemCallHandler {
 
         if (ip.type == Inode.T_DEV) {
             fd.type = FileDescriptor.FD_DEVICE;
+            fd.major = ip.major;
         }
 
         int fdIdx = task.allocFd(fd);

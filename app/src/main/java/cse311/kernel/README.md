@@ -810,6 +810,132 @@ Two implementations are available:
 - **ContiguousMemoryCoordinator**: Traditional contiguous memory allocation
 - **NonContiguousMemoryCoordinator**: Paging-based virtual memory (Sv32-like)
 
+---
+
+## File System Journaling
+
+The kernel includes a **transaction log (journaling)** system for crash resilience, implementing write-ahead logging to protect metadata operations.
+
+### Architecture
+
+```
+FileSystem
+├── Log (Transaction Manager)
+├── BufferCache
+├── InodeManager
+└── DirectoryManager
+```
+
+### Implementation Files
+
+- [`Log.java`](app/src/main/java/cse311/kernel/fs/Log.java) - Transaction log with write-ahead logging
+- [`FileSystem.java`](app/src/main/java/cse311/kernel/fs/FileSystem.java) - File system with transaction support
+- [`SystemCallHandler.java`](app/src/main/java/cse311/kernel/syscall/SystemCallHandler.java) - Wrapped system calls with transactions
+
+### How Journaling Works
+
+**1. Write-Ahead Logging**
+```java
+// When writing a block, it's first written to the log area
+public synchronized void write(Buffer b) {
+    // 1. Record block number in log header
+    lh_block[lh_n++] = b.blockNo;
+    
+    // 2. Write data to log area (not actual destination)
+    Buffer logBuf = bcache.bread(logStart + i + 1);
+    System.arraycopy(b.data, 0, logBuf.data, 0, DiskDevice.BSIZE);
+    bcache.bwrite(logBuf);
+}
+```
+
+**2. Atomic Transactions**
+```java
+// System calls wrap operations in transactions
+log.beginOp();  // Start transaction
+// ... file system operations (create, write, unlink, etc.)
+log.endOp();    // Commit transaction
+```
+
+**3. Commit Sequence**
+```java
+private void commit() {
+    if (lh_n > 0) {
+        writeHeader();    // 1. Write log header (transaction committed)
+        installTrans();   // 2. Copy blocks to actual destinations
+        lh_n = 0;
+        writeHeader();    // 3. Clear log header
+    }
+}
+```
+
+### Crash Recovery
+
+On boot, the file system automatically recovers from crashes:
+
+```java
+private void recover() {
+    Buffer buf = bcache.bread(logStart);
+    lh_n = bb.getInt(0);  // Read number of blocks in log
+    
+    if (lh_n > 0 && lh_n <= LOGSIZE) {
+        // Replay transaction from log
+        installTrans();
+        // Clear log
+        writeHeader();
+    }
+}
+```
+
+### Protected Operations
+
+The following system calls are protected by transactions:
+
+| System Call | Protected Operations |
+|-------------|---------------------|
+| `SYS_OPEN` | Inode allocation, directory updates |
+| `SYS_CLOSE` | Reference count updates |
+| `SYS_READ` | (Read-only, no logging needed) |
+| `SYS_WRITE` | Data block writes, inode size updates |
+| `SYS_UNLINK` | Inode deallocation, directory updates |
+| `SYS_MKDIR` | Directory creation, parent updates |
+| `SYS_CHDIR` | (No metadata changes) |
+| `SYS_FSTAT` | (Read-only, no logging needed) |
+
+### Log Configuration
+
+The log is configured from the superblock:
+
+```java
+public class Log {
+    private final int MAXOPBLOCKS = 10;  // Max blocks per system call
+    private final int LOGSIZE;           // Total log size (from SuperBlock.nlog)
+    private final int logStart;          // Log start block (from SuperBlock.logstart)
+}
+```
+
+### Performance Considerations
+
+- **Overhead**: Each metadata write requires an additional write to the log area
+- **Block Size**: 1024 bytes (DiskDevice.BSIZE)
+- **Log Capacity**: Configured at file system creation time
+- **Transaction Size**: Limited to MAXOPBLOCKS (10) blocks per system call
+
+### Error Handling
+
+All log operations include comprehensive error handling:
+
+```java
+try {
+    Buffer logBuf = bcache.bread(logStart + i + 1);
+    // ... operations
+} catch (Exception e) {
+    FileLogger.log("Log.write: failed to write to log area");
+    FileLogger.log(e);
+}
+```
+
+This ensures that errors during logging don't crash the kernel and are properly logged for debugging.
+
 ## Future Enhancements
 
 - [ ] Network stack implementation
