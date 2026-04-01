@@ -574,12 +574,12 @@ public class DatapathView extends AnchorPane {
 
     private void layoutLabels(double w, double h) {
         // PC label
-        txtPC.setLayoutX(pcPane.getLayoutX());
+        txtPC.setLayoutX(pcPane.getLayoutX() - 40);
         txtPC.setLayoutY(pcPane.getLayoutY() - 10);
 
         // Instruction type label
         txtInstruction.setLayoutX(imPane.getLayoutX());
-        txtInstruction.setLayoutY(imPane.getLayoutY() + imPane.getPrefHeight() + 15);
+        txtInstruction.setLayoutY(imPane.getLayoutY() + imPane.getPrefHeight() + 35);
 
         // Control signals
         txtControlSignals.setLayoutX(w * 0.05);
@@ -602,7 +602,7 @@ public class DatapathView extends AnchorPane {
         txtRs2Val.setLayoutX(regRight() + 5);
         txtRs2Val.setLayoutY(regPane.getLayoutY() + regPane.getPrefHeight() * 0.5);
         txtAluResult.setLayoutX(aluPane.getLayoutX() + aluPane.getPrefWidth() + 5);
-        txtAluResult.setLayoutY(aluPane.getLayoutY() + aluPane.getPrefHeight() / 2);
+        txtAluResult.setLayoutY(aluPane.getLayoutY() + aluPane.getPrefHeight() / 1.5);
 
         // Component title labels (below components)
         lblPcTitle.setLayoutX(pcPane.getLayoutX());
