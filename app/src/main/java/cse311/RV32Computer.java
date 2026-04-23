@@ -1,6 +1,6 @@
 package cse311;
 
-import cse311.Enum.MemoryMode;
+import cse311.Constants.MemoryMode;
 import cse311.kernel.Kernel;
 import cse311.kernel.NonContiguous.paging.*;
 import cse311.kernel.contiguous.AllocationStrategy;
@@ -9,7 +9,7 @@ import cse311.kernel.contiguous.ContiguousMemoryManager;
 import cse311.kernel.process.Task;
 
 public class RV32Computer {
-    private RV32Cpu cpu;
+    // private RV32Cpu cpu;
     private MemoryManager memory;
     private Kernel kernel;
 
@@ -18,7 +18,8 @@ public class RV32Computer {
     }
 
     public RV32Computer(int memSize, int maxTasks, MemoryMode mode) {
-        System.out.println("--- Booting RV32iComputer in " + mode + " Mode ---");
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                "--- Booting RV32iComputer in " + mode + " Mode ---");
 
         // 1. Initialize Memory Hardware & Logic
         if (mode == MemoryMode.PAGING) {
@@ -42,14 +43,12 @@ public class RV32Computer {
         }
 
         // 2. Initialize CPU (Polymorphic: works with either memory)
-        this.cpu = new RV32Cpu(memory);
+        // this.cpu = new RV32Cpu(memory);
 
         // 3. Initialize Kernel (Kernel constructor detects memory type)
-        this.kernel = new Kernel(cpu, memory);
+        this.kernel = new Kernel(memory);
 
-        this.cpu.turnOn();
-
-        System.out.println("System Initialized. Memory: " + (memSize / 1024 / 1024) + "MB");
+        cse311.Logger.FileLogger.log("System Initialized. Memory: " + (memSize / 1024 / 1024) + "MB");
     }
 
     /**
@@ -65,7 +64,8 @@ public class RV32Computer {
             byte[] simpleProgram = createSimpleProgram(entryPoint);
             return kernel.createTask(simpleProgram, "task_" + entryPoint);
         } catch (Exception e) {
-            System.err.println("Failed to create task: " + e.getMessage());
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "Failed to create task: " + e.getMessage());
             return null;
         }
     }
@@ -81,7 +81,8 @@ public class RV32Computer {
         try {
             return kernel.createTask(elfData, name);
         } catch (Exception e) {
-            System.err.println("Failed to create task: " + e.getMessage());
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "Failed to create task: " + e.getMessage());
             return null;
         }
     }
@@ -101,15 +102,6 @@ public class RV32Computer {
                 // ecall
                 0x73, 0x00, 0x00, 0x00 // ecall
         };
-    }
-
-    /**
-     * Gets the CPU.
-     * 
-     * @return The CPU
-     */
-    public RV32Cpu getCpu() {
-        return cpu;
     }
 
     /**
@@ -151,10 +143,5 @@ public class RV32Computer {
      */
     public void stop() {
         kernel.stop();
-    }
-
-    @Override
-    public String toString() {
-        return "RV32iComputer [cpu=" + cpu + ", memory=" + memory + ", kernel=" + kernel + "]";
     }
 }

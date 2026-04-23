@@ -52,6 +52,19 @@ public interface ProcessMemoryCoordinator {
     int setupStack(int pid, List<String> args, MemoryLayout layout) throws MemoryAccessException;
 
     /**
+     * Attempts to expand the physical or virtual heap space.
+     * For contiguous memory, this is a no-op (memory is pre-allocated).
+     * For paged memory, this updates the heap limit so the pager knows
+     * which addresses are valid for demand allocation.
+     *
+     * @param pid          The process ID.
+     * @param currentBreak The current program break address.
+     * @param newBreak     The requested new program break address.
+     * @return true if successful, false if out of memory.
+     */
+    boolean expandHeap(int pid, int currentBreak, int newBreak) throws MemoryAccessException;
+
+    /**
      * Data Transfer Object (DTO) to return memory details to TaskManager.
      */
     class MemoryLayout {

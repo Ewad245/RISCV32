@@ -57,9 +57,9 @@ The system follows this boot sequence:
    - Scheduler type set to ROUND_ROBIN
    - Time slice of 2000 instructions per task
 
-3. **Process Initialization**
-   - The bootloader spawns the Init process (PID 1)
-   - The Init process can spawn additional processes (like a shell)
+3. **Task Initialization**
+   - The bootloader spawns the Init task (PID 1)
+   - The Init task can spawn additional tasks (like a shell)
 
 4. **ELF Loading**
    - Optional pre-loading of ELF files at startup
@@ -76,10 +76,13 @@ Kernel kernel = computer.getKernel();
 kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.ROUND_ROBIN);
 kernel.getConfig().setTimeSlice(2000);
 
-// 3. (Optional) Load initial ELF program
+// 3. (Optional) Mount filesystem (if needed)
+// kernel.mountFileSystem("disk.img");
+
+// 4. (Optional) Load initial ELF program
 kernel.createTask("User_Program_ELF/init.elf");
 
-// 4. Start the kernel (this blocks forever)
+// 5. Start the kernel (this blocks forever)
 kernel.start();
 ```
 
@@ -109,27 +112,31 @@ lowPriorityTask.setPriority(1);
 The kernel supports both standard and custom system calls:
 
 ### Standard System Calls
-- `SYS_EXIT (93)`: Terminate process
+- `SYS_EXIT (93)`: Terminate task
 - `SYS_WRITE (64)`: Write to file descriptor
 - `SYS_READ (63)`: Read from file descriptor
 - `SYS_YIELD (124)`: Voluntarily yield CPU
-- `SYS_GETPID (172)`: Get process ID
+- `SYS_GETPID (172)`: Get task ID
 
 ### Custom System Calls
 - `SYS_DEBUG_PRINT (1000)`: Debug output
 - `SYS_GET_TIME (1001)`: Get current time
-- `SYS_SLEEP (1002)`: Sleep for specified time
+- `SYS_NANOSLEEP (1002)`: Sleep for specified time (replaces deprecated SYS_SLEEP)
+- `SYS_CV_WAIT (280)`: Condition variable wait
+- `SYS_CV_SIGNAL (281)`: Condition variable signal
+- `SYS_CV_BROADCAST (282)`: Condition variable broadcast
 
 ### Adding Custom System Calls
 
 ```java
 // In SystemCallHandler.java
 case SYS_MY_CUSTOM_CALL:
-    result = handleMyCustomCall(process, arg0, arg1);
+    result = handleMyCustomCall(task, cpu, arg0, arg1);
     break;
 
-private int handleMyCustomCall(Process process, int arg0, int arg1) {
+private int handleMyCustomCall(Task task, RV32Cpu cpu, int arg0, int arg1) {
     // Your custom system call implementation
+    // Access task registers via cpu.getRegisters()
     return 0;
 }
 ```
@@ -145,7 +152,7 @@ KernelConfig config = kernel.getConfig();
 config.setSchedulerType(KernelConfig.SchedulerType.ROUND_ROBIN);
 config.setTimeSlice(1000);
 
-// Process limits
+// Task limits
 config.setMaxProcesses(64);
 config.setStackSize(8192);
 
@@ -168,19 +175,19 @@ public class MyCustomScheduler extends Scheduler {
     }
     
     @Override
-    public Process schedule(Collection<Process> processes) {
+    public Task schedule(Collection<Task> tasks) {
         // Your scheduling algorithm here
-        return selectedProcess;
+        return selectedTask;
     }
     
     @Override
-    public void addProcess(Process process) {
-        // Add process to your scheduler's data structures
+    public void addTask(Task task) {
+        // Add task to your scheduler's data structures
     }
     
     @Override
-    public void removeProcess(Process process) {
-        // Remove process from your scheduler's data structures
+    public void removeTask(Task task) {
+        // Remove task from your scheduler's data structures
     }
     
     @Override
@@ -198,6 +205,8 @@ case CUSTOM:
     return new MyCustomScheduler(config.getTimeSlice());
 ```
 
+Note: You'll need to add a `CUSTOM` enum value to `KernelConfig.SchedulerType` first.
+
 ## Task States and Lifecycle
 
 ```
@@ -208,26 +217,27 @@ case CUSTOM:
             └─── [SHELL] ───────┘
 ```
 
-- **BOOT**: System is initializing
-- **INIT**: Initial process (PID 1) is starting
-- **READY**: Task is ready to run
-- **RUNNING**: Task is currently executing
-- **WAITING**: Task is blocked (I/O, sleep, etc.)
-- **TERMINATED**: Task has finished or been killed
-- **SHELL**: Special shell process spawned by init
+- **READY**: Task is ready to run and waiting to be scheduled
+- **RUNNING**: Task is currently executing on a CPU core
+- **WAITING**: Task is blocked (I/O, timer, pipe, condition variable)
+- **TERMINATED**: Task has finished execution or was killed
+
+> Note: The kernel uses a multi-core SMP architecture with 5 CPU cores. The Bootstrap Processor (BSP/Core 0) coordinates scheduling, while Application Processors (APs) can be started for parallel execution.
 
 ## Initialization Process
 
-The system starts with a special Init process (PID 1) that:
+The system starts with a special Init task (PID 1) that:
 1. Initializes system services
-2. Can spawn a shell or other system processes
+2. Can spawn a shell or other system tasks
 3. Manages system startup scripts
 
-The Init process is responsible for:
+The Init task is responsible for:
 - Setting up the system environment
 - Starting system services
 - Launching the default shell
-- Managing process cleanup
+- Managing task cleanup
+
+> **Note**: The kernel boots with only the Bootstrap Processor (BSP/Core 0) active. Application Processors (APs) must be explicitly started by calling `kernel.wakeupApplicationProcessors()` after initialization.
 
 ## Error Handling
 
@@ -243,13 +253,13 @@ The system supports two memory management approaches:
 
 ### 1. Contiguous Memory Management
 ```
-[Process 1] [Process 2]  ...  [Process N]  [Free Space]
+[Task 1] [Task 2]  ...  [Task N]  [Free Space]
 ```
 
 #### Key Features
 - **Base/Limit Registers**: Hardware-enforced memory protection
 - **Allocation Strategies**: First-Fit, Best-Fit
-- **Process Isolation**: Each process has its own memory partition
+- **Task Isolation**: Each task has its own memory partition
 - **Fragmentation Handling**: External fragmentation handled via compaction
 
 ### 2. Non-Contiguous Memory Management (Paging)
@@ -269,12 +279,12 @@ The system supports two memory management approaches:
 
 #### Key Features
 - **Paging**: 4KB pages with 2-level page tables (Sv32-like)
-- **Virtual Memory**: Each process has its own 1GB virtual address space
+- **Virtual Memory**: Each task has its own 1GB virtual address space
 - **Page Replacement**: Configurable paging policies (Demand Paging, Eager Paging)
 - **Frame Allocation**: Global frame allocator with reverse mapping
 
 ### Memory Protection
-- **Contiguous**: Base/Limit registers ensure process isolation
+- **Contiguous**: Base/Limit registers ensure task isolation
 - **Paged**: Page table permissions control access
 - **Common**:
   - Memory accesses are validated to prevent out-of-bounds access
@@ -287,7 +297,7 @@ The system supports two memory management approaches:
 - `0x10000008`: UART_STATUS - Status register
 - `0x1000000C`: UART_CONTROL - Control register
 
-### Process Memory Layout (Per Process)
+### Task Memory Layout (Per Task)
 
 #### Contiguous Mode
 ```
@@ -334,7 +344,7 @@ The system supports two memory management approaches:
 - **Common**:
   - UART region (0x10000000-0x10000FFF) is memory-mapped I/O
   - Memory accesses are validated for protection
-  - Each process has its own isolated address space
+  - Each task has its own isolated address space
 
 ## Debugging and Monitoring
 
@@ -344,7 +354,7 @@ The system supports two memory management approaches:
 kernel.printStatus();
 // Output:
 // === Kernel Status ===
-// Total processes: 3
+// Total tasks: 3
 // Running: 1
 // Ready: 2
 // Waiting: 0
@@ -369,26 +379,394 @@ System.out.println("Schedules: " + stats.totalSchedules);
 System.out.println("Context switches: " + stats.contextSwitches);
 ```
 
+Note: The scheduler uses internal spinlocks for thread-safe operation in multi-core environments.
+
 ## Examples
 
-See the following example files:
-- `KernelExample.java`: Basic kernel usage
-- `KernelSchedulerTest.java`: Scheduler comparison and testing
-- `SystemCallDemo.java`: Demonstration of system call integration
-- `SystemCallIntegrationTest.java`: Integration tests for CPU-kernel system call handling
+See the following example files in `app/src/main/java/cse311/`:
+- [`KernelExample.java`](app/src/main/java/cse311/KernelExample.java): Basic kernel usage
+- [`KernelSchedulerTest.java`](app/src/main/java/cse311/KernelSchedulerTest.java): Scheduler comparison and testing
+- [`SystemCallDemo.java`](app/src/main/java/cse311/SystemCallDemo.java): Demonstration of system call integration
+- Integration tests: `app/src/test/java/cse311/SystemCallIntegrationTest.java`
 
 ## Integration with Existing Code
 
-The kernel is designed to work seamlessly with your existing RV32iCpu and MemoryManager classes. It extends the functionality of your `Task.java` class, adding kernel-specific features while maintaining compatibility.
+The kernel is designed to work seamlessly with your existing RV32Cpu and MemoryManager classes. It extends the functionality of your `Task.java` class, adding kernel-specific features while maintaining compatibility.
+
+---
+
+## 🔄 Inter-Process Communication (IPC) - Complete Reference
+
+The kernel provides **6 IPC mechanisms** for process coordination and data sharing:
+
+### **Overview Table**
+
+| Mechanism | Type | System Call(s) | Performance | Use Case |
+|-----------|------|----------------|-------------|----------|
+| **Pipes** | Message Passing | `SYS_PIPE (59)` | Medium | Byte-stream communication |
+| **Condition Variables** | Synchronization | `SYS_CV_WAIT/SIGNAL/BROADCAST (280-282)` | Fast | Thread coordination |
+| **Shared Memory** | Shared Memory | `SYS_SHM_OPEN/ATTACH (20-21)` | Very Fast | High-throughput data sharing |
+| **Thread Creation** | Shared Address Space | `SYS_CLONE (220)` | Fast | Multi-threaded apps |
+| **FD Inheritance** | Resource Sharing | Via `clone()` flags | Fast | Process cooperation |
+| **User-space Mutexes** | Synchronization | Atomic instructions | Very Fast | Critical sections |
+
+### **1. Pipes** - Byte-stream Communication
+
+**Files:**
+- [`Pipe.java`](app/src/main/java/cse311/kernel/fs/Pipe.java) - 4KB circular buffer implementation
+- [`SystemCallHandler.handlePipe()`](app/src/main/java/cse311/kernel/syscall/SystemCallHandler.java#L1407) - Pipe creation
+- [`SystemCallHandler.handleRead()`](app/src/main/java/cse311/kernel/syscall/SystemCallHandler.java#L514) - Pipe read (blocking)
+- [`SystemCallHandler.handleWrite()`](app/src/main/java/cse311/kernel/syscall/SystemCallHandler.java#L376) - Pipe write (blocking)
+
+**Implementation Details:**
+```java
+// Pipe structure
+public class Pipe {
+    public static final int PIPESIZE = 4096; // 4KB buffer
+    private byte[] buffer = new byte[PIPESIZE];
+    private int readIndex, writeIndex;
+    private boolean readOpen, writeOpen;
+}
+```
+
+**Blocking Semantics:**
+- **Writers block** when pipe is full (4096 bytes)
+- **Readers block** when pipe is empty
+- **Automatic wakeup** when data becomes available or space frees up
+- **Broken pipe** (-1 return) when reading from pipe with closed write end
+
+**Task Management:**
+```java
+// In TaskManager
+private Map<Pipe, Queue<Task>> pipeWaitQueues; // Tasks blocked on pipes
+
+public void addTaskToPipeWaitQueue(Pipe pipe, Task task)
+public void wakeTasksBlockedOnPipe(Pipe pipe)
+```
+
+**Usage Example:**
+```c
+int fds[2];
+pipe(fds);  // fds[0] = read, fds[1] = write
+
+if (fork() == 0) {
+    // Child - write
+    close(fds[0]);
+    write(fds[1], "Hello", 5);
+    close(fds[1]);
+} else {
+    // Parent - read
+    close(fds[1]);
+    read(fds[0], buffer, 5);
+    close(fds[0]);
+}
+```
+
+---
+
+### **2. Condition Variables** - Thread Synchronization
+
+**Files:**
+- [`TaskManager.conditionVariables`](app/src/main/java/cse311/kernel/process/TaskManager.java#L33) - Per-CV wait queues
+- [`SystemCallHandler.handleCvWait()`](app/src/main/java/cse311/kernel/syscall/SystemCallHandler.java#L1446) - Wait implementation
+- [`SystemCallHandler.handleCvSignal()`](app/src/main/java/cse311/kernel/syscall/SystemCallHandler.java#L1488) - Signal one waiter
+- [`SystemCallHandler.handleCvBroadcast()`](app/src/main/java/cse311/kernel/syscall/SystemCallHandler.java#L1501) - Broadcast to all
+
+**Implementation Details:**
+```java
+// In TaskManager
+private Map<Integer, Queue<Task>> conditionVariables; // cvId -> wait queue
+
+public void waitOnCondition(Task task, int cvId)
+public boolean signalCondition(int cvId)  // Wakes one
+public int broadcastCondition(int cvId)   // Wakes all
+```
+
+**Monitor Pattern (with Mutex):**
+```c
+// C library wrapper
+void cv_wait(cv_t *cv, mutex_t *mutex) {
+    mutex_unlock(mutex);
+    syscall(SYS_CV_WAIT, cv->id, 0);
+    mutex_lock(mutex);  // Re-acquire on wakeup
+}
+
+void cv_signal(cv_t *cv) {
+    syscall(SYS_CV_SIGNAL, cv->id, 0);
+}
+
+void cv_broadcast(cv_t *cv) {
+    syscall(SYS_CV_BROADCAST, cv->id, 0);
+}
+```
+
+**Usage Example:**
+```c
+// Producer-Consumer with bounded buffer
+mutex_lock(&mutex);
+while (buffer_empty()) {
+    cv_wait(&not_empty, &mutex);
+}
+// Consume item
+cv_signal(&not_full);
+mutex_unlock(&mutex);
+```
+
+---
+
+### **3. Shared Memory** - High-performance Data Sharing
+
+**Files:**
+- [`PagedMemoryManager.sharedKeyMap`](app/src/main/java/cse311/kernel/NonContiguous/paging/PagedMemoryManager.java#L38) - Key to frame mapping
+- [`PagedMemoryManager.openSharedRegion()`](app/src/main/java/cse311/kernel/NonContiguous/paging/PagedMemoryManager.java#L350) - Create/open shared region
+- [`PagedMemoryManager.mapSharedPage()`](app/src/main/java/cse311/kernel/NonContiguous/paging/PagedMemoryManager.java#L372) - Map to address space
+- [`SystemCallHandler`](app/src/main/java/cse311/kernel/syscall/SystemCallHandler.java#L230) - SYS_SHM_OPEN handling
+- [`SystemCallHandler`](app/src/main/java/cse311/kernel/syscall/SystemCallHandler.java#L244) - SYS_SHM_ATTACH handling
+
+**Implementation Details:**
+```java
+// In PagedMemoryManager
+private Map<Integer, Integer> sharedKeyMap;  // key -> frameId
+private int[] frameRefCount;  // Reference counting
+
+public synchronized int openSharedRegion(int key) {
+    // 1. Check if key exists
+    // 2. If not, allocate new frame
+    // 3. Increment ref count
+    // 4. Return frameId
+}
+
+public synchronized boolean mapSharedPage(AddressSpace as, int vpn, int frame, boolean write) {
+    // 1. Map virtual page (vpn) to physical frame
+    // 2. Set write permission
+    // 3. Update page table
+}
+```
+
+**Usage Example:**
+```c
+// Process A - Create shared memory
+int shmid = shm_open(0x1234);  // Key = 0x1234
+shm_attach(shmid, 0x50000000);  // Map to virtual addr 0x50000000
+*(int*)0x50000000 = 42;  // Write to shared memory
+
+// Process B - Access same shared memory
+int shmid = shm_open(0x1234);  // Same key
+shm_attach(shmid, 0x50000000);
+int value = *(int*)0x50000000;  // Read: 42
+```
+
+**Limitations:**
+- ✅ Works in **Paging mode only**
+- ❌ Not available in Contiguous mode
+- Page-aligned (4KB granularity)
+
+---
+
+### **4. Thread Creation (CLONE_VM)** - Shared Address Space
+
+**Files:**
+- [`SystemCallHandler.handleClone()`](app/src/main/java/cse311/kernel/syscall/SystemCallHandler.java#L601) - Clone implementation
+- [`TaskManager.clone()`](app/src/main/java/cse311/kernel/process/TaskManager.java#L267) - Task duplication
+- [`AddressSpace.refCount`](app/src/main/java/cse311/kernel/NonContiguous/paging/AddressSpace.java#L55) - Shared address space ref counting
+
+**Clone Flags:**
+```java
+public static final int CLONE_VM      = 0x00000100; // Share memory
+public static final int CLONE_FILES   = 0x00000400; // Share file descriptors
+public static final int CLONE_SIGHAND = 0x00000800; // Share signal handlers
+```
+
+**Implementation Details:**
+```java
+// In SystemCallHandler
+private int handleClone(RV32Cpu cpu, Task parent, int flags, int stack) {
+    boolean shareMemory = (flags & CLONE_VM) != 0;
+    boolean shareFiles = (flags & CLONE_FILES) != 0;
+    
+    // Create child task
+    Task child = kernel.getTaskManager().clone(parent, shareMemory, shareFiles);
+    
+    if (shareMemory) {
+        // Share address space (increment ref count)
+        child.setAddressSpace(parent.getAddressSpace());
+    }
+    
+    // Set child stack if provided
+    if (stack != 0) {
+        child.setStackPointer(stack);
+    }
+    
+    return child.getId();  // Return child PID to parent
+}
+```
+
+**Usage Example:**
+```c
+// Create thread (share memory)
+pid_t tid = clone(CLONE_VM | CLONE_FILES, thread_stack);
+
+if (tid == 0) {
+    // Child thread - shares memory with parent
+    global_var = 42;  // Visible to all threads
+    return 0;
+} else {
+    // Parent thread
+    waitpid(tid, NULL, 0);
+}
+
+// Create process (separate memory)
+pid_t pid = clone(0, process_stack);
+```
+
+---
+
+### **5. File Descriptor Inheritance** - Implicit IPC
+
+**Mechanism:** Automatic via `clone()` with `CLONE_FILES` flag
+
+**Implementation:**
+```java
+// In TaskManager.clone()
+if (shareFiles) {
+    // Copy file descriptor table (shallow copy - same FileDescriptor objects)
+    child.openFiles = Arrays.copyOf(parent.openFiles, NOFILE);
+}
+```
+
+**Usage:**
+```c
+// Create pipe
+int fds[2];
+pipe(fds);
+
+// Clone with CLONE_FILES
+pid_t child = clone(CLONE_VM | CLONE_FILES, stack);
+
+if (child == 0) {
+    // Child inherits fds[0] and fds[1]
+    write(fds[1], "data", 4);  // Can use inherited pipe
+} else {
+    read(fds[0], buffer, 4);  // Parent uses same pipe
+}
+```
+
+---
+
+### **6. User-space Mutexes** - Atomic Synchronization
+
+**Files:**
+- `C_Library/lib/libthread.c` - Mutex implementation
+- Uses RV32A atomic instructions (LR/SC, AMO*)
+
+**Implementation:**
+```c
+// Spinlock using atomic instructions
+void mutex_lock(mutex_t *m) {
+    while (atomic_exchange(&m->locked, 1) != 0) {
+        // Spin until lock acquired
+    }
+}
+
+void mutex_unlock(mutex_t *m) {
+    atomic_store(&m->locked, 0);
+}
+```
+
+**Atomic Instructions Used:**
+- `LR.W` (Load Reserved) - Atomic load with reservation
+- `SC.W` (Store Conditional) - Conditional store
+- `AMOSWAP.W` - Atomic swap
+- `AMOADD.W` - Atomic add
+
+**Thread Safety:**
+- ✅ Works across multiple CPU cores
+- ✅ Proper memory ordering
+- ✅ Integration with condition variables
+
+---
+
+## IPC Performance Comparison
+
+| Mechanism | Latency | Throughput | Best For |
+|-----------|---------|------------|----------|
+| **Shared Memory** | ~1 cycle | GB/s | Large data, frequent access |
+| **User-space Mutex** | ~10-100 cycles | N/A | Critical sections |
+| **Condition Variable** | ~100-1000 cycles | N/A | Thread coordination |
+| **Pipe** | ~1000-10000 cycles | MB/s | Byte streams, unrelated processes |
+| **Thread (CLONE_VM)** | ~1000 cycles | N/A | Parallel tasks |
+
+---
+
+## IPC Selection Guide
+
+**Choose based on your needs:**
+
+1. **Need to share large data structures?**
+   - ✅ **Shared Memory** (fastest, but paging mode only)
+   - ✅ **CLONE_VM threads** (share entire address space)
+
+2. **Need synchronization?**
+   - ✅ **User-space Mutex** (fast, for critical sections)
+   - ✅ **Condition Variables** (for waiting on conditions)
+
+3. **Need message passing?**
+   - ✅ **Pipes** (byte-stream, producer-consumer)
+   - ✅ **File descriptors** (inheritance between related processes)
+
+4. **Need parallel execution?**
+   - ✅ **CLONE_VM threads** (shared memory, low overhead)
+   - ✅ **Separate processes** (isolation, stability)
+
+---
+
+## Synchronization Patterns
+
+### **Producer-Consumer with Pipe**
+```c
+int fds[2];
+pipe(fds);
+
+// Producer
+write(fds[1], &data, sizeof(data));
+
+// Consumer
+read(fds[0], &data, sizeof(data));
+```
+
+### **Monitor Pattern with Mutex + CV**
+```c
+mutex_lock(&m);
+while (condition_not_met) {
+    cv_wait(&cv, &m);
+}
+// Critical section
+cv_signal(&cv);
+mutex_unlock(&m);
+```
+
+### **Shared Memory with Mutex**
+```c
+// Thread A
+mutex_lock(&m);
+shared_data = 42;
+mutex_unlock(&m);
+
+// Thread B
+mutex_lock(&m);
+value = shared_data;  // Reads 42
+mutex_unlock(&m);
+```
 
 ### System Call Integration
 
 The integration between the CPU and kernel for system call handling works as follows:
 
-1. **CPU Detection**: When the CPU executes an `ECALL` instruction, it sets an internal flag
+1. **CPU Detection**: When the CPU executes an `ECALL` instruction, it sets `lastInstructionWasEcall = true`
 2. **Kernel Polling**: The kernel checks `cpu.isEcall()` after each instruction execution
 3. **Handler Invocation**: If an ECALL is detected, the kernel calls `SystemCallHandler.handleSystemCall()`
 4. **State Management**: The system call handler can modify task state (e.g., WAITING, TERMINATED)
+5. **Exception Handling**: If an exception occurs during execution, `cpu.isException()` is checked and handled
 
 ```java
 // In Kernel.executeTask()
@@ -397,21 +775,175 @@ if (cpu.isEcall()) {
     handleSystemCall(task); // Delegates to SystemCallHandler
     break;
 }
+if (cpu.isException()) {
+    handleException(task); // Handle exceptions
+    break;
+}
 ```
 
 ### CPU Modifications
 
-The `RV32iCpu` class has been modified to:
+The `RV32Cpu` class has been modified to:
 - Track ECALL instructions with `lastInstructionWasEcall` flag
 - Track exceptions with `exceptionOccurred` flag  
 - Remove built-in system call handling (now handled by kernel)
 - Provide `isEcall()` and `isException()` methods for kernel integration
+- Support multi-core execution with per-core CPU instances
+
+### Memory Management Integration
+
+The kernel uses a strategy pattern for memory management:
+
+```java
+// ProcessMemoryCoordinator interface abstracts memory management
+public interface ProcessMemoryCoordinator {
+    MemoryLayout allocateMemory(int pid, int sizeBytes);
+    ProgramInfo loadProgram(int pid, byte[] elfData);
+    void freeMemory(int pid);
+    void copyMemory(int parentPid, int childPid);
+    void switchContext(int pid);
+    boolean expandHeap(int pid, int currentBreak, int newBreak);
+}
+```
+
+Two implementations are available:
+- **ContiguousMemoryCoordinator**: Traditional contiguous memory allocation
+- **NonContiguousMemoryCoordinator**: Paging-based virtual memory (Sv32-like)
+
+---
+
+## File System Journaling
+
+The kernel includes a **transaction log (journaling)** system for crash resilience, implementing write-ahead logging to protect metadata operations.
+
+### Architecture
+
+```
+FileSystem
+├── Log (Transaction Manager)
+├── BufferCache
+├── InodeManager
+└── DirectoryManager
+```
+
+### Implementation Files
+
+- [`Log.java`](app/src/main/java/cse311/kernel/fs/Log.java) - Transaction log with write-ahead logging
+- [`FileSystem.java`](app/src/main/java/cse311/kernel/fs/FileSystem.java) - File system with transaction support
+- [`SystemCallHandler.java`](app/src/main/java/cse311/kernel/syscall/SystemCallHandler.java) - Wrapped system calls with transactions
+
+### How Journaling Works
+
+**1. Write-Ahead Logging**
+```java
+// When writing a block, it's first written to the log area
+public synchronized void write(Buffer b) {
+    // 1. Record block number in log header
+    lh_block[lh_n++] = b.blockNo;
+    
+    // 2. Write data to log area (not actual destination)
+    Buffer logBuf = bcache.bread(logStart + i + 1);
+    System.arraycopy(b.data, 0, logBuf.data, 0, DiskDevice.BSIZE);
+    bcache.bwrite(logBuf);
+}
+```
+
+**2. Atomic Transactions**
+```java
+// System calls wrap operations in transactions
+log.beginOp();  // Start transaction
+// ... file system operations (create, write, unlink, etc.)
+log.endOp();    // Commit transaction
+```
+
+**3. Commit Sequence**
+```java
+private void commit() {
+    if (lh_n > 0) {
+        writeHeader();    // 1. Write log header (transaction committed)
+        installTrans();   // 2. Copy blocks to actual destinations
+        lh_n = 0;
+        writeHeader();    // 3. Clear log header
+    }
+}
+```
+
+### Crash Recovery
+
+On boot, the file system automatically recovers from crashes:
+
+```java
+private void recover() {
+    Buffer buf = bcache.bread(logStart);
+    lh_n = bb.getInt(0);  // Read number of blocks in log
+    
+    if (lh_n > 0 && lh_n <= LOGSIZE) {
+        // Replay transaction from log
+        installTrans();
+        // Clear log
+        writeHeader();
+    }
+}
+```
+
+### Protected Operations
+
+The following system calls are protected by transactions:
+
+| System Call | Protected Operations |
+|-------------|---------------------|
+| `SYS_OPEN` | Inode allocation, directory updates |
+| `SYS_CLOSE` | Reference count updates |
+| `SYS_READ` | (Read-only, no logging needed) |
+| `SYS_WRITE` | Data block writes, inode size updates |
+| `SYS_UNLINK` | Inode deallocation, directory updates |
+| `SYS_MKDIR` | Directory creation, parent updates |
+| `SYS_CHDIR` | (No metadata changes) |
+| `SYS_FSTAT` | (Read-only, no logging needed) |
+
+### Log Configuration
+
+The log is configured from the superblock:
+
+```java
+public class Log {
+    private final int MAXOPBLOCKS = 10;  // Max blocks per system call
+    private final int LOGSIZE;           // Total log size (from SuperBlock.nlog)
+    private final int logStart;          // Log start block (from SuperBlock.logstart)
+}
+```
+
+### Performance Considerations
+
+- **Overhead**: Each metadata write requires an additional write to the log area
+- **Block Size**: 1024 bytes (DiskDevice.BSIZE)
+- **Log Capacity**: Configured at file system creation time
+- **Transaction Size**: Limited to MAXOPBLOCKS (10) blocks per system call
+
+### Error Handling
+
+All log operations include comprehensive error handling:
+
+```java
+try {
+    Buffer logBuf = bcache.bread(logStart + i + 1);
+    // ... operations
+} catch (Exception e) {
+    FileLogger.log("Log.write: failed to write to log area");
+    FileLogger.log(e);
+}
+```
+
+This ensures that errors during logging don't crash the kernel and are properly logged for debugging.
 
 ## Future Enhancements
 
-- Virtual memory management
-- Inter-process communication (IPC)
-- File system integration
-- Network stack
-- Device driver framework
-- Real-time scheduling support
+- [ ] Network stack implementation
+- [ ] Device driver framework expansion
+- [ ] Advanced paging features (copy-on-write fork)
+- [ ] Real-time scheduling support
+- [ ] User-space threading library support
+- [ ] POSIX signals (SIGCHLD, SIGTERM, etc.)
+- [ ] Message queues (msgget, msgsnd, msgrcv)
+- [ ] Named semaphores
+- [ ] Unix domain sockets

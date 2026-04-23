@@ -10,10 +10,10 @@ public class PagingPolicyTest {
     public static void main(String[] args) {
         try {
             testPolicyAbstraction();
-            System.out.println("All policy abstraction tests passed!");
+            cse311.Logger.FileLogger.log("All policy abstraction tests passed!");
         } catch (Exception e) {
-            System.err.println("Test failed: " + e.getMessage());
-            e.printStackTrace();
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR, "Test failed: " + e.getMessage());
+            cse311.Logger.FileLogger.log(e);
         }
     }
 
@@ -60,6 +60,7 @@ public class PagingPolicyTest {
             throw new RuntimeException("Page should be present with eager pager");
         }
 
-        System.out.println("Policy abstraction working correctly with 2-level page tables");
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                "Policy abstraction working correctly with 2-level page tables");
     }
 }

@@ -12,6 +12,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  */
 public class RoundRobinScheduler extends Scheduler {
     private final Queue<Task> readyQueue = new ConcurrentLinkedQueue<>();
+    private final Set<Task> queuedTasks = Collections.synchronizedSet(new HashSet<>());
     private Task currentTask = null;
 
     // Statistics
@@ -24,28 +25,17 @@ public class RoundRobinScheduler extends Scheduler {
     }
 
     @Override
-    public Task schedule(Collection<Task> tasks) {
+    public Task schedule() {
         long startTime = System.nanoTime();
         totalSchedules++;
 
-        // Add any newly ready tasks to the queue
-        for (Task task : tasks) {
-            if (task.getState() == TaskState.READY && !readyQueue.contains(task)) {
-                readyQueue.offer(task);
-            }
-        }
-
-        // Remove non-ready tasks from the queue
-        readyQueue.removeIf(t -> t.getState() != TaskState.READY);
-
-        // Get the next task from the queue
+        // Get the next task from the head of the queue (FIFO)
+        // This removes it from the queue.
         Task nextTask = readyQueue.poll();
 
-        // If we have a task, add it back to the end of the queue for next time
         if (nextTask != null) {
-            readyQueue.offer(nextTask);
-
-            // Count context switch if we're switching to a different task
+            queuedTasks.remove(nextTask);
+            // Context switch tracking
             if (currentTask != nextTask) {
                 contextSwitches++;
                 currentTask = nextTask;
@@ -58,7 +48,8 @@ public class RoundRobinScheduler extends Scheduler {
 
     @Override
     public void addTask(Task task) {
-        if (task.getState() == TaskState.READY && !readyQueue.contains(task)) {
+        // Atomic check-and-add to prevent duplicates
+        if (task.getState() == TaskState.READY && queuedTasks.add(task)) {
             readyQueue.offer(task);
         }
     }
@@ -66,6 +57,7 @@ public class RoundRobinScheduler extends Scheduler {
     @Override
     public void removeTask(Task task) {
         readyQueue.remove(task);
+        queuedTasks.remove(task);
         if (currentTask == task) {
             currentTask = null;
         }
@@ -89,5 +81,10 @@ public class RoundRobinScheduler extends Scheduler {
      */
     public List<Task> getReadyQueueSnapshot() {
         return new ArrayList<>(readyQueue);
+    }
+
+    @Override
+    public Collection<Task> getReadyTasks() {
+        return Collections.unmodifiableCollection(readyQueue);
     }
 }

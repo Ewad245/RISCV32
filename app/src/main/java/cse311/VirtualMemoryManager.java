@@ -10,6 +10,7 @@ import java.util.Map;
  * Virtual Memory Manager that provides individual address spaces for each task
  * Uses a 2D array approach where each task has its own memory space
  */
+@Deprecated
 public class VirtualMemoryManager {
     // 2D array: [taskId][address] = byte value
     private final Map<Integer, byte[]> taskMemorySpaces = new ConcurrentHashMap<>();
@@ -43,10 +44,12 @@ public class VirtualMemoryManager {
         this.sharedMemory = new byte[UART_SIZE]; // Shared memory for UART
         this.uart = new Uart();
 
-        System.out.println("VirtualMemoryManager initialized:");
-        System.out.println("  Memory per task: " + (TASK_MEMORY_SIZE / (1024 * 1024)) + "MB");
-        System.out.println("  Max tasks: " + maxTasks);
-        System.out.println("  Total virtual memory: " + (TASK_MEMORY_SIZE * maxTasks / (1024 * 1024)) + "MB");
+        cse311.Logger.FileLogger.log("VirtualMemoryManager initialized:");
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                "  Memory per task: " + (TASK_MEMORY_SIZE / (1024 * 1024)) + "MB");
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG, "  Max tasks: " + maxTasks);
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                "  Total virtual memory: " + (TASK_MEMORY_SIZE * maxTasks / (1024 * 1024)) + "MB");
     }
 
     /**
@@ -61,12 +64,14 @@ public class VirtualMemoryManager {
      */
     public boolean allocateTaskMemory(int taskId) {
         if (taskMemorySpaces.containsKey(taskId)) {
-            System.err.println("Task " + taskId + " already has allocated memory");
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "Task " + taskId + " already has allocated memory");
             return false;
         }
 
         if (taskMemorySpaces.size() >= maxTasks) {
-            System.err.println("Maximum number of tasks (" + maxTasks + ") reached");
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "Maximum number of tasks (" + maxTasks + ") reached");
             return false;
         }
 
@@ -77,7 +82,9 @@ public class VirtualMemoryManager {
         // Initialize stack area to zero
         initializeTaskMemory(taskId);
 
-        System.out.println("Allocated " + (TASK_MEMORY_SIZE / (1024 * 1024)) + "MB memory for task " + taskId);
+        cse311.Logger.FileLogger
+                .log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                        "Allocated " + (TASK_MEMORY_SIZE / (1024 * 1024)) + "MB memory for task " + taskId);
         return true;
     }
 
@@ -87,7 +94,8 @@ public class VirtualMemoryManager {
     public void deallocateTaskMemory(int taskId) {
         byte[] memory = taskMemorySpaces.remove(taskId);
         if (memory != null) {
-            System.out.println("Deallocated memory for task " + taskId);
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                    "Deallocated memory for task " + taskId);
         }
     }
 
@@ -219,8 +227,9 @@ public class VirtualMemoryManager {
         }
 
         System.arraycopy(programData, 0, taskMemory, loadAddress, programData.length);
-        System.out.println("Loaded " + programData.length + " bytes into task " + taskId + " at address 0x" +
-                Integer.toHexString(loadAddress));
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                "Loaded " + programData.length + " bytes into task " + taskId + " at address 0x" +
+                        Integer.toHexString(loadAddress));
     }
 
     /**

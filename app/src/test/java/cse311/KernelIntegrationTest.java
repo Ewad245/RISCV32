@@ -17,7 +17,7 @@ class KernelIntegrationTest {
 
     private Kernel kernel;
     private MemoryManager memory;
-    private RV32Cpu cpu;
+    // private RV32Cpu cpu; // Managed internally by kernel
 
     @BeforeEach
     void setUp() {
@@ -27,8 +27,8 @@ class KernelIntegrationTest {
                 new BestFitStrategy());
         this.memory = cmm;
 
-        cpu = new RV32Cpu(memory);
-        kernel = new Kernel(cpu, memory);
+        // cpu = new RV32Cpu(memory);
+        kernel = new Kernel(memory);
     }
 
     /**
@@ -111,8 +111,10 @@ class KernelIntegrationTest {
         int pid = task.getId();
         kernel.terminateTask(pid);
 
-        assertNull(kernel.getTask(pid));
-        assertEquals(TaskState.TERMINATED, task.getState());
+        // Under the new Unix-style lifecycle, a terminated task becomes a ZOMBIE
+        // and remains in the task map until its parent reaps it via wait().
+        assertNotNull(kernel.getTask(pid), "Task should remain in map as a zombie until reaped");
+        assertEquals(TaskState.TERMINATED, task.getState(), "Task state should be TERMINATED");
     }
 
     @Test

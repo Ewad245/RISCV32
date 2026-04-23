@@ -5,6 +5,10 @@ import java.util.List;
 
 import cse311.RV32Cpu;
 import cse311.WaitReason;
+import cse311.kernel.fs.FileDescriptor;
+import cse311.kernel.fs.Inode;
+import cse311.kernel.fs.Pipe;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Represents a task (process) in the simulated operating system.
@@ -38,9 +42,20 @@ public class Task {
     // Process memory information
     private ProgramInfo meminfo;
     private int allocatedSize;
+    private int programBreak; // Current top of heap (brk)
 
     // Generic context (AddressSpace or SegmentTable)
     private transient Object memoryContext;
+
+    private volatile boolean killed = false;
+
+    // File System Support
+    public static final int NOFILE = 16; // Max open files per task
+    private FileDescriptor[] openFiles = new FileDescriptor[NOFILE];
+    public Inode cwd; // Current Working Directory
+
+    // Pipe blocking support
+    private Pipe blockedOnPipe; // Pipe this task is waiting on
 
     /**
      * Creates a new task with the specified ID and stack size.
@@ -74,9 +89,15 @@ public class Task {
         this.wakeupTime = 0;
         this.waitingForPid = -1;
         this.exitCode = 0;
+        this.programBreak = (info != null) ? info.heapStart : 0;
 
         // Initialize stack pointer (x2) to the top of the stack
         this.registers[2] = stackBase + stackSize;
+
+        // Note: cwd should be set after initialization, probably by the Kernel or
+        // during fork/exec,
+        // because we don't have access to FileSystem here easily. If this is init, it
+        // will set its own.
     }
 
     /**
@@ -282,6 +303,22 @@ public class Task {
         this.allocatedSize = allocatedSize;
     }
 
+    public int getProgramBreak() {
+        return programBreak;
+    }
+
+    public void setProgramBreak(int programBreak) {
+        this.programBreak = programBreak;
+    }
+
+    public boolean isKilled() {
+        return killed;
+    }
+
+    public void kill() {
+        this.killed = true;
+    }
+
     public ProgramInfo getProgramInfo() {
         return meminfo;
     }
@@ -402,6 +439,7 @@ public class Task {
             waitReason = WaitReason.NONE;
             wakeupTime = 0;
             waitingForPid = -1;
+            blockedOnPipe = null;
         }
     }
 
@@ -440,5 +478,109 @@ public class Task {
     @Override
     public String toString() {
         return String.format("Task[pid=%d, name=%s, state=%s]", getId(), name, state);
+    }
+
+    // --- Concurrency Detection ---
+    private final AtomicInteger activeHartId = new AtomicInteger(-1);
+
+    /**
+     * Tries to claim this task for a specific Hart (CPU).
+     * 
+     * @param hartId The ID of the CPU attempting to run this task.
+     * @return true if successfully claimed, false if already running on another
+     *         CPU.
+     */
+    public boolean tryAcquireCpu(int hartId) {
+        return activeHartId.compareAndSet(-1, hartId);
+    }
+
+    /**
+     * Releases this task from the current CPU.
+     * Use with caution.
+     */
+    public void releaseCpu() {
+        activeHartId.set(-1);
+    }
+
+    /**
+     * Gets the ID of the Hart currently executing this task (if any).
+     * 
+     * @return Hart ID or -1 if idle.
+     */
+    public int getActiveHartId() {
+        return activeHartId.get();
+    }
+
+    // --- File Descriptor Support ---
+
+    /**
+     * Allocates a new file descriptor index.
+     * 
+     * @return fd index (3..15) or -1 if full
+     */
+    public int allocFd(FileDescriptor fd) {
+        // 0, 1, 2 are reserved for Stdin/Stdout/Stderr
+        for (int i = 3; i < NOFILE; i++) {
+            if (openFiles[i] == null) {
+                openFiles[i] = fd;
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public FileDescriptor getFileDescriptor(int fd) {
+        if (fd < 0 || fd >= NOFILE)
+            return null;
+        return openFiles[fd];
+    }
+
+    public void closeFd(int fd, cse311.kernel.fs.FileSystem fs) {
+        if (fd < 0 || fd >= NOFILE || openFiles[fd] == null)
+            return;
+        openFiles[fd].close(fs);
+        openFiles[fd] = null;
+    }
+
+    // Copy FDs for Fork (dup)
+    public void dupFileDescriptors(Task parent) {
+        for (int i = 0; i < NOFILE; i++) {
+            if (parent.openFiles[i] != null) {
+                this.openFiles[i] = parent.openFiles[i];
+                this.openFiles[i].refCount++;
+            }
+        }
+    }
+
+    /**
+     * Duplicates a file descriptor into the lowest available slot.
+     */
+    public int dupFd(int oldFd) {
+        if (oldFd < 0 || oldFd >= NOFILE || openFiles[oldFd] == null) {
+            return -1;
+        }
+
+        FileDescriptor fd = openFiles[oldFd];
+        // Start from 0 to allow reuse of closed stdin/stdout/stderr
+        for (int i = 0; i < NOFILE; i++) {
+            if (openFiles[i] == null) {
+                openFiles[i] = fd;
+                fd.refCount++;
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    public Pipe getBlockedOnPipe() {
+        return blockedOnPipe;
+    }
+
+    public void setBlockedOnPipe(Pipe pipe) {
+        this.blockedOnPipe = pipe;
+    }
+
+    public void clearBlockedOnPipe() {
+        this.blockedOnPipe = null;
     }
 }

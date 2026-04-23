@@ -1,10 +1,13 @@
 package cse311.programs; // You can create a new package
 
 import cse311.*;
+import cse311.Logger.FileLogger;
 import cse311.kernel.Kernel;
 import cse311.kernel.process.Task;
 import cse311.kernel.process.TaskState;
 
+// This is not tested
+@Deprecated
 public class InitTask extends JavaTask {
 
     private Task shellTask;
@@ -26,18 +29,19 @@ public class InitTask extends JavaTask {
         if (shellTask == null || shellTask.getState() == TaskState.TERMINATED) {
             if (shellTask != null) {
                 // Shell must have exited, clean it up
-                System.out.println("init: Shell exited. Reaping.");
+                FileLogger.log(FileLogger.LogLevel.DEBUG, "init: Shell exited. Reaping.");
                 kernel.getTaskManager().cleanupTaskAndNotify(shellTask);
             }
 
             // "fork/exec" the shell
-            System.out.println("init: Starting sh...");
+            FileLogger.log("init: Starting sh...");
             try {
                 // Create our new Java-based ShellTask
                 this.shellTask = new ShellTask(kernel.getNextPid(), kernel, this);
                 kernel.addTaskToScheduler(this.shellTask);
             } catch (Exception e) {
-                System.err.println("init: Failed to start sh: " + e.getMessage());
+                FileLogger.log(FileLogger.LogLevel.ERROR,
+                        "init: Failed to start sh: " + e.getMessage());
                 // Wait 5 seconds before retrying
                 this.waitFor(WaitReason.TIMER, System.currentTimeMillis() + 5000);
                 return;
@@ -55,7 +59,8 @@ public class InitTask extends JavaTask {
 
         if (orphanToReap != null) {
             // Found an orphan to reap
-            System.out.println("init: Reaping orphaned process " + orphanToReap.getId());
+            FileLogger.log(FileLogger.LogLevel.DEBUG,
+                    "init: Reaping orphaned process " + orphanToReap.getId());
             kernel.getTaskManager().cleanupTaskAndNotify(orphanToReap);
 
             // Stay in READY state to immediately check for more orphans

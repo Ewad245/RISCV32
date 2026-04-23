@@ -25,7 +25,7 @@ public class SimpleMemory {
     private static final int MMIO_START = 0x10000000;
     private static final int MMIO_END = 0x10001000;
 
-    public byte readByte(int address) throws MemoryAccessException {
+    public synchronized byte readByte(int address) throws MemoryAccessException {
         // Check if address is in MMIO range
         if (address >= MMIO_START && address < MMIO_END) {
             // Let MemoryManager handle MMIO
@@ -40,7 +40,7 @@ public class SimpleMemory {
         return memory[physicalAddress];
     }
 
-    public void writeByte(int address, byte value) throws MemoryAccessException {
+    public synchronized void writeByte(int address, byte value) throws MemoryAccessException {
         // Check if address is in MMIO range
         if (address >= MMIO_START && address < MMIO_END) {
             // Let MemoryManager handle MMIO
@@ -55,7 +55,7 @@ public class SimpleMemory {
         memory[physicalAddress] = value;
     }
 
-    public short readHalfWord(int address) throws MemoryAccessException {
+    public synchronized short readHalfWord(int address) throws MemoryAccessException {
         checkAddress(address, HALF_WORD_ALIGN);
         checkAlignment(address, HALF_WORD_ALIGN);
 
@@ -64,7 +64,7 @@ public class SimpleMemory {
                 (memory[physicalAddress] & 0xFF));
     }
 
-    public int readWord(int address) throws MemoryAccessException {
+    public synchronized int readWord(int address) throws MemoryAccessException {
         checkAddress(address, WORD_ALIGN);
         checkAlignment(address, WORD_ALIGN);
 
@@ -75,7 +75,7 @@ public class SimpleMemory {
                 (memory[physicalAddress] & 0xFF);
     }
 
-    public void writeHalfWord(int address, short value) throws MemoryAccessException {
+    public synchronized void writeHalfWord(int address, short value) throws MemoryAccessException {
         checkAddress(address, HALF_WORD_ALIGN);
         checkAlignment(address, HALF_WORD_ALIGN);
 
@@ -84,7 +84,7 @@ public class SimpleMemory {
         memory[physicalAddress + 1] = (byte) ((value >> 8) & 0xFF);
     }
 
-    public void writeWord(int address, int value) throws MemoryAccessException {
+    public synchronized void writeWord(int address, int value) throws MemoryAccessException {
         checkAddress(address, WORD_ALIGN);
         checkAlignment(address, WORD_ALIGN);
 

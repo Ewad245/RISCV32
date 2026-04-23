@@ -15,6 +15,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import cse311.kernel.fs.Pipe;
 
 /**
  * Manages task creation, destruction, and lifecycle
@@ -25,6 +28,14 @@ public class TaskManager {
     private final Map<Integer, TaskMemoryInfo> taskMemory = new ConcurrentHashMap<>();
     private ProcessMemoryCoordinator memoryCoordinator;
     private Task initTask; // The init process (PID 1)
+
+    // Condition Variables tracking
+    // Maps cvId -> Queue of Tasks waiting on that CV
+    private final Map<Integer, java.util.Queue<Task>> conditionVariables = new ConcurrentHashMap<>();
+
+    // Pipe wait queues
+    // Maps Pipe -> Queue of Tasks waiting on that Pipe
+    private final Map<Pipe, java.util.Queue<Task>> pipeWaitQueues = new ConcurrentHashMap<>();
 
     public TaskManager(Kernel kernel, KernelMemoryManager kernelMemory) {
         this.kernel = kernel;
@@ -114,6 +125,12 @@ public class TaskManager {
         memoryCoordinator.freeMemory(task.getId());
 
         TaskMemoryInfo memInfo = taskMemory.get(pid);
+
+        if (task.cwd != null) {
+            kernel.getFileSystem().iput(task.cwd);
+            task.cwd = null;
+        }
+
         if (memInfo != null) {
             kernelMemory.freeStack(pid, memInfo.stackBase, memInfo.stackSize);
             taskMemory.remove(pid);
@@ -131,12 +148,14 @@ public class TaskManager {
         Task initTask = kernel.getTask(1);
 
         if (initTask == null) {
-            System.err.println("CRITICAL: Init task (PID 1) not found during reparenting!");
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "CRITICAL: Init task (PID 1) not found during reparenting!");
             return;
         }
 
         if (dyingTask.getId() == 1) {
-            System.err.println("CRITICAL: Init task is dying! System halt imminent.");
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "CRITICAL: Init task is dying! System halt imminent.");
             return;
         }
 
@@ -161,8 +180,22 @@ public class TaskManager {
             // D. Important: If the child was already ZOMBIE (TERMINATED),
             // Init needs to know so it can reap it immediately.
             // In a real OS, we might send a SIGCHLD signal here.
-            // For this simulator, if the child is already TERMINATED, Init will
-            // pick it up in its next wait() call naturally.
+            synchronized (initTask) {
+                if (child.getState() == TaskState.TERMINATED) {
+                    if (initTask.getState() == TaskState.WAITING &&
+                            initTask.getWaitReason() == cse311.WaitReason.PROCESS_EXIT) {
+
+                        int waitingFor = initTask.getWaitingForPid();
+                        if (waitingFor == -1 || waitingFor == child.getId()) {
+                            kernel.removeFromWaitQueue(initTask);
+                            initTask.wakeup();
+                            kernel.addTaskToScheduler(initTask);
+                            cse311.Logger.FileLogger
+                                    .log("TaskManager: Woke init to reap adopted zombie " + child.getId());
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -212,6 +245,9 @@ public class TaskManager {
         // Copy registers
         child.setProgramCounter(parent.getProgramCounter());
         System.arraycopy(parent.getRegisters(), 0, child.getRegisters(), 0, 32);
+
+        // Copy heap state
+        child.setProgramBreak(parent.getProgramBreak());
 
         // Set up parent relationship
         child.setParent(parent);
@@ -269,7 +305,19 @@ public class TaskManager {
         // 6. Set Return Value (0 for child)
         child.getRegisters()[10] = 0; // a0 = 0
 
-        // 7. Hierarchy & Scheduler
+        // 7. Copy heap state
+        child.setProgramBreak(parent.getProgramBreak());
+
+        // Copy file descriptors to child so it can use pipes/files!
+        child.dupFileDescriptors(parent);
+        // Inherit the Current Working Directory using strict caching!
+        if (parent.cwd != null) {
+            child.cwd = kernel.getFileSystem().idup(parent.cwd);
+        } else {
+            child.cwd = null;
+        }
+
+        // 8. Hierarchy & Scheduler
         child.setAllocatedSize(childMemorySize);
         child.setParent(parent);
         parent.addChild(child);
@@ -330,7 +378,8 @@ public class TaskManager {
     }
 
     /**
-     * Clean up task resources and notify parent
+     * Clean up task resources and notify parent (Used for Java Simulated Task
+     * Methods) (Not used for actual tasks) (Not tested yet)
      */
     public void cleanupTaskAndNotify(Task task) {
         int pid = task.getId();
@@ -369,6 +418,106 @@ public class TaskManager {
         }
 
         // System.out.println("Cleaned up task " + pid + " resources");
+    }
+
+    // --- Condition Variable Support ---
+
+    /**
+     * Blocks a task waiting for a Condition Variable
+     * 
+     * @param task The task to block
+     * @param cvId The ID of the condition variable
+     */
+    public void waitOnCondition(Task task, int cvId) {
+        conditionVariables.computeIfAbsent(cvId, k -> new java.util.LinkedList<>()).add(task);
+        task.waitFor(WaitReason.CONDITION_VARIABLE);
+    }
+
+    /**
+     * Wakes up one task waiting on a Condition Variable (Mesa semantics)
+     * 
+     * @param cvId The ID of the condition variable
+     * @return true if a task was woken up, false if no tasks were waiting
+     */
+    public boolean signalCondition(int cvId) {
+        java.util.Queue<Task> queue = conditionVariables.get(cvId);
+        if (queue != null && !queue.isEmpty()) {
+            Task awoken = queue.poll();
+            awoken.wakeup();
+            // The task is now READY but must wait its turn in the global Scheduler queue
+            kernel.addTaskToScheduler(awoken);
+
+            // Clean up empty queues
+            if (queue.isEmpty()) {
+                conditionVariables.remove(cvId);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Wakes up all tasks waiting on a Condition Variable
+     * 
+     * @param cvId The ID of the condition variable
+     * @return the number of tasks woken up
+     */
+    public int broadcastCondition(int cvId) {
+        java.util.Queue<Task> queue = conditionVariables.remove(cvId);
+        if (queue != null) {
+            int count = queue.size();
+            for (Task awoken : queue) {
+                awoken.wakeup();
+                kernel.addTaskToScheduler(awoken);
+            }
+            return count;
+        }
+        return 0;
+    }
+
+    /**
+     * Gets all tasks currently waiting on any condition variable
+     * 
+     * @return Collection of all tasks waiting on condition variables
+     */
+    public Collection<Task> getAllConditionVariableWaiters() {
+        List<Task> allWaiters = new ArrayList<>();
+        for (java.util.Queue<Task> queue : conditionVariables.values()) {
+            allWaiters.addAll(queue);
+        }
+        return Collections.unmodifiableList(allWaiters);
+    }
+
+    // --- Pipe Support ---
+
+    /**
+     * Blocks a task waiting for a Pipe
+     * 
+     * @param pipe The pipe the task is waiting on
+     * @param task The task to block
+     */
+    public void addTaskToPipeWaitQueue(Pipe pipe, Task task) {
+        pipeWaitQueues.computeIfAbsent(pipe, k -> new java.util.LinkedList<>()).add(task);
+    }
+
+    /**
+     * Wakes up all tasks waiting on a Pipe
+     * 
+     * @param pipe The pipe to wake tasks from
+     */
+    public void wakeTasksBlockedOnPipe(Pipe pipe) {
+        java.util.Queue<Task> queue = pipeWaitQueues.remove(pipe);
+        if (queue != null) {
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                    "TaskManager: Waking " + queue.size() + " tasks blocked on pipe (pipe has " + pipe.availableBytes()
+                            + " bytes, writeOpen=" + pipe.isWriteOpen() + ")");
+
+            for (Task awoken : queue) {
+                awoken.wakeup();
+                awoken.clearBlockedOnPipe();
+                kernel.addTaskToScheduler(awoken);
+            }
+        }
     }
 
     /**

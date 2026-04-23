@@ -1,7 +1,11 @@
 package cse311.kernel.contiguous;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import cse311.MemoryManager;
 import cse311.SimpleMemory;
@@ -16,14 +20,28 @@ public class ContiguousMemoryManager extends MemoryManager {
     private final int totalMemory;
     private final AllocationStrategy allocator;
 
-    // Simulates the Hardware Registers
-    private int baseRegister = 0;
-    private int limitRegister = 0;
-    private int currentPid = -1;
+    // Simulates the Hardware Registers (Per-Core)
+    private static class CpuContext {
+        int baseRegister = 0;
+        int limitRegister = 0;
+        int currentPid = -1;
+    }
+
+    // Map Thread ID (CPU Core) -> CPU Register Context
+    private final Map<Long, CpuContext> contexts = new ConcurrentHashMap<>();
 
     // Track free and allocated blocks
+    // Synchronized lists for thread safety during allocation/free/compact
     private List<MemoryBlock> freeList = new ArrayList<>();
     private List<ProcessBlock> allocatedList = new ArrayList<>();
+
+    // Track PIDs that share another process's memory (CLONE_VM threads)
+    // These should NOT free the underlying memory when they exit
+    private final Set<Integer> sharedPids = new HashSet<>();
+
+    private CpuContext getContext() {
+        return contexts.computeIfAbsent(Thread.currentThread().getId(), k -> new CpuContext());
+    }
 
     public ContiguousMemoryManager(int totalMemory, AllocationStrategy allocator) {
         // Initialize the underlying physical RAM
@@ -35,7 +53,7 @@ public class ContiguousMemoryManager extends MemoryManager {
     }
 
     public int getLimitRegister() {
-        return this.limitRegister;
+        return getContext().limitRegister;
     }
 
     private boolean isMMIO(int address) {
@@ -46,32 +64,36 @@ public class ContiguousMemoryManager extends MemoryManager {
      * Switch hardware context (Base/Limit registers) to a specific process.
      */
     public void switchContext(int pid) {
-        this.currentPid = pid;
+        CpuContext ctx = getContext();
+        ctx.currentPid = pid;
         // Load Base and Limit registers for the current process
-        for (ProcessBlock pb : allocatedList) {
-            if (pb.pid == pid) {
-                this.baseRegister = pb.start;
-                this.limitRegister = pb.size;
-                return;
+        synchronized (this) {
+            for (ProcessBlock pb : allocatedList) {
+                if (pb.pid == pid) {
+                    ctx.baseRegister = pb.start;
+                    ctx.limitRegister = pb.size;
+                    return;
+                }
             }
         }
         // If kernel or not found, grant full access (or default to 0)
-        this.baseRegister = 0;
-        this.limitRegister = totalMemory;
+        ctx.baseRegister = 0;
+        ctx.limitRegister = totalMemory;
     }
 
     /**
      * Translate Logical Address -> Physical Address
      */
     public int translate(int logicalAddr) throws MemoryAccessException {
+        CpuContext ctx = getContext();
         // Check Limit Register (Protection)
-        if (logicalAddr >= limitRegister) {
+        if (logicalAddr >= ctx.limitRegister) {
             throw new MemoryAccessException(
                     String.format("Segmentation Fault: PID %d accessed 0x%08X (Limit: 0x%08X)",
-                            currentPid, logicalAddr, limitRegister));
+                            ctx.currentPid, logicalAddr, ctx.limitRegister));
         }
         // Apply Relocation Register
-        return baseRegister + logicalAddr;
+        return ctx.baseRegister + logicalAddr;
     }
 
     // --- OVERRIDE MEMORY ACCESS METHODS ---
@@ -140,7 +162,7 @@ public class ContiguousMemoryManager extends MemoryManager {
 
     // --- ALLOCATION LOGIC (Managed by Coordinator) ---
 
-    public boolean allocateMemory(int pid, int size) {
+    public synchronized boolean allocateMemory(int pid, int size) {
         // Use strategy (First/Best/Worst fit) to find a hole
         int startAddr = allocator.findRegion(freeList, size);
 
@@ -148,7 +170,8 @@ public class ContiguousMemoryManager extends MemoryManager {
             // Check for External Fragmentation
             int totalFree = freeList.stream().mapToInt(b -> b.size).sum();
             if (totalFree >= size) {
-                System.out.println("External Fragmentation detected. Compacting...");
+                cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                        "External Fragmentation detected. Compacting...");
                 compact();
                 startAddr = allocator.findRegion(freeList, size);
             }
@@ -166,7 +189,7 @@ public class ContiguousMemoryManager extends MemoryManager {
      * Copies the content of the parent's memory partition to the child's partition.
      * Essential for fork() implementation.
      */
-    public boolean copyMemory(int parentPid, int childPid) {
+    public synchronized boolean copyMemory(int parentPid, int childPid) {
         ProcessBlock parent = null;
         ProcessBlock child = null;
 
@@ -179,7 +202,9 @@ public class ContiguousMemoryManager extends MemoryManager {
         }
 
         if (parent == null || child == null) {
-            System.err.println("Contiguous Copy Failed: PIDs not found (P:" + parentPid + ", C:" + childPid + ")");
+            cse311.Logger.FileLogger
+                    .log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                            "Contiguous Copy Failed: PIDs not found (P:" + parentPid + ", C:" + childPid + ")");
             return false;
         }
 
@@ -195,12 +220,20 @@ public class ContiguousMemoryManager extends MemoryManager {
             System.arraycopy(ram, parent.start, ram, child.start, bytesToCopy);
             return true;
         } catch (Exception e) {
-            System.err.println("Contiguous Copy Error: " + e.getMessage());
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                    "Contiguous Copy Error: " + e.getMessage());
             return false;
         }
     }
 
-    public void freeMemory(int pid) {
+    public synchronized void freeMemory(int pid) {
+        // If this PID is a shared thread (CLONE_VM), just remove the alias
+        // Do NOT free the physical memory — the parent still owns it
+        if (sharedPids.remove(pid)) {
+            allocatedList.removeIf(b -> b.pid == pid);
+            return;
+        }
+
         allocatedList.removeIf(b -> {
             if (b.pid == pid) {
                 freeList.add(new MemoryBlock(b.start, b.size));
@@ -211,7 +244,24 @@ public class ContiguousMemoryManager extends MemoryManager {
         mergeHoles();
     }
 
-    public void compact() {
+    /**
+     * Register a child PID to share the parent's memory block (for CLONE_VM).
+     * The child gets the same Base/Limit registers but does NOT own the memory.
+     */
+    public synchronized void registerSharedBlock(int childPid, int parentPid) {
+        for (ProcessBlock pb : allocatedList) {
+            if (pb.pid == parentPid) {
+                // Create an alias block pointing to the same physical region
+                allocatedList.add(new ProcessBlock(childPid, pb.start, pb.size));
+                sharedPids.add(childPid);
+                return;
+            }
+        }
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                "registerSharedBlock: Parent PID " + parentPid + " not found in allocatedList");
+    }
+
+    public synchronized void compact() {
         // Simple compaction: Move all allocated blocks to the start
         int currentPos = 0;
 
@@ -225,13 +275,12 @@ public class ContiguousMemoryManager extends MemoryManager {
                 pb.start = currentPos;
             }
 
-            // Check and update immediately.
-            // We do this outside the 'if (moved)' block because even if the process
-            // didn't move (it was already at 0), it's safe and consistent to ensure
-            // the registers match the PCB.
-            if (pb.pid == currentPid) {
-                this.baseRegister = pb.start;
-                this.limitRegister = pb.size;
+            // Update registers for ALL contexts tracking this process
+            for (CpuContext ctx : contexts.values()) {
+                if (ctx.currentPid == pb.pid) {
+                    ctx.baseRegister = pb.start;
+                    ctx.limitRegister = pb.size;
+                }
             }
 
             currentPos += pb.size;
@@ -276,5 +325,13 @@ public class ContiguousMemoryManager extends MemoryManager {
                 i--; // Retry this index
             }
         }
+    }
+
+    public synchronized List<ProcessBlock> getAllocatedBlocks() {
+        return new ArrayList<>(allocatedList);
+    }
+
+    public synchronized List<MemoryBlock> getFreeBlocks() {
+        return new ArrayList<>(freeList);
     }
 }

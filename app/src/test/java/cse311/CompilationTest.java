@@ -2,7 +2,7 @@ package cse311;
 
 import org.junit.jupiter.api.Test;
 
-import cse311.Enum.MemoryMode;
+import cse311.Constants.MemoryMode;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -16,7 +16,7 @@ public class CompilationTest {
         // Test that all classes can be instantiated
         RV32Computer computer = new RV32Computer(64 * 1024 * 1024, 4, MemoryMode.PAGING);
         assertNotNull(computer);
-        assertNotNull(computer.getCpu());
+        // assertNotNull(computer.getCpu()); // CPU is now managed by Kernel
         assertNotNull(computer.getMemoryManager());
         assertNotNull(computer.getKernel());
 

@@ -1,56 +1,110 @@
 package cse311.kernel;
 
 import cse311.*;
+import cse311.Exception.BreakpointException;
+import cse311.Logger.FileLogger;
+import cse311.Logger.FileLogger.LogLevel;
 import cse311.kernel.scheduler.*;
 import cse311.kernel.syscall.*;
 import cse311.kernel.process.*;
+import cse311.kernel.fs.FileSystem;
+import cse311.kernel.fs.BufferCache;
 import cse311.kernel.NonContiguous.NonContiguousMemoryCoordinator;
 import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
 import cse311.kernel.NonContiguous.paging.PagingMapper;
 import cse311.kernel.contiguous.ContiguousMemoryCoordinator;
 import cse311.kernel.contiguous.ContiguousMemoryManager;
 import cse311.kernel.memory.*;
+import javafx.application.Platform;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.PriorityBlockingQueue;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Main kernel class that coordinates all kernel subsystems
  * Provides a clean interface for managing tasks, scheduling, and system calls
  */
 public class Kernel {
-    private final RV32Cpu cpu;
+    private final List<RV32Cpu> cpus; // NEW
     private final MemoryManager memory;
     private final TaskManager taskManager;
     private final Scheduler scheduler;
     private final SystemCallHandler syscallHandler;
     private final KernelMemoryManager kernelMemory;
     private ProcessMemoryCoordinator memoryCoordinator;
+    private FileSystem fileSystem;
+    private BufferCache bufferCache;
+
+    // 1. I/O Wait Queue (FIFO)
+    private final Queue<Task> ioWaitQueue = new ConcurrentLinkedQueue<>();
+
+    // 2. Interrupt/Timer Wait Queue (Sorted by wakeup time)
+    private final PriorityBlockingQueue<Task> sleepWaitQueue = new PriorityBlockingQueue<>(
+            11, Comparator.comparingLong(Task::getWakeupTime));
+
+    // 3. Child Termination Wait Queue
+    // Map: Child PID -> Parent Task (The parent waiting for that child)
+    private final Map<Integer, Task> childTerminationWaitQueue = new ConcurrentHashMap<>();
 
     // Kernel state
     private boolean running = false;
     private int nextPid = 1;
+    // Master list of all tasks (for tracking purposes only, not scheduling)
     private final Map<Integer, Task> tasks = new ConcurrentHashMap<>();
+
+    // Boot coordination
+    private volatile boolean started = false;
+
+    // Execution Control
+    private volatile boolean paused = false;
+    private volatile int executionDelayMs = 0; // 0 = max speed
+
+    // Synchronization
+    private final cse311.kernel.lock.Spinlock schedulerLock = new cse311.kernel.lock.Spinlock("scheduler");
 
     // Configuration
     private final KernelConfig config;
 
-    public Kernel(RV32Cpu cpu, MemoryManager memory) {
-        this.cpu = cpu;
+    // Heat decay for memory heatmap
+    private ScheduledExecutorService heatDecayExecutor;
+
+    // Console for displaying warnings (GUI integration)
+    private cse311.gui.components.ConsoleView consoleView;
+
+    // Deadlock detection flag to prevent spamming
+    private final AtomicBoolean deadlockDetected = new AtomicBoolean(false);
+
+    // Devices
+    private final cse311.kernel.fs.Device[] devsw = new cse311.kernel.fs.Device[10];
+
+    public Kernel(MemoryManager memory) {
+        cpus = new ArrayList<>();
         this.memory = memory;
         this.config = new KernelConfig();
+
+        for (int i = 0; i < config.getCoreCount(); i++) {
+            RV32Cpu core = new RV32Cpu(memory); // All cores share the same physical RAM
+            core.setId(i);
+            this.cpus.add(core);
+        }
 
         // Initialize kernel subsystems
         this.kernelMemory = new KernelMemoryManager(memory);
         this.taskManager = new TaskManager(this, kernelMemory);
         this.scheduler = createScheduler();
-        this.syscallHandler = new SystemCallHandler(this, cpu);
+        this.syscallHandler = new SystemCallHandler(this);
 
         // --------------------------------------------------------
         // 1. FACTORY: Initialize the correct Memory Coordinator
         // --------------------------------------------------------
         if (memory instanceof PagedMemoryManager) {
             // --- PAGING MODE ---
-            System.out.println("Kernel: Detected Paging Mode.");
+            FileLogger.log(FileLogger.LogLevel.DEBUG, "Kernel: Detected Paging Mode.");
 
             PagedMemoryManager pm = (PagedMemoryManager) memory;
             PagingMapper mapper = new PagingMapper(pm);
@@ -61,7 +115,7 @@ public class Kernel {
 
         } else if (memory instanceof ContiguousMemoryManager) {
             // --- CONTIGUOUS MODE ---
-            System.out.println("Kernel: Detected Contiguous Mode.");
+            FileLogger.log(FileLogger.LogLevel.DEBUG, "Kernel: Detected Contiguous Mode.");
 
             ContiguousMemoryManager cmm = (ContiguousMemoryManager) memory;
 
@@ -71,13 +125,33 @@ public class Kernel {
 
         } else {
             // --- LEGACY MODE ---
-            System.out.println("Kernel: Warning - Legacy Memory Mode (No Coordinator).");
+            FileLogger.log("Kernel: Warning - Legacy Memory Mode (No Coordinator).");
             this.memoryCoordinator = null;
         }
         taskManager.setMemoryCoordinator(this.memoryCoordinator);
 
-        System.out.println("RV32IM Java Kernel initialized");
-        System.out.println("Scheduler: " + scheduler.getClass().getSimpleName());
+        // Register standard devices
+        registerDevice(1, new cse311.kernel.fs.ConsoleDevice(this));
+
+        FileLogger.log("RV32IM Java Kernel initialized");
+        FileLogger.log("Scheduler: " + scheduler.getClass().getSimpleName());
+    }
+
+    /**
+     * Mount a file system from a disk image.
+     * This should be called by App/GuiApp after kernel creation.
+     */
+    public void mountFileSystem(String diskImagePath) {
+        try {
+            this.fileSystem = new FileSystem(diskImagePath, this);
+            this.bufferCache = fileSystem.getBufferCache();
+            FileLogger.log("FileSystem mounted: " + diskImagePath);
+            FileLogger.log("BufferCache initialized with " + BufferCache.NBUF + " buffers");
+        } catch (Exception e) {
+            FileLogger.log(FileLogger.LogLevel.ERROR,
+                    "Failed to mount FS: " + e.getMessage());
+            throw new RuntimeException("Could not mount file system", e);
+        }
     }
 
     /**
@@ -97,8 +171,10 @@ public class Kernel {
         }
     }
 
+    private final List<Thread> kernelThreads = new ArrayList<>();
+
     /**
-     * Start the kernel and begin task execution
+     * Start the kernel and eventually the APs
      */
     public void start() {
         if (running) {
@@ -106,10 +182,70 @@ public class Kernel {
         }
 
         running = true;
-        System.out.println("Kernel starting...");
+        FileLogger.log(FileLogger.LogLevel.DEBUG, "Kernel starting...");
 
-        // Main kernel loop
-        mainLoop();
+        // 1. Launch Maintenance Thread (Handles Interrupts/Timers)
+        Thread maintThread = new Thread(this::maintenanceLoop, "Kernel-Maintenance");
+        maintThread.setDaemon(true);
+        maintThread.start();
+        kernelThreads.add(maintThread);
+
+        // 2. Launch Bootstrap Processor (BSP) - Core 0
+        RV32Cpu bsp = cpus.get(0);
+        Thread bspThread = new Thread(() -> {
+            FileLogger.log(FileLogger.LogLevel.DEBUG, "BSP (Core 0) booting...");
+            cpuRunLoop(bsp);
+        }, "CPU-Core-0");
+        bspThread.setDaemon(true);
+        bspThread.start();
+        kernelThreads.add(bspThread);
+
+        // Note: Application Processors (APs) are NOT started here.
+        // They will be started by the BSP calling startOthers().
+        // For simulation purposes, we will trigger this automatically after a short
+        // delay
+        // to mimic the BSP finishing its initialization.
+        Thread apStarterThread = new Thread(() -> {
+            try {
+                Thread.sleep(1000); // Simulate BSP initialization time
+                startOthers();
+            } catch (InterruptedException e) {
+                FileLogger.log(e);
+            }
+        });
+        apStarterThread.setDaemon(true);
+        apStarterThread.start();
+        kernelThreads.add(apStarterThread);
+
+        // 4. Start heat decay timer for memory heatmap visualization
+        heatDecayExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "heat-decay");
+            t.setDaemon(true);
+            return t;
+        });
+        heatDecayExecutor.scheduleAtFixedRate(() -> {
+            if (memory instanceof PagedMemoryManager pmm) {
+                pmm.decayHeat();
+            }
+        }, 500, 500, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * Wake up Application Processors (APs)
+     * In xv6, this is done by the BSP in main() calling startothers()
+     */
+    private void startOthers() {
+        FileLogger.log(FileLogger.LogLevel.DEBUG,
+                "BSP: Starting Application Processors (APs)...");
+        started = true;
+
+        for (int i = 1; i < cpus.size(); i++) {
+            RV32Cpu ap = cpus.get(i);
+            Thread apThread = new Thread(() -> cpuRunLoop(ap), "CPU-Core-" + ap.getId());
+            apThread.setDaemon(true);
+            apThread.start();
+            kernelThreads.add(apThread);
+        }
     }
 
     /**
@@ -117,49 +253,152 @@ public class Kernel {
      */
     public void stop() {
         running = false;
-        System.out.println("Kernel stopped");
+        started = false;
+        for (RV32Cpu cpu : cpus) {
+            cpu.turnOff();
+        }
+        if (heatDecayExecutor != null)
+            heatDecayExecutor.shutdownNow();
+        for (Thread t : kernelThreads) {
+            if (t != null && t.isAlive()) {
+                t.interrupt();
+            }
+        }
+        FileLogger.log("Kernel stopped");
     }
 
     /**
-     * Main kernel execution loop
+     * [Thread 1..N] The Main Execution Loop for each CPU Core
      */
-    private void mainLoop() {
+    private void cpuRunLoop(RV32Cpu cpu) {
+        FileLogger.log(FileLogger.LogLevel.DEBUG, "Core " + cpu.getId() + " online.");
+        // Only start the keyboard input thread on the BSP (Core 0)
+        // This prevents multiple threads from contending for System.in
+        if (cpu.getId() == 0) {
+            cpu.turnOn();
+        }
+
+        // Boot Coordination: APs spin-wait until BSP says 'started'
+        if (cpu.getId() != 0) {
+            while (!started) {
+                Thread.yield(); // Spin
+            }
+        }
+
         while (running) {
             try {
-                // Get the next task to run
-                Task currentTask = scheduler.schedule(tasks.values());
-
-                if (currentTask == null) {
-                    // No runnable tasks, check for waiting tasks
-                    if (hasWaitingTasks()) {
-                        // Handle I/O or other events that might wake tasks
-                        handleWaitingTasks();
-                        continue;
-                    } else {
-                        // No tasks at all, kernel can idle or exit
-                        System.out.println("No tasks to run, kernel idling...");
-                        break;
+                // ------------------------------------------------------------
+                // 1. EXECUTION CONTROL (Pause / Speed)
+                // ------------------------------------------------------------
+                while (paused) {
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
                     }
                 }
 
-                // Execute the selected task
-                executeTask(currentTask);
+                if (executionDelayMs > 0) {
+                    try {
+                        Thread.sleep(executionDelayMs);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+
+                Task currentTask;
+
+                // Synchronize scheduler access using our Spinlock
+                schedulerLock.acquire();
+                try {
+                    currentTask = scheduler.schedule();
+                } finally {
+                    schedulerLock.release();
+                }
+
+                if (currentTask == null) {
+                    cpu.setCurrentTask(null);
+                    cpu.processorWasClocked.emit();
+                    idle();
+                    detectDeadlock();
+                    continue;
+                }
+
+                // DOUBLE-SCHEDULE CHECK
+                if (!currentTask.tryAcquireCpu(cpu.getId())) {
+                    // Task was woken up concurrently but hasn't been released by its previous core
+                    // yet.
+                    // Safely requeue it to the scheduler to try again shortly.
+                    scheduler.addTask(currentTask);
+                    continue;
+                }
+
+                try {
+                    // Execute the selected task on THIS cpu
+                    executeTask(currentTask, cpu);
+
+                    // Decide where the task goes next (Ready, Wait, or Terminated)
+                    // MUST be called before releaseCpu to prevent other cores from modifying state
+                    dispatchTask(currentTask);
+
+                } catch (Exception e) {
+                    FileLogger.log("Core " + cpu.getId() + " execution error: " + e.getMessage());
+                    currentTask.setState(TaskState.TERMINATED);
+                    dispatchTask(currentTask);
+                } finally {
+                    // Release ownership AFTER dispatching to prevent other cores from snatching it
+                    currentTask.releaseCpu();
+                }
+
+                // Note: We do NOT clear currentTask here to avoid UI flickering.
+                // It will be updated in the next 'executeTask' call
+                // or cleared in the 'if (currentTask == null)' block above.
 
             } catch (Exception e) {
-                System.err.println("Kernel error: " + e.getMessage());
-                e.printStackTrace();
-                // Continue running unless it's a critical error
+                FileLogger.log("Core " + cpu.getId() + " error: " + e.getMessage());
+                FileLogger.log(e);
             }
+        }
+    }
+
+    /**
+     * [Thread 0] Maintenance Loop
+     * Checks hardware status and moves tasks from Wait Queues to Ready Queue.
+     */
+    private void maintenanceLoop() {
+        while (running) {
+            try {
+                checkDeviceInterrupts();
+                Thread.sleep(10); // Prevent burning host CPU
+            } catch (Exception e) {
+                FileLogger.log(e);
+            }
+        }
+    }
+
+    private void idle() {
+        // Simple idle loop: sleep briefly to save host CPU
+        try {
+            Thread.sleep(1);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return;
         }
     }
 
     /**
      * Execute a task for its time slice
      */
-    private void executeTask(Task task) {
+    private void executeTask(Task task, RV32Cpu cpu) {
         if (task.getState() != TaskState.READY) {
             return;
         }
+
+        FileLogger.log(FileLogger.LogLevel.DEBUG,
+                "Kernel: Executing task " + task.getId() + " (state=" + task.getState() + ", PC="
+                        + task.getProgramCounter() + ", a0=" + task.getRegisters()[10] + ")");
+
+        cpu.setCurrentTask(task); // Notify CPU about the task it is running
 
         if (task instanceof cse311.JavaTask) {
             // This is a Java-based task
@@ -172,9 +411,11 @@ public class Kernel {
                 if (task.getState() == TaskState.RUNNING) {
                     task.setState(TaskState.READY);
                 }
+                cpu.processorWasClocked.emit();
             } catch (Exception e) {
-                System.err.println("JavaTask " + task.getId() + " error: " + e.getMessage());
-                e.printStackTrace();
+                cpu.clearLastDecodedInstruction();
+                FileLogger.log("JavaTask " + task.getId() + " error: " + e.getMessage());
+                FileLogger.log(e);
                 task.setState(TaskState.TERMINATED);
             }
 
@@ -202,10 +443,16 @@ public class Kernel {
                         // 1. Save state BEFORE handling syscall (Required for fork/wait to work)
                         task.saveState(cpu);
 
-                        // 2. Handle the syscall (which might change Task state, like exec)
-                        handleSystemCall(task);
+                        // 2. Clear decoded instruction so UI doesn't show stale ecall state
+                        cpu.clearLastDecodedInstruction();
 
-                        // 3. Mark that we have already saved/handled the state.
+                        // 3. Handle the syscall (which might change Task state, like exec)
+                        handleSystemCall(task, cpu);
+
+                        // 4. Emit signal so UI sees the cleared state
+                        cpu.processorWasClocked.emit();
+
+                        // 5. Mark that we have already saved/handled the state.
                         // This prevents the code below the loop from overwriting
                         // changes made by 'exec' (like the new PC).
                         stateSavedBySyscall = true;
@@ -214,12 +461,32 @@ public class Kernel {
 
                     // Check if task hit a breakpoint or exception
                     if (cpu.isException()) {
+                        cpu.clearLastDecodedInstruction();
+                        cpu.processorWasClocked.emit();
                         handleException(task);
                         break;
                     }
 
+                    if (task.isKilled()) {
+                        cpu.clearLastDecodedInstruction();
+                        cpu.processorWasClocked.emit();
+                        task.setState(TaskState.TERMINATED);
+                        break;
+                    }
+
+                    // Emit UI signal after each normal instruction (state is clean)
+                    cpu.processorWasClocked.emit();
+
+                } catch (BreakpointException e) {
+                    cpu.clearLastDecodedInstruction();
+                    cpu.processorWasClocked.emit();
+                    FileLogger.log("Kernel: " + e.getMessage());
+                    this.pause();
+                    break;
                 } catch (Exception e) {
-                    System.err.println("Task " + task.getId() + " error: " + e.getMessage());
+                    cpu.clearLastDecodedInstruction();
+                    cpu.processorWasClocked.emit();
+                    FileLogger.log("Task " + task.getId() + " error: " + e.getMessage());
                     task.setState(TaskState.TERMINATED);
                     break;
                 }
@@ -237,6 +504,155 @@ public class Kernel {
     }
 
     /**
+     * Checks hardware status and moves tasks from Wait Queues to Ready Queue.
+     * This corresponds to the "Interrupt Occurs" or "I/O Completion" arrows.
+     */
+    private void checkDeviceInterrupts() {
+        // A. Check UART (I/O)
+        // If UART has data, wake up ALL tasks waiting for UART input
+        // (Real OS might be more selective, but this matches your logic)
+        try {
+            if ((memory.readByte(MemoryManager.UART_STATUS) & 1) != 0) {
+                Iterator<Task> it = ioWaitQueue.iterator();
+                while (it.hasNext()) {
+                    Task t = it.next();
+                    if (t.getWaitReason() == WaitReason.UART_INPUT) {
+                        t.wakeup(); // Set state to READY
+                        scheduler.addTask(t); // Move to Ready Queue
+                        it.remove(); // Remove from I/O Wait Queue
+                        FileLogger.log(FileLogger.LogLevel.DEBUG,
+                                "Kernel: Woke up Task " + t.getId() + " (UART)");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            FileLogger.log("Kernel: UART check error: " + e.getMessage());
+            FileLogger.log(e);
+        }
+
+        // B. Check Timer (Interrupt Wait Queue)
+        long now = System.currentTimeMillis();
+        while (!sleepWaitQueue.isEmpty() && sleepWaitQueue.peek().getWakeupTime() <= now) {
+            Task t = sleepWaitQueue.poll(); // Remove from Interrupt Wait Queue
+            t.wakeup();
+            scheduler.addTask(t); // Move to Ready Queue
+            FileLogger.log(FileLogger.LogLevel.DEBUG,
+                    "Kernel: Woke up Task " + t.getId() + " (Timer)");
+        }
+    }
+
+    /**
+     * Decides where to put the task after it stops running on the CPU.
+     * This implements the arrows leaving the CPU node.
+     */
+    private void dispatchTask(Task task) {
+        switch (task.getState()) {
+            case RUNNING:
+                // Time slice expired, still runnable
+                task.setState(TaskState.READY);
+                scheduler.addTask(task); // Back to Ready Queue
+                break;
+
+            case WAITING:
+                // Blocked (Syscall or I/O)
+                handleWaitRequest(task);
+                break;
+
+            case TERMINATED:
+                // Task finished
+                handleTermination(task);
+                break;
+
+            case READY:
+                // Should not happen immediately after execution, but treat as re-queue
+                scheduler.addTask(task);
+                break;
+        }
+    }
+
+    private void handleWaitRequest(Task task) {
+        switch (task.getWaitReason()) {
+            case UART_INPUT:
+                ioWaitQueue.add(task); // -> I/O Wait Queue
+                break;
+
+            case TIMER:
+                sleepWaitQueue.add(task); // -> Interrupt Wait Queue
+                break;
+
+            case PROCESS_EXIT:
+                // The task is waiting for a specific child PID
+                int childPid = task.getWaitingForPid();
+                if (childPid != -1) {
+                    childTerminationWaitQueue.put(childPid, task); // -> Child Wait Queue
+                } else {
+                    // Waiting for ANY child (simplified: just put in sleep queue or check
+                    // immediately)
+                    // For strict diagram adherence, we'd add to a generic wait list.
+                    // Here we fall back to a slow polling list for "Wait Any"
+                    ioWaitQueue.add(task);
+                }
+                break;
+
+            case CONDITION_VARIABLE:
+                // Handled specifically by TaskManager.conditionVariables map
+                // Do not add to any kernel polling queues!
+                break;
+
+            default:
+                // Generic wait
+                ioWaitQueue.add(task);
+                break;
+        }
+    }
+
+    private void handleTermination(Task task) {
+        // 1. Remove from Scheduler so it never runs again
+        scheduler.removeTask(task);
+
+        // 2. Notify waiting parents
+        int pid = task.getId();
+
+        // Check if a parent was waiting specifically for THIS child
+        Task parent = childTerminationWaitQueue.remove(pid);
+
+        // Check for parents waiting for ANY child (WaitReason.PROCESS_EXIT with pid -1)
+        if (parent == null && task.getParent() != null) {
+            Task p = task.getParent();
+            // Synchronize on the parent to prevent the wakeup race condition!
+            synchronized (p) {
+                if (p.getState() == TaskState.WAITING && p.getWaitReason() == WaitReason.PROCESS_EXIT
+                        && p.getWaitingForPid() <= 0) {
+                    parent = p;
+                    // Remove from generic wait queue if it was stored there
+                    ioWaitQueue.remove(parent);
+
+                    // Wake up the parent ATOMICALLY inside the lock.
+                    // This changes the state to READY so other cores will skip this block.
+                    parent.wakeup();
+                    scheduler.addTask(parent);
+                    FileLogger.log(LogLevel.DEBUG, "Kernel: Zombie Task " + pid + " woke up Parent " + parent.getId());
+                }
+            }
+        }
+
+        if (parent != null) {
+            // Wake up the parent.
+            // When the parent runs, it will re-execute the 'wait' instruction,
+            // find this ZOMBIE (TERMINATED) task, read its exit code,
+            // and perform the actual cleanup.
+            parent.wakeup();
+            scheduler.addTask(parent);
+            FileLogger.log(LogLevel.DEBUG, "Kernel: Zombie Task " + pid + " woke up Parent " + parent.getId());
+        } else {
+            FileLogger.log(LogLevel.DEBUG, "Kernel: Task " + pid + " became a Zombie (Parent not waiting).");
+        }
+
+        // We must leave the task in memory as a ZOMBIE so the parent can read the exit
+        // code.
+    }
+
+    /**
      * Switch to a task's address space
      */
     private void switchToTaskAddressSpace(Task task) {
@@ -249,11 +665,11 @@ public class Kernel {
     /**
      * Handle system call from a task
      */
-    private void handleSystemCall(Task task) {
+    private void handleSystemCall(Task task, RV32Cpu cpu) {
         try {
-            syscallHandler.handleSystemCall(task);
+            syscallHandler.handleSystemCall(task, cpu);
         } catch (Exception e) {
-            System.err.println("System call error for task " + task.getId() + ": " + e.getMessage());
+            FileLogger.log("System call error for task " + task.getId() + ": " + e.getMessage());
             task.setState(TaskState.TERMINATED);
         }
     }
@@ -262,7 +678,7 @@ public class Kernel {
      * Handle exception from a task
      */
     private void handleException(Task task) {
-        System.err.println("Task " + task.getId() + " caused an exception");
+        FileLogger.log("Task " + task.getId() + " caused an exception");
         // For now, terminate the task
         task.setState(TaskState.TERMINATED);
     }
@@ -276,7 +692,12 @@ public class Kernel {
         tasks.put(pid, task);
         scheduler.addTask(task);
 
-        System.out.println("Created task " + pid + " from " + elfPath);
+        if (fileSystem != null) {
+            // iget(1) safely grabs the root inode and increments its ref count!
+            task.cwd = fileSystem.iget(1);
+        }
+
+        FileLogger.log("Created task " + pid + " from " + elfPath);
         return task;
     }
 
@@ -289,21 +710,39 @@ public class Kernel {
         tasks.put(pid, task);
         scheduler.addTask(task);
 
-        System.out.println("Created task " + pid + " (" + name + ")");
+        if (fileSystem != null) {
+            // iget(1) safely grabs the root inode and increments its ref count!
+            task.cwd = fileSystem.iget(1);
+        }
+
+        FileLogger.log("Created task " + pid + " (" + name + ")");
         return task;
     }
 
     /**
-     * Terminate a task
+     * Terminate a task.
+     * Sets state to TERMINATED and reparents orphaned children to init,
+     * but does NOT free memory or remove from the tasks map.
+     * The zombie remains until the parent reaps it via wait().
+     * This follows the Unix process lifecycle: exit() -> zombie -> wait() ->
+     * cleanup.
      */
     public void terminateTask(int pid) {
         Task task = tasks.get(pid);
         if (task != null) {
             task.setState(TaskState.TERMINATED);
             scheduler.removeTask(task);
-            taskManager.cleanupTask(task);
-            tasks.remove(pid);
-            System.out.println("Terminated task " + pid);
+
+            if (task.cwd != null) {
+                fileSystem.iput(task.cwd);
+                task.cwd = null;
+            }
+
+            // Reparent this task's children to init so they aren't lost.
+            // Do NOT free memory yet — parent must wait() to reap this zombie.
+            taskManager.reparentChildrenToInit(task);
+
+            FileLogger.log(LogLevel.DEBUG, "Terminated task " + pid + " (zombie until reaped)");
         }
     }
 
@@ -339,7 +778,8 @@ public class Kernel {
                 // Check if the task can be woken up
                 if (canWakeTask(task)) {
                     task.setState(TaskState.READY);
-                    System.out.println("Woke up task " + task.getId());
+                    FileLogger.log(FileLogger.LogLevel.DEBUG,
+                            "Woke up task " + task.getId());
                 }
             }
         }
@@ -389,11 +829,65 @@ public class Kernel {
         }
     }
 
-    // Getters for kernel subsystems
-    public RV32Cpu getCpu() {
-        return cpu;
+    public RV32Cpu getCpu(int id) {
+        if (id < 0 || id >= cpus.size()) {
+            return null;
+        }
+        return cpus.get(id);
     }
 
+    /**
+     * Get the Bootstrap Processor (Core 0)
+     * Added for backward compatibility
+     */
+    public RV32Cpu getCpu() {
+        return getCpu(0);
+    }
+
+    // --- Execution Control Methods ---
+    public void pause() {
+        this.paused = true;
+        FileLogger.log("Kernel: Execution Paused.");
+    }
+
+    public void resume() {
+        this.paused = false;
+        FileLogger.log("Kernel: Execution Resumed.");
+    }
+
+    public void setExecutionSpeed(int delayMs) {
+        this.executionDelayMs = delayMs;
+        FileLogger.log(LogLevel.DEBUG, "Kernel: Speed set to " + delayMs + "ms delay.");
+    }
+
+    public boolean isPaused() {
+        return paused;
+    }
+
+    public void removeFromWaitQueue(Task task) {
+        if (ioWaitQueue != null) {
+            ioWaitQueue.remove(task);
+        }
+    }
+
+    // --- Observability Methods (For GUI) ---
+    public Collection<Task> getIoWaitQueue() {
+        return Collections.unmodifiableCollection(ioWaitQueue);
+    }
+
+    public Collection<Task> getSleepWaitQueue() {
+        return Collections.unmodifiableCollection(sleepWaitQueue);
+    }
+
+    public Collection<Task> getReadyQueue() {
+        return scheduler.getReadyTasks();
+    }
+
+    public Collection<Task> getConditionVariableWaitQueue() {
+        return taskManager.getAllConditionVariableWaiters();
+    }
+
+    // Getters for kernel subsystems
     public MemoryManager getMemory() {
         return memory;
     }
@@ -418,6 +912,47 @@ public class Kernel {
         return config;
     }
 
+    public void setConsoleView(cse311.gui.components.ConsoleView consoleView) {
+        this.consoleView = consoleView;
+    }
+
+    /**
+     * Detects if all tasks are blocked on condition variables (potential deadlock)
+     */
+    private void detectDeadlock() {
+        if (consoleView == null)
+            return;
+
+        boolean readyQueueEmpty = getReadyQueue().isEmpty();
+        if (!readyQueueEmpty) {
+            deadlockDetected.set(false);
+            return;
+        }
+
+        long waitingOnCv = tasks.values().stream()
+                .filter(t -> t.getState() == TaskState.WAITING && t.getWaitReason() == WaitReason.CONDITION_VARIABLE)
+                .count();
+
+        long totalWaiting = tasks.values().stream()
+                .filter(t -> t.getState() == TaskState.WAITING)
+                .count();
+
+        long totalTasks = tasks.values().stream()
+                .filter(t -> t.getState() != TaskState.TERMINATED)
+                .count();
+
+        if (totalTasks > 0 && waitingOnCv == totalWaiting && waitingOnCv == totalTasks && !deadlockDetected.get()) {
+            String message = "DEADLOCK DETECTED: All threads are blocked on condition variables.\n";
+            Platform.runLater(() -> {
+                consoleView.appendText(message, "kernel-error");
+            });
+            deadlockDetected.set(true);
+            FileLogger.log(FileLogger.LogLevel.ERROR, "DEADLOCK DETECTED: All " + totalTasks + " tasks blocked on CVs");
+        } else if (waitingOnCv < totalTasks) {
+            deadlockDetected.set(false);
+        }
+    }
+
     /**
      * Get kernel statistics
      */
@@ -435,14 +970,14 @@ public class Kernel {
      */
     public void printStatus() {
         KernelStats stats = getStats();
-        System.out.println("=== Kernel Status ===");
-        System.out.println("Total tasks: " + stats.totalProcesses);
-        System.out.println("Running: " + stats.runningProcesses);
-        System.out.println("Ready: " + stats.readyProcesses);
-        System.out.println("Waiting: " + stats.waitingProcesses);
-        System.out.println("Terminated: " + stats.terminatedProcesses);
-        System.out.println("Scheduler: " + scheduler.getClass().getSimpleName());
-        System.out.println("====================");
+        FileLogger.log("=== Kernel Status ===");
+        FileLogger.log("Total tasks: " + stats.totalProcesses);
+        FileLogger.log("Running: " + stats.runningProcesses);
+        FileLogger.log("Ready: " + stats.readyProcesses);
+        FileLogger.log("Waiting: " + stats.waitingProcesses);
+        FileLogger.log("Terminated: " + stats.terminatedProcesses);
+        FileLogger.log("Scheduler: " + scheduler.getClass().getSimpleName());
+        FileLogger.log("====================");
     }
 
     /**
@@ -479,5 +1014,26 @@ public class Kernel {
     public void setMemoryCoordinator(ProcessMemoryCoordinator memoryCoordinator) {
         this.memoryCoordinator = memoryCoordinator;
         this.taskManager.setMemoryCoordinator(memoryCoordinator);
+    }
+
+    public FileSystem getFileSystem() {
+        return fileSystem;
+    }
+
+    public BufferCache getBufferCache() {
+        return bufferCache;
+    }
+
+    public cse311.kernel.fs.Device getDevice(int major) {
+        if (major >= 0 && major < devsw.length) {
+            return devsw[major];
+        }
+        return null;
+    }
+
+    public void registerDevice(int major, cse311.kernel.fs.Device device) {
+        if (major >= 0 && major < devsw.length) {
+            devsw[major] = device;
+        }
     }
 }

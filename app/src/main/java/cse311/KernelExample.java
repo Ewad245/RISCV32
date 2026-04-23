@@ -10,13 +10,12 @@ public class KernelExample {
 
     public static void main(String[] args) {
         try {
-            // Create memory and CPU
+            // Create memory
             SimpleMemory simpleMemory = new SimpleMemory(128 * 1024 * 1024); // 128MB
             MemoryManager memory = new MemoryManager(simpleMemory);
-            RV32Cpu cpu = new RV32Cpu(memory);
 
             // Create kernel
-            Kernel kernel = new Kernel(cpu, memory);
+            Kernel kernel = new Kernel(memory);
 
             // Configure kernel for cooperative scheduling
             kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.COOPERATIVE);
@@ -29,16 +28,16 @@ public class KernelExample {
             kernel.printStatus();
 
             // Start the kernel (this will run until all processes finish)
-            System.out.println("Starting kernel...");
+            cse311.Logger.FileLogger.log("Starting kernel...");
             kernel.start();
 
             // Print final status
-            System.out.println("Kernel finished");
+            cse311.Logger.FileLogger.log("Kernel finished");
             kernel.printStatus();
 
         } catch (Exception e) {
-            System.err.println("Error: " + e.getMessage());
-            e.printStackTrace();
+            cse311.Logger.FileLogger.log("Error: " + e.getMessage());
+            cse311.Logger.FileLogger.log(e);
         }
     }
 
@@ -55,7 +54,7 @@ public class KernelExample {
         byte[] program3 = createSleepingProgram("Task 3 sleeping", 1000);
         Task task3 = kernel.createTask(program3, "sleeper");
 
-        System.out.println("Created " + kernel.getAllTasks().size() + " example tasks");
+        cse311.Logger.FileLogger.log("Created " + kernel.getAllTasks().size() + " example tasks");
     }
 
     /**

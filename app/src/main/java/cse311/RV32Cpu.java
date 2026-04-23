@@ -7,16 +7,32 @@ import cse311.Exception.MemoryAccessException;
 import java.util.HashMap;
 import java.util.Map;
 
+import cse311.kernel.process.Task;
+import cse311.util.Signal;
+
 public class RV32Cpu {
 
+    public final Signal processorWasClocked = new Signal();
+    public final Signal processorWasReset = new Signal();
+
+    private int cpuId;
     private int[] x = new int[32];
     private int lastPC = -1;
-    private int lastPCBranch = -1;
-    private int loopCountBranch = 0;
-    private int loopCount = 0;
+
+    // --- NEW: Datapath Latches (State for GUI) ---
+    public int lastRs1Val;
+    public int lastRs2Val;
+    public int lastImmVal;
+    public int lastAluResult;
+    public int lastMemReadVal;
+    public int lastMemWriteVal;
+    public boolean aluSrcBSel; // 0 = Register, 1 = Immediate
+    public boolean memWrite;
+    public boolean regWrite;
     private int pc = 0;
     // private int[] instruction;
     private static final int INSTRUCTION_SIZE = 4; // 32-bit instructions
+    private int lastInstructionSize = 4; // Tracks size of current instruction (2 for RVC, 4 for standard)
 
     // Privilege levels
     public static final int PRIVILEGE_USER = 0; // U-mode
@@ -25,6 +41,9 @@ public class RV32Cpu {
 
     // Current privilege level
     private int privilegeMode = PRIVILEGE_MACHINE; // Start in M-mode
+
+    // For visualization
+    private InstructionDecoded lastDecodedInstruction;
 
     // CSR addresses
     // Machine-level CSRs
@@ -38,6 +57,7 @@ public class RV32Cpu {
     public static final int MCAUSE = 0x342; // Machine trap cause
     public static final int MTVAL = 0x343; // Machine trap value
     public static final int MIP = 0x344; // Machine interrupt pending
+    public static final int MHARTID = 0xF14; // Hardware Thread ID (Vendor-specific/Standard)
 
     // Supervisor-level CSRs
     public static final int SSTATUS = 0x100; // Supervisor status register
@@ -61,8 +81,10 @@ public class RV32Cpu {
     private Scanner reader;
     private Thread cpuThread;
     private boolean running = false;
-    private static final int LOOP_THRESHOLD = 1000; // Maximum times to execute same instruction
     private InputThread input;
+
+    // Track Current Task (for GUI/Observability)
+    private volatile Task currentTask;
 
     // Fields to track system calls and exceptions for kernel integration
     private boolean lastInstructionWasEcall = false;
@@ -74,6 +96,15 @@ public class RV32Cpu {
 
         // Initialize CSR registers
         initializeCSRs();
+    }
+
+    public void setId(int id) {
+        this.cpuId = id;
+        // Update MHARTID CSR
+        csrRegisters.put(MHARTID, id);
+        // Set Thread Pointer (x4) to cpuId
+        // This is a common optimization (used in xv6) to quickly access per-cpu data
+        x[4] = id;
     }
 
     /**
@@ -214,6 +245,25 @@ public class RV32Cpu {
         this.pc = entryPoint;
     }
 
+    public int getLastPC() {
+        return lastPC;
+    }
+
+    public Task getCurrentTask() {
+        return currentTask;
+    }
+
+    public void setCurrentTask(Task currentTask) {
+        this.currentTask = currentTask;
+        if (currentTask == null) {
+            this.lastDecodedInstruction = null;
+        }
+    }
+
+    public void clearLastDecodedInstruction() {
+        this.lastDecodedInstruction = null;
+    }
+
     // Methods needed by the kernel
     public void step() throws Exception {
         fetchExecuteCycle();
@@ -259,59 +309,37 @@ public class RV32Cpu {
         this.pc = pc;
     }
 
+    public InstructionDecoded getLastDecodedInstruction() {
+        return lastDecodedInstruction;
+    }
+
     public void turnOn() {
         Runnable task1 = () -> input.getInput(memory);
-        /*
-         * this.cpuThread = new Thread(new Runnable() {
-         * 
-         * @Override
-         * public void run() {
-         * while (RV32iCpu.this.running) {
-         * try {
-         * // find13And12(memory.getByteMemory());
-         * fetchExecuteCycle();
-         * } catch (Exception e) {
-         * // TODO Auto-generated catch block
-         * e.printStackTrace();
-         * }
-         * }
-         * }
-         * });
-         */
-        new Thread(task1).start();
+        Thread inputThread = new Thread(task1, "CPU-Input-Thread");
+        inputThread.setDaemon(true);
+        inputThread.start();
         this.running = true;
         // this.cpuThread.start();
     }
 
+    public void turnOff() {
+        this.running = false;
+        input.stop();
+    }
+
     private void fetchExecuteCycle() throws Exception {
-        // Check for infinite loop
-        if (pc == lastPC) {
-            loopCount++;
-            if (loopCount > LOOP_THRESHOLD) {
-                System.out.println("Infinite loop detected at PC: 0x" + Integer.toHexString(pc));
-                System.out.println("Program halted after " + LOOP_THRESHOLD + " iterations");
-                this.running = false;
-                return;
-            }
-        } else {
-            lastPC = pc;
-            loopCount = 0;
-        }
+        lastPC = pc;
 
         try {
-            // Fetch the instruction from memory at the address in the pc register
             int instructionFetched = fetch();
             InstructionDecoded instructionDecoded = decode(instructionFetched);
+            this.lastDecodedInstruction = instructionDecoded;
             execute(instructionDecoded);
-            // System.out.println(instructionDecoded.toString());
-            // displayRegisters();
         } catch (MemoryAccessException e) {
-            // Handle memory access exception using the handleException method
-            handleException(7, pc - INSTRUCTION_SIZE); // 7 = store/AMO access fault
+            handleException(7, pc - lastInstructionSize);
         } catch (Exception e) {
-            // Handle other exceptions using the handleException method
-            handleException(2, pc - INSTRUCTION_SIZE); // 2 = illegal instruction
-            e.printStackTrace(); // Log the exception for debugging
+            handleException(2, pc - lastInstructionSize);
+            cse311.Logger.FileLogger.log(e);
         }
     }
 
@@ -428,26 +456,66 @@ public class RV32Cpu {
         }
     }
 
+    // --- Breakpoints ---
+    private final java.util.Set<Integer> breakpoints = new java.util.HashSet<>();
+
+    public void addBreakpoint(int addr) {
+        breakpoints.add(addr);
+    }
+
+    public void removeBreakpoint(int addr) {
+        breakpoints.remove(addr);
+    }
+
+    public void toggleBreakpoint(int addr) {
+        if (breakpoints.contains(addr)) {
+            breakpoints.remove(addr);
+        } else {
+            breakpoints.add(addr);
+        }
+    }
+
+    public boolean hasBreakpoint(int addr) {
+        return breakpoints.contains(addr);
+    }
+
     private int fetch() throws MemoryAccessException {
-        // Read 32-bit instruction from memory at PC
+        // Check for Breakpoint BEFORE fetch
+        if (breakpoints.contains(pc)) {
+            throw new cse311.Exception.BreakpointException("Breakpoint hit at " + Integer.toHexString(pc));
+        }
+
         int instruction = 0;
 
-        // Read 4 bytes and combine them
         try {
+            // Step 1: Read the lower 16 bits (2 bytes) at PC
             byte byte0 = memory.readByte(pc);
             byte byte1 = memory.readByte(pc + 1);
-            byte byte2 = memory.readByte(pc + 2);
-            byte byte3 = memory.readByte(pc + 3);
+            int lower16 = ((byte1 & 0xFF) << 8) | (byte0 & 0xFF);
 
-            // Combine bytes into 32-bit instruction
-            instruction = (byte3 & 0xFF) << 24
-                    | (byte2 & 0xFF) << 16
-                    | (byte1 & 0xFF) << 8
-                    | (byte0 & 0xFF);
+            // Step 2: Check bits [1:0] to determine instruction length
+            if ((lower16 & 0x3) != 0x3) {
+                // --- COMPRESSED (16-bit) instruction ---
+                // Expand to 32-bit equivalent using the decompressor
+                instruction = RVCDecompressor.decompress(lower16);
+                lastInstructionSize = 2;
+                pc += 2;
+            } else {
+                // --- STANDARD (32-bit) instruction ---
+                // Read the upper 16 bits
+                byte byte2 = memory.readByte(pc + 2);
+                byte byte3 = memory.readByte(pc + 3);
 
-            // Increment PC by instruction size (4 bytes)
-            pc += INSTRUCTION_SIZE;
+                instruction = (byte3 & 0xFF) << 24
+                        | (byte2 & 0xFF) << 16
+                        | (byte1 & 0xFF) << 8
+                        | (byte0 & 0xFF);
 
+                lastInstructionSize = 4;
+                pc += INSTRUCTION_SIZE;
+            }
+        } catch (cse311.Exception.BreakpointException e) {
+            throw e; // Re-throw breakpoint exceptions
         } catch (Exception e) {
             throw new MemoryAccessException("Failed to fetch instruction at PC: " + pc);
         }
@@ -519,6 +587,14 @@ public class RV32Cpu {
     }
 
     private void execute(InstructionDecoded instruction) {
+        // Reset/Init Latches for this cycle
+        this.regWrite = false;
+        this.memWrite = false;
+        this.aluSrcBSel = false; // Default to Reg
+        this.lastRs1Val = x[instruction.getRs1()];
+        this.lastRs2Val = x[instruction.getRs2()];
+        this.lastImmVal = 0;
+
         int opcode = instruction.getOpcode();
         int rd = instruction.getRd();
         int rs1 = instruction.getRs1();
@@ -536,14 +612,20 @@ public class RV32Cpu {
                 switch (func3) {
                     case 0b000: // ADD/SUB/MUL
                         if (func7 == 0) {
-                            x[rd] = x[rs1] + x[rs2]; // ADD
+                            lastAluResult = lastRs1Val + lastRs2Val; // ADD
+                            x[rd] = lastAluResult;
+                            regWrite = true;
                         } else if (func7 == 0b0100000) {
-                            x[rd] = x[rs1] - x[rs2]; // SUB
+                            lastAluResult = lastRs1Val - lastRs2Val; // SUB
+                            x[rd] = lastAluResult;
+                            regWrite = true;
                         } else if (func7 == 0b0000001) {
-                            x[rd] = x[rs1] * x[rs2]; // MUL (M-extension)
+                            lastAluResult = lastRs1Val * lastRs2Val; // MUL (M-extension)
+                            x[rd] = lastAluResult;
+                            regWrite = true;
                         } else {
                             // Illegal instruction
-                            handleException(2, pc - INSTRUCTION_SIZE);
+                            handleException(2, pc - lastInstructionSize);
                         }
                         break;
                     case 0b001: // SLL/MULH
@@ -567,16 +649,20 @@ public class RV32Cpu {
                         break;
                     case 0b010: // SLT/MULHSU
                         if (func7 == 0) {
-                            x[rd] = (x[rs1] < x[rs2]) ? 1 : 0; // SLT
+                            lastAluResult = (lastRs1Val < lastRs2Val) ? 1 : 0; // SLT
+                            x[rd] = lastAluResult;
+                            regWrite = true;
                         } else if (func7 == 0b0000001) {
                             // MULHSU (M-extension) - high bits of signed×unsigned product
-                            long a = x[rs1];
-                            long b = Integer.toUnsignedLong(x[rs2]);
+                            long a = lastRs1Val;
+                            long b = Integer.toUnsignedLong(lastRs2Val);
                             // Sign extend a to 64 bits
                             if ((a & 0x80000000L) != 0)
                                 a |= 0xFFFFFFFF00000000L;
                             long result = a * b;
-                            x[rd] = (int) (result >> 32); // High 32 bits
+                            lastAluResult = (int) (result >> 32); // High 32 bits
+                            x[rd] = lastAluResult;
+                            regWrite = true;
                         } else {
                             // Illegal instruction
                             handleException(2, pc - INSTRUCTION_SIZE);
@@ -598,7 +684,9 @@ public class RV32Cpu {
                         break;
                     case 0b100: // XOR/DIV
                         if (func7 == 0) {
-                            x[rd] = x[rs1] ^ x[rs2]; // XOR
+                            lastAluResult = lastRs1Val ^ lastRs2Val; // XOR
+                            x[rd] = lastAluResult;
+                            regWrite = true;
                         } else if (func7 == 0b0000001) {
                             // DIV (M-extension) - signed division
                             if (x[rs2] == 0) {
@@ -635,7 +723,9 @@ public class RV32Cpu {
                         break;
                     case 0b110: // OR/REM
                         if (func7 == 0) {
-                            x[rd] = x[rs1] | x[rs2]; // OR
+                            lastAluResult = lastRs1Val | lastRs2Val; // OR
+                            x[rd] = lastAluResult;
+                            regWrite = true;
                         } else if (func7 == 0b0000001) {
                             // REM (M-extension) - signed remainder
                             if (x[rs2] == 0) {
@@ -654,7 +744,9 @@ public class RV32Cpu {
                         break;
                     case 0b111: // AND/REMU
                         if (func7 == 0) {
-                            x[rd] = x[rs1] & x[rs2]; // AND
+                            lastAluResult = lastRs1Val & lastRs2Val; // AND
+                            x[rd] = lastAluResult;
+                            regWrite = true;
                         } else if (func7 == 0b0000001) {
                             // REMU (M-extension) - unsigned remainder
                             if (x[rs2] == 0) {
@@ -673,154 +765,191 @@ public class RV32Cpu {
 
             // I-type instructions
             case 0b0010011: // I-type ALU
+                aluSrcBSel = true;
+                lastImmVal = imm_i;
+                regWrite = true;
                 switch (func3) {
                     case 0b000: // ADDI
-                        x[rd] = x[rs1] + imm_i;
+                        lastAluResult = lastRs1Val + imm_i;
+                        x[rd] = lastAluResult;
                         break;
                     case 0b001: // SLLI
-                        x[rd] = x[rs1] << (imm_i & 0x1F);
+                        lastAluResult = lastRs1Val << (imm_i & 0x1F);
+                        x[rd] = lastAluResult;
                         break;
                     case 0b010: // SLTI
-                        x[rd] = (x[rs1] < imm_i) ? 1 : 0;
+                        lastAluResult = (lastRs1Val < imm_i) ? 1 : 0;
+                        x[rd] = lastAluResult;
                         break;
                     case 0b011: // SLTIU
-                        x[rd] = (Integer.compareUnsigned(x[rs1], imm_i) < 0) ? 1 : 0;
+                        lastAluResult = (Integer.compareUnsigned(lastRs1Val, imm_i) < 0) ? 1 : 0;
+                        x[rd] = lastAluResult;
                         break;
                     case 0b100: // XORI
-                        x[rd] = x[rs1] ^ imm_i;
+                        lastAluResult = lastRs1Val ^ imm_i;
+                        x[rd] = lastAluResult;
                         break;
                     case 0b101: // SRLI/SRAI
                         if ((imm_i & 0xFE0) == 0) {
-                            x[rd] = x[rs1] >>> (imm_i & 0x1F); // SRLI
+                            lastAluResult = lastRs1Val >>> (imm_i & 0x1F); // SRLI
+                            x[rd] = lastAluResult;
                         } else if ((imm_i & 0xFE0) == 0x400) {
-                            x[rd] = x[rs1] >> (imm_i & 0x1F); // SRAI
+                            lastAluResult = lastRs1Val >> (imm_i & 0x1F); // SRAI
+                            x[rd] = lastAluResult;
                         }
                         break;
                     case 0b110: // ORI
-                        x[rd] = x[rs1] | imm_i;
+                        lastAluResult = lastRs1Val | imm_i;
+                        x[rd] = lastAluResult;
                         break;
                     case 0b111: // ANDI
-                        x[rd] = x[rs1] & imm_i;
+                        lastAluResult = lastRs1Val & imm_i;
+                        x[rd] = lastAluResult;
                         break;
                 }
                 break;
 
             // Load instructions
             case 0b0000011: // LOAD
+                aluSrcBSel = true;
+                lastImmVal = imm_i;
+                regWrite = true;
                 try {
-                    int address = mapAddress(x[rs1] + imm_i);
+                    // ALU Result for Load is the Address
+                    lastAluResult = lastRs1Val + imm_i;
+                    int address = mapAddress(lastAluResult);
+
                     switch (func3) {
                         case 0b000: // LB
-                            x[rd] = memory.readByte(address);
+                            lastMemReadVal = memory.readByte(address);
+                            x[rd] = lastMemReadVal;
                             break;
                         case 0b001: // LH
-                            x[rd] = memory.readHalfWord(address);
+                            lastMemReadVal = memory.readHalfWord(address);
+                            x[rd] = lastMemReadVal;
                             break;
                         case 0b010: // LW
-                            x[rd] = memory.readWord(address);
+                            lastMemReadVal = memory.readWord(address);
+                            x[rd] = lastMemReadVal;
                             break;
                         case 0b100: // LBU
-                            x[rd] = memory.readByte(address) & 0xFF;
+                            lastMemReadVal = memory.readByte(address) & 0xFF; // Logic separate from latch if strictly
+                                                                              // raw?
+                            // But usually we latch what we write back or coming from memory bus.
+                            // Let's latch the raw read? Or the sign-extended result?
+                            // Ripes shows values on wires. Output of data mem usually raw.
+                            // But since x[rd] gets the extended value, let's latch that for simplicity of
+                            // "Result"
+                            x[rd] = lastMemReadVal;
                             break;
                         case 0b101: // LHU
-                            x[rd] = memory.readHalfWord(address) & 0xFFFF;
+                            lastMemReadVal = memory.readHalfWord(address) & 0xFFFF;
+                            x[rd] = lastMemReadVal;
                             break;
                     }
                 } catch (MemoryAccessException e) {
                     // Handle load access fault
-                    handleException(5, x[rs1] + imm_i); // 5 = load access fault
+                    handleException(5, lastRs1Val + imm_i); // 5 = load access fault
                 }
                 break;
 
             // Store instructions
             case 0b0100011: // STORE
+                aluSrcBSel = true;
+                lastImmVal = imm_s;
+                memWrite = true;
+                lastMemWriteVal = lastRs2Val; // Store uses rs2 as data source
                 try {
-                    int address = mapAddressForWrite(x[rs1] + imm_s);
+                    lastAluResult = lastRs1Val + imm_s;
+                    int address = mapAddressForWrite(lastAluResult);
                     switch (func3) {
                         case 0b000: // SB
-                            memory.writeByte(address, (byte) x[rs2]);
+                            memory.writeByte(address, (byte) lastRs2Val);
                             break;
                         case 0b001: // SH
-                            memory.writeHalfWord(address, (short) x[rs2]);
+                            memory.writeHalfWord(address, (short) lastRs2Val);
                             break;
                         case 0b010: // SW
-                            memory.writeWord(address, x[rs2]);
+                            memory.writeWord(address, lastRs2Val);
                             break;
                     }
                 } catch (MemoryAccessException e) {
                     // Handle store access fault
-                    handleException(7, x[rs1] + imm_s); // 7 = store/AMO access fault
+                    handleException(7, lastRs1Val + imm_s); // 7 = store/AMO access fault
                 }
                 break;
 
             // Branch instructions
             case 0b1100011: // BRANCH
                 boolean takeBranch = false;
+                // ALU performs comparison (Subtraction)
+                lastAluResult = lastRs1Val - lastRs2Val;
+
                 switch (func3) {
                     case 0b000: // BEQ
-                        takeBranch = (x[rs1] == x[rs2]);
+                        takeBranch = (lastRs1Val == lastRs2Val);
                         break;
                     case 0b001: // BNE
-                        takeBranch = (x[rs1] != x[rs2]);
+                        takeBranch = (lastRs1Val != lastRs2Val);
                         break;
                     case 0b100: // BLT
-                        takeBranch = (x[rs1] < x[rs2]);
+                        takeBranch = (lastRs1Val < lastRs2Val);
                         break;
                     case 0b101: // BGE
-                        takeBranch = (x[rs1] >= x[rs2]);
+                        takeBranch = (lastRs1Val >= lastRs2Val);
                         break;
                     case 0b110: // BLTU
-                        takeBranch = (Integer.compareUnsigned(x[rs1], x[rs2]) < 0);
+                        takeBranch = (Integer.compareUnsigned(lastRs1Val, lastRs2Val) < 0);
                         break;
                     case 0b111: // BGEU
-                        takeBranch = (Integer.compareUnsigned(x[rs1], x[rs2]) >= 0);
+                        takeBranch = (Integer.compareUnsigned(lastRs1Val, lastRs2Val) >= 0);
                         break;
                 }
                 if (takeBranch) {
-                    pc += imm_b - INSTRUCTION_SIZE; // Subtract INSTRUCTION_SIZE because pc was already incremented in
-                                                    // fetch
-                    /*
-                     * if (lastPCBranch == -1) {
-                     * lastPCBranch = pc;
-                     * } else if (pc == lastPCBranch) {
-                     * loopCountBranch++;
-                     * } else {
-                     * loopCountBranch = 0;
-                     * lastPCBranch = -1;
-                     * }
-                     * if (loopCountBranch > 20) {
-                     * loopCountBranch = 0;
-                     * lastPCBranch = -1;
-                     * System.out.println("Getting input");
-                     * memory.getInput(reader.nextLine());
-                     * }
-                     */
+                    pc += imm_b - lastInstructionSize;
                 }
                 break;
 
             // Jump instructions
             case 0b1101111: // JAL
+                // PC+4 is written to rd
                 if (rd != 0) {
                     x[rd] = pc;
+                    regWrite = true;
                 }
-                pc += imm_j - INSTRUCTION_SIZE;
+
+                pc += imm_j - lastInstructionSize;
                 break;
 
             case 0b1100111: // JALR
+                aluSrcBSel = true;
+                lastImmVal = imm_i;
+                lastAluResult = lastRs1Val + imm_i; // Target Address calculation
+
                 int temp = pc;
-                pc = (x[rs1] + imm_i) & ~1;
+                pc = lastAluResult & ~1;
+
                 if (rd != 0) {
                     x[rd] = temp;
+                    regWrite = true;
                 }
                 break;
 
             // LUI and AUIPC
             case 0b0110111: // LUI
-                x[rd] = imm_u;
+                aluSrcBSel = true;
+                lastImmVal = imm_u;
+                lastAluResult = imm_u;
+                x[rd] = lastAluResult;
+                regWrite = true;
                 break;
 
             case 0b0010111: // AUIPC
-                x[rd] = pc - INSTRUCTION_SIZE + imm_u;
+                aluSrcBSel = true;
+                lastImmVal = imm_u;
+                lastAluResult = pc - lastInstructionSize + imm_u;
+                x[rd] = lastAluResult;
+                regWrite = true;
                 break;
 
             case 0b1110011: // SYSTEM
@@ -836,7 +965,7 @@ public class RV32Cpu {
                         // Return from M-mode trap
                         if (privilegeMode != PRIVILEGE_MACHINE) {
                             // Illegal instruction exception if executed in lower privilege mode
-                            handleException(2, pc - INSTRUCTION_SIZE);
+                            handleException(2, pc - lastInstructionSize);
                         } else {
                             returnFromException(PRIVILEGE_MACHINE);
                         }
@@ -844,7 +973,7 @@ public class RV32Cpu {
                         // Return from S-mode trap
                         if (privilegeMode < PRIVILEGE_SUPERVISOR) {
                             // Illegal instruction exception if executed in U-mode
-                            handleException(2, pc - INSTRUCTION_SIZE);
+                            handleException(2, pc - lastInstructionSize);
                         } else {
                             returnFromException(PRIVILEGE_SUPERVISOR);
                         }
@@ -892,14 +1021,103 @@ public class RV32Cpu {
                     }
                 }
                 break;
+            case 0x2F: // Atomic Operations (RV32A)
+                executeAtomic(instruction);
+                break;
         }
 
+        // Hardwired zero register x[0] must always be 0
+        x[0] = 0;
     }
 
     private void handleQemuSemihosting() {
         if (x[17] == 93) { // Exit operation
             this.running = false;
             System.out.println("Program exited with code: " + x[10]);
+        }
+    }
+
+    private void executeAtomic(InstructionDecoded instr) {
+        int funct5 = (instr.getFunc7() >> 2);
+        int aq = (instr.getFunc7() >> 1) & 1; // Acquire bit (ordering)
+        int rl = instr.getFunc7() & 1; // Release bit (ordering)
+        int rs1 = instr.getRs1();
+        int rs2 = instr.getRs2();
+        int rd = instr.getRd();
+        int func3 = instr.getFunc3(); // Width (2 = word)
+
+        if (func3 != 2) {
+            handleException(2, pc - lastInstructionSize); // Illegal instruction if not 32-bit
+            return;
+        }
+
+        try {
+            int virtualAddr = x[rs1];
+            // Use mapAddressForWrite to ensure translation and permissions check
+            int physAddr = mapAddressForWrite(virtualAddr);
+
+            // CRITICAL: We lock the memory object to ensure atomicity at the Java level
+            synchronized (memory) {
+                int loadedValue = memory.readWord(physAddr); // 1. Load
+                int result = 0;
+
+                // 2. Operation
+                switch (funct5) {
+                    case 0x01: // AMOSWAP
+                        result = x[rs2];
+                        break;
+                    case 0x00: // AMOADD
+                        result = loadedValue + x[rs2];
+                        break;
+                    case 0x04: // AMOXOR
+                        result = loadedValue ^ x[rs2];
+                        break;
+                    case 0x0C: // AMOAND
+                        result = loadedValue & x[rs2];
+                        break;
+                    case 0x08: // AMOOR
+                        result = loadedValue | x[rs2];
+                        break;
+                    case 0x10: // AMOMIN
+                        result = Math.min(loadedValue, x[rs2]);
+                        break;
+                    case 0x14: // AMOMAX
+                        result = Math.max(loadedValue, x[rs2]);
+                        break;
+                    case 0x18: // AMOMINU
+                        result = (Integer.compareUnsigned(loadedValue, x[rs2]) < 0) ? loadedValue : x[rs2];
+                        break;
+                    case 0x1C: // AMOMAXU
+                        result = (Integer.compareUnsigned(loadedValue, x[rs2]) > 0) ? loadedValue : x[rs2];
+                        break;
+                    case 0x02: // LR.W (Load Reserved)
+                        // Register this reservation in MemoryManager (see Step 2b below)
+                        memory.registerReservation(physAddr, this.cpuId);
+                        result = loadedValue;
+                        // LR does NOT write back to memory, it just loads
+                        x[rd] = result;
+                        return;
+                    case 0x03: // SC.W (Store Conditional)
+                        // Check if reservation is still valid
+                        if (memory.checkReservation(physAddr, this.cpuId)) {
+                            memory.writeWord(physAddr, x[rs2]);
+                            x[rd] = 0; // Success (0)
+                        } else {
+                            x[rd] = 1; // Failure (nonzero)
+                        }
+                        return;
+                    default:
+                        // Illegal instruction exception
+                        handleException(2, pc - lastInstructionSize);
+                        return;
+                }
+
+                // 3. Store Back (for AMOs only, not LR/SC)
+                memory.writeWord(physAddr, result);
+                x[rd] = loadedValue; // AMOs write the ORIGINAL value to rd
+            }
+        } catch (MemoryAccessException e) {
+            handleException(7, x[rs1]); // Store/AMO Access Fault
         }
     }
 
@@ -1020,6 +1238,12 @@ public class RV32Cpu {
      */
     public int readCSRTest(int csrAddr) {
         return csrRegisters.getOrDefault(csrAddr, 0);
+    }
+
+    // setId moved to top to handle initialization logic
+
+    public int getId() {
+        return cpuId;
     }
 
     /**

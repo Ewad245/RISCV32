@@ -1,76 +1,138 @@
-# RV32IM Simulator Kernel Integrated
+# RV32IM System Simulator & Kernel
 
-A modular, extensible kernel implementation for the RV32IM CPU simulator, written in Java. This project emphasizes a **pluggable architecture**, allowing developers to swap out core OS subsystems (Scheduling, Memory Management) with a single line of configuration code.
+A modular, extensible kernel implementation and simulator for the RV32IM CPU architecture, written in Java. This project provides a full-featured simulation environment, including a GUI, pluggable kernel subsystems, and real-time visualization of CPU state, memory, and scheduling.
 
-## Architecture Overview
+## 🚀 Key Features
 
-The kernel is designed around decoupled interfaces, preventing monolithic dependencies.
+### 1. **Modular Architecture**
+The system uses a pluggable interface design, allowing instant swapping of core components:
+-   **Memory Management**: Switch between **Contiguous** (First-Fit, Best-Fit) and **Paging** (Demand, Eager, LRU/Clock) modes at boot time.
+-   **Scheduling**: Built-in support for **Round Robin**, **Priority**, and **Cooperative** schedulers.
+-   **Multi-Core SMP**: Default configuration supports **5 CPU cores** with proper bootstrap processor (BSP) and application processor (AP) coordination.
 
-```text
-[Hardware Layer]      [Kernel Layer]                  [Modules]
-RV32iCpu  <---------> Kernel (Coordinator)
-Memory    <---------> ├── TaskManager
-                      ├── SystemCallHandler
-                      │
-                      ├── IScheduler  <-------------> RoundRobin / Priority / Cooperative
-                      │
-                      └── MemoryCoordinator <-------> Contiguous (First-Fit, Best-Fit)
-                                             └____--> Paging (Demand, Eager)
-````
+### 2. **Advanced GUI Visualization**
+State-of-the-art visualization tools for debugging and understanding OS concepts:
+-   **CPU View**: Real-time inspection of 32 general-purpose registers and Program Counter.
+-   **Assembly View**: **Integrated Disassembler** (RV32I + M-extension + A-extension + C-extension) shows the running instruction stream in human-readable assembly. Optimized for performance and usability.
+-   **Memory View**: Visual tape (Contiguous) or Page Table Grid (Paging) showing real-time allocations, fragmentation, and page faults.
+-   **Scheduler View**: Live queues for Ready, I/O Wait, Sleep, and Condition Variable states.
+-   **Terminal**: Simulated UART console for user interactivity.
+-   **Datapath View**: Animated CPU datapath showing real-time data flow, control signals, and component activity.
 
-## Key Features
+### 3. **Concurrency & Safety**
+-   **Race Condition Free**: Rigorously tested schedulers with atomic task queue management using `Spinlock` synchronization.
+-   **Double Schedule Detector**: A built-in kernel "trap" that detects if a task is ever scheduled on multiple cores simultaneously, immediately halting the system to prevent undefined behavior.
+-   **Hardware Atomic Instructions**: Full RV32A extension support with LR/SC and AMO instructions for user-space mutexes and spinlocks.
+-   **Thread Support**: POSIX-style threads with `clone()`, mutex locks, and condition variables.
 
-### 1\. **Modular Memory Management**
+### 4. **Process Management**
+-   Full Unix-style process hierarchy (Parent/Child).
+-   `clone()`, `fork()`, `exec()`, `wait()`, `exit()` implementation (using Linux `clone()` syscall as the unified primitive).
+-   Zombie reaping and orphan adoption by Init (PID 1).
+-   Shared memory support via `CLONE_VM` flag for threads vs processes distinction.
 
-The system supports multiple memory models determined at boot time. You can switch between **Contiguous** and **Non-Contiguous** modes instantly.
+---
 
-  - **Contiguous Allocation**: Supports pluggable allocation strategies (First-Fit, Best-Fit, etc.).
-  - **Paging (Virtual Memory)**: Supports pluggable paging policies (Demand Paging vs. Eager Paging) and replacement algorithms (Clock, LRU).
+## 🛠️ Build & Run
 
-### 2\. **Pluggable Scheduler System**
+This project uses **Gradle** (incompatible with Gradle < 8.0, supports Gradle 9.0+).
 
-The scheduler is defined by a simple abstract base class.
+### Prerequisites
+-   Java JDK 17 or higher.
 
-  - **Round Robin**: Time-sliced scheduling.
-  - **Cooperative**: Tasks run until voluntary yield.
-  - **Priority**: Preemptive scheduling based on task priority.
+### Command Line
+```bash
+# Clean and Build
+./gradlew clean build
 
-### 3\. **Process Hierarchy & Orphan Handling**
+# Run the Simulator
+./gradlew run
 
-  - Full parent-child relationship tracking.
-  - **Unix-style Reparenting**: Adopted by `Init` (PID 1) upon parent death.
-  - **Zombie Reaping**: Prevents resource leaks via `wait()`/`exit()` semantics.
-
------
-
-## Configuration & Quick Start
-
-You can select your kernel modules in `App.java` before booting:
-
-```java
-// 1. Choose Memory Mode (PAGING or CONTIGUOUS)
-RV32iComputer computer = new RV32iComputer(128 * 1024 * 1024, 16, MemoryMode.PAGING);
-
-// 2. Choose Scheduler
-Kernel kernel = computer.getKernel();
-kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.PRIORITY);
-kernel.getConfig().setTimeSlice(1000);
-
-// 3. Boot
-kernel.start();
+# Debugging
+./gradlew run --debug-jvm
 ```
 
------
+---
 
-## Extending the Kernel
+## 📚 Configuration & Swapping Algorithms
 
-Because the kernel uses interfaces and strategy patterns, implementing new algorithms is straightforward.
+The kernel is designed for experimentation. You can easily swap algorithms by modifying **`RV32Computer.java`** and **`App.java`**.
 
-### 1\. implementing a New Scheduler
+### 1. Changing Memory Strategies
+Open `app/src/main/java/cse311/RV32Computer.java` to configure memory policies:
 
-To add a new scheduling algorithm (e.g., "Lottery Scheduling"), simply extend the `Scheduler` class.
+**For Contiguous Memory:**
+```java
+// Swapping Allocation Algorithms is a one-line change:
+AllocationStrategy allocator = new BestFitStrategy(); 
+// AllocationStrategy allocator = new FirstFitStrategy(); // to switch, just uncomment this!
+```
 
-**Step A: Create the Class**
+**For Paging:**
+```java
+// Configure Paging Policies (Fetch & Replacement)
+PagingConfiguration.configure(pmm,
+        PagingConfiguration.Policy.DEMAND, // or EAGER
+        PagingConfiguration.Policy.CLOCK   // or LRU, RANDOM
+);
+```
+
+### 2. Changing Schedulers
+Open `app/src/main/java/cse311/App.java` to select the CPU scheduler:
+
+```java
+// Use Round Robin (Time Sliced)
+kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.ROUND_ROBIN);
+
+// Or switch to Priority / Cooperative
+// kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.PRIORITY);
+```
+
+---
+
+## 🖥️ System Architecture
+
+```mermaid
+flowchart TD
+    A[Simulator GUI] <--> B[RV32IM Computer]
+
+    subgraph "Hardware Layer"
+        H1[RV32iCpu]
+        H2[Memory]
+    end
+
+    subgraph "Kernel Layer"
+        K1["Kernel\n(Coordinator)"]
+
+        subgraph Modules
+            TM[TaskManager]
+            SYSCALL["SystemCallHandler\n(Syscalls)"]
+            SCH[IScheduler]
+            SCHRR[RoundRobin]
+            SCHPR[Priority]
+            SCHCO[Cooperative]
+            MC[MemoryCoordinator]
+            MC1["Contiguous\n(First-Fit, Best-Fit)"]
+            MC2["Paging\n(Demand, Eager)"]
+        end
+    end
+
+    B --> K1
+    H1 <--> K1
+    H2 <--> K1
+
+    K1 --> TM & SYSCALL & SCH & MC
+
+    SCH --> SCHRR & SCHPR & SCHCO
+    MC --> MC1 & MC2
+```
+
+---
+
+## 🔌 Extending the Kernel
+
+### 1. Implementing a New Scheduler
+To add a new scheduling algorithm (e.g., "Lottery Scheduling"), extend the `Scheduler` class:
 
 ```java
 public class LotteryScheduler extends Scheduler {
@@ -82,105 +144,125 @@ public class LotteryScheduler extends Scheduler {
 
     @Override
     public Task schedule(Collection<Task> tasks) {
-        // Your custom logic to pick a 'winning' ticket
-        List<Task> readyTasks = tasks.stream()
-            .filter(t -> t.getState() == TaskState.READY)
-            .collect(Collectors.toList());
-            
+        // Atomic thread-safe queue access is handled by base class
+        List<Task> readyTasks = getReadyTasks();
         if (readyTasks.isEmpty()) return null;
         return readyTasks.get(random.nextInt(readyTasks.size()));
     }
-    
-    // Implement addTask/removeTask...
 }
 ```
 
-**Step B: Register it in Kernel.java**
-
-```java
-// In Kernel.java -> createScheduler()
-case LOTTERY:
-    return new LotteryScheduler(config.getTimeSlice());
-```
-
-### 2\. Implementing a New Memory Allocator
-
-If running in `CONTIGUOUS` mode, you can change how the kernel finds free memory holes by implementing the `AllocationStrategy` interface.
-
-**Step A: Create the Strategy**
-
-```java
-public class WorstFitStrategy implements AllocationStrategy {
-    @Override
-    public int findRegion(List<MemoryBlock> holes, int requestSize) {
-        // Find the LARGEST hole to leave big chunks available
-        MemoryBlock worst = null;
-        for (MemoryBlock hole : holes) {
-            if (hole.size >= requestSize) {
-                if (worst == null || hole.size > worst.size)
-                    worst = hole;
-            }
-        }
-        return (worst != null) ? worst.start : -1;
-    }
-}
-```
-
-**Step B: Plug it in (RV32iComputer.java)**
-
-```java
-// Swap 'BestFitStrategy' with your new class
-if (mode == MemoryMode.CONTIGUOUS) {
-    AllocationStrategy allocator = new WorstFitStrategy(); // <--- Swapped!
-    this.memory = new ContiguousMemoryManager(memSize, allocator);
-}
-```
-
-### 3\. Implementing a New Paging Policy
-
-If running in `PAGING` mode, you can change how pages are loaded (e.g., implementing `PredictivePager`) by implementing the `Pager` interface.
-
-```java
-public class PredictivePager implements Pager {
-    @Override
-    public int ensureResident(AddressSpace as, int va, VmAccess access) {
-        // Logic to bring in page 'va' AND 'va + 1' (prefetching)
-        // ...
-        return frameNumber;
-    }
-}
-```
-
------
-
-## System Calls
-
-The kernel exposes a standard UNIX-like system call interface to user programs:
+### 2. Adding System Calls
+New system calls can be registered in `SystemCallHandler.java`. The kernel currently supports:
 
 | Syscall | Code | Description |
 | :--- | :--- | :--- |
-| `SYS_EXIT` | 93 | Terminate process (become Zombie) |
-| `SYS_READ` | 63 | Read from file descriptor/UART |
-| `SYS_WRITE` | 64 | Write to file descriptor/UART |
-| `SYS_YIELD` | 124 | Voluntarily yield CPU time slice |
-| `SYS_FORK` | 220 | Copy current process (parent -\> child) |
-| `SYS_EXEC` | 221 | Load new executable image |
-| `SYS_WAIT` | 260 | Wait for child to change state |
-| `SYS_SHM_OPEN` | 20 | Create or open a shared memory region |
-| `SYS_SHM_ATTACH` | 21 | Attach a shared memory region to process address space |
+| `SYS_EXIT` | 93 | Terminate process |
+| `SYS_READ` | 63 | Read from file descriptor |
+| `SYS_WRITE` | 64 | Write to file descriptor |
+| `SYS_YIELD` | 124 | Yield CPU to scheduler |
+| `SYS_GETPID` | 172 | Get process ID |
+| `SYS_CLONE` | 220 | Create thread/process (unified primitive) |
+| `SYS_EXEC` | 221 | Load and execute ELF program |
+| `SYS_WAIT` | 260 | Wait for child exit |
+| `SYS_KILL` | 129 | Send signal to process |
+| `SYS_NANOSLEEP` | 101 | High-resolution sleep |
+| `SYS_DEBUG_PRINT`| 1000 | Print to host console |
+| `SYS_GET_TIME` | 1001 | Get system time |
+| `SYS_OPEN` | 56 | Open file |
+| `SYS_CLOSE` | 57 | Close file descriptor |
+| `SYS_DUP` | 23 | Duplicate file descriptor |
+| `SYS_PIPE` | 59 | Create pipe for IPC |
+| `SYS_FSTAT` | 80 | Get file status |
+| `SYS_MKNOD` | 33 | Create device node |
+| `SYS_MKDIR` | 34 | Create directory |
+| `SYS_UNLINK` | 35 | Delete file |
+| `SYS_LINK` | 37 | Create hard link |
+| `SYS_CHDIR` | 49 | Change directory |
+| `SYS_CV_WAIT` | 280 | Condition variable wait |
+| `SYS_CV_SIGNAL` | 281 | Condition variable signal |
+| `SYS_CV_BROADCAST`| 282 | Condition variable broadcast |
 
------
+---
 
-## Task States Lifecycle
+## 🐛 Debugging Features
 
-The kernel manages tasks through a rigorous state machine to ensure stability.
+-   **Disassembler**: Use the detailed view to trace instructions `pc - 15` to `pc + 15`.
+-   **Panic Mode**: If the kernel detects an invalid state (e.g. Double Schedule), it throws a `RuntimeException` to stop execution immediately.
+-   **File Logger**: All kernel events, errors, and debug information logged to file for post-mortem analysis.
+-   **Visual Breakpoints**: GUI allows stepping through execution, inspecting registers, memory, and scheduler state in real-time.
+-   **CSR Debugging**: Control and Status Register inspection for privilege mode and interrupt configuration.
 
-```text
-[NEW] → [READY] ↔ [RUNNING]
-           ↑         ↓
-           └─── [WAITING]
-                 ↓
-            [TERMINATED] (Zombie)
-                 ↓
-             [REMOVED]
-```
+---
+
+## 📋 ISA Support
+
+The simulator implements the following RISC-V ISA extensions:
+
+-   **RV32I**: Base integer instruction set (40 instructions)
+-   **RV32M**: Multiply/Divide extension (MUL, MULH, DIV, REM, etc.)
+-   **RV32A**: Atomic extension (LR, SC, AMOSWAP, AMOADD, etc.) - **Used by C library for mutexes**
+-   **RVC**: Compressed instruction extension (16-bit instructions)
+-   **Zicsr**: Control and Status Register access (CSRRW, CSRRS, MRET, SRET) - **Emulated by CPU** for exception handling and privilege mode switching (user programs access via ECALL only, not direct CSR instructions)
+
+---
+
+## 🔄 Inter-Process Communication (IPC)
+
+The kernel provides comprehensive IPC mechanisms for process coordination and data sharing:
+
+### **1. Pipes** (Byte-stream Communication)
+- **System Call**: `SYS_PIPE (59)`
+- **Implementation**: 4KB circular buffer with blocking read/write semantics
+- **Features**:
+  - Creates two file descriptors (read end, write end)
+  - Automatic task blocking when pipe is full (writers) or empty (readers)
+  - Broken pipe detection when read/write end closes
+  - Integration with file descriptor system
+- **Use Case**: Parent-child communication, producer-consumer patterns
+
+### **2. Condition Variables** (Synchronization)
+- **System Calls**: `SYS_CV_WAIT (280)`, `SYS_CV_SIGNAL (281)`, `SYS_CV_BROADCAST (282)`
+- **Features**:
+  - Per-CV wait queues with signal/broadcast semantics
+  - Integration with user-space mutexes for monitor pattern
+  - Automatic cleanup when no waiters remain
+- **Use Case**: Thread synchronization, event signaling
+
+### **3. Shared Memory** (High-performance Data Sharing)
+- **System Calls**: `SYS_SHM_OPEN (20)`, `SYS_SHM_ATTACH (21)`
+- **Implementation**: Key-based frame allocation with reference counting
+- **Features**:
+  - Virtual memory mapping to shared physical frames
+  - Write permission control per mapping
+  - Automatic cleanup via reference counting
+  - **Available in**: Paging mode only
+- **Use Case**: High-throughput data sharing, shared buffers
+
+### **4. Thread Creation** (Shared Address Space)
+- **System Call**: `SYS_CLONE (220)` (Linux-style)
+- **Clone Flags**:
+  - `CLONE_VM (0x00000100)` - Share memory space (creates threads)
+  - `CLONE_FILES (0x00000400)` - Share file descriptors
+  - `CLONE_SIGHAND (0x00000800)` - Share signal handlers
+- **Features**:
+  - True POSIX-style thread creation
+  - Proper parent-child relationship tracking
+  - Resource sharing control via flags
+- **Use Case**: Multi-threaded applications, parallel processing
+
+### **5. File Descriptor Inheritance** (Implicit IPC)
+- **Mechanism**: Via `clone()` with `CLONE_FILES` flag
+- **Features**:
+  - Child inherits parent's file descriptor table
+  - Shared access to pipes, files, and devices
+  - Reference-counted file descriptor management
+- **Use Case**: Process cooperation, resource sharing
+
+### **6. User-space Mutexes** (Synchronization)
+- **Implementation**: C library using RV32A atomic instructions
+- **Features**:
+  - Spinlock implementation using LR/SC instructions
+  - Integration with condition variables
+  - Thread-safe across multiple CPU cores
+- **Use Case**: Critical section protection, resource locking

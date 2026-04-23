@@ -6,6 +6,7 @@ import cse311.Exception.MemoryAccessException;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Sv32-like 2-level page table for per-process virtual memory.
@@ -18,13 +19,22 @@ public class PagedMemoryManager extends MemoryManager {
     private final int totalFrames;
     private final FrameOwner[] reverseMap; // reverse mapping for frame ownership
 
+    // Heat tracking for heatmap visualization
+    private final int[] frameHeat; // 0..255, decays over time
+    private static final int HEAT_MAX = 255;
+    private static final int HEAT_INC = 6; // increment per access
+    private static final int HEAT_DECAY = 2; // decrement per decay tick
+
     // Page table management for 2-level structure
     private final Map<Integer, AddressSpace.PageTable> pageTableFrames = new HashMap<>();
     private final Map<Integer, AddressSpace.PageDirectory> pageDirectoryFrames = new HashMap<>();
 
     // Address-space mapping
     private final Map<Integer, AddressSpace> spaces = new HashMap<>();
-    private AddressSpace current = null;
+
+    // Per-Core (Thread) Active Address Space
+    private final Map<Long, AddressSpace> activeContexts = new ConcurrentHashMap<>();
+
     private Pager pager = null; // Policy implementation
 
     // Shared Memory
@@ -46,6 +56,7 @@ public class PagedMemoryManager extends MemoryManager {
         this.reverseMap = new FrameOwner[totalFrames];
         this.freeFrames.set(0, totalFrames); // all free
         this.frameRefCount = new int[totalFrames];
+        this.frameHeat = new int[totalFrames];
     }
 
     /**
@@ -56,7 +67,7 @@ public class PagedMemoryManager extends MemoryManager {
     }
 
     // ---- Address-space lifecycle ----
-    public AddressSpace createAddressSpace(int pid) {
+    public synchronized AddressSpace createAddressSpace(int pid) {
         AddressSpace as = new AddressSpace(pid, this);
         spaces.put(pid, as);
         return as;
@@ -66,10 +77,29 @@ public class PagedMemoryManager extends MemoryManager {
         return spaces.get(pid);
     }
 
-    public void destroyAddressSpace(int pid) {
+    /**
+     * Register a child PID to an existing shared AddressSpace (for CLONE_VM).
+     * This allows the child to be looked up by PID for context switching.
+     */
+    public synchronized void registerSharedAddressSpace(int childPid, AddressSpace as) {
+        spaces.put(childPid, as);
+    }
+
+    public synchronized void destroyAddressSpace(int pid) {
         AddressSpace as = spaces.get(pid);
         if (as == null)
             return;
+
+        // Decrement reference count (for CLONE_VM shared address spaces)
+        // Only free memory when the last reference is released
+        if (as.decrementRefCount() > 0) {
+            // Other threads/processes still using this AddressSpace
+            spaces.remove(pid);
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                    "PagedMemoryManager: Detached PID " + pid + " from shared AddressSpace (refCount="
+                            + as.getRefCount() + ")");
+            return;
+        }
 
         // 1. Iterate over the Page Directory (Level 1)
         for (int i = 0; i < 1024; i++) {
@@ -98,11 +128,13 @@ public class PagedMemoryManager extends MemoryManager {
 
         // 4. Remove the logical structure
         spaces.remove(pid);
-        System.out.println("PagedMemoryManager: Fully reclaimed memory for PID " + pid);
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                "PagedMemoryManager: Fully reclaimed memory for PID " + pid);
     }
 
     public void switchTo(AddressSpace as) {
-        this.current = as;
+        // Update the active address space for THIS thread (CPU)
+        activeContexts.put(Thread.currentThread().getId(), as);
     }
 
     // ---- Public helpers used by TaskManager/Kernel ----
@@ -119,66 +151,58 @@ public class PagedMemoryManager extends MemoryManager {
     // Policy-based memory access using Pager
     @Override
     public void writeByteToVirtualAddress(int va, byte val) throws MemoryAccessException {
-        ensureCurrent();
-        ensurePager();
-        int frame = pager.ensureResident(current, va, VmAccess.WRITE);
-
-        // --- FIX START ---
-        if (frame == -2) { // UART MMIO
-            // Delegate to parent MemoryManager to handle UART write
+        if (isUart(va)) {
             super.writeByte(va, val);
             return;
         }
-        // --- FIX END ---
+        AddressSpace current = ensureCurrent();
+        ensurePager();
+        int frame = pager.ensureResident(current, va, VmAccess.WRITE);
 
         int pa = (frame << 12) | (va & 0xFFF);
+        bumpHeat(pa);
         super.writeByte(pa, val);
     }
 
     @Override
     public byte readByte(int va) throws MemoryAccessException {
-        ensureCurrent();
+        if (isUart(va)) {
+            return super.readByte(va);
+        }
+        AddressSpace current = ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.READ);
 
-        // --- FIX START ---
-        if (frame == -2) { // UART MMIO
-            // Delegate to parent MemoryManager to handle UART read (Status/Data)
-            return super.readByte(va);
-        }
-        // --- FIX END ---
-
         int pa = (frame << 12) | (va & 0xFFF);
+        bumpHeat(pa);
         return super.readByte(pa);
     }
 
     @Override
     public short readHalfWord(int va) throws MemoryAccessException {
-        ensureCurrent();
+        if (isUart(va)) {
+            return super.readHalfWord(va);
+        }
+        AddressSpace current = ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.READ);
 
-        // --- FIX START ---
-        if (frame == -2)
-            return super.readHalfWord(va);
-        // --- FIX END ---
-
         int pa = (frame << 12) | (va & 0xFFF);
+        bumpHeat(pa);
         return super.readHalfWord(pa);
     }
 
     @Override
     public int readWord(int va) throws MemoryAccessException {
-        ensureCurrent();
+        if (isUart(va)) {
+            return super.readWord(va);
+        }
+        AddressSpace current = ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.READ);
 
-        // --- FIX START ---
-        if (frame == -2)
-            return super.readWord(va);
-        // --- FIX END ---
-
         int pa = (frame << 12) | (va & 0xFFF);
+        bumpHeat(pa);
         return super.readWord(pa);
     }
 
@@ -189,34 +213,65 @@ public class PagedMemoryManager extends MemoryManager {
 
     @Override
     public void writeHalfWord(int va, short v) throws MemoryAccessException {
-        ensureCurrent();
-        ensurePager();
-        int frame = pager.ensureResident(current, va, VmAccess.WRITE);
-
-        // --- FIX START ---
-        if (frame == -2) {
+        if (isUart(va)) {
             super.writeHalfWord(va, v);
             return;
         }
-        // --- FIX END ---
+        AddressSpace current = ensureCurrent();
+        ensurePager();
+        int frame = pager.ensureResident(current, va, VmAccess.WRITE);
 
         int pa = (frame << 12) | (va & 0xFFF);
+        bumpHeat(pa);
         super.writeHalfWord(pa, v);
     }
 
     @Override
     public void writeWord(int va, int v) throws MemoryAccessException {
-        ensureCurrent();
-        ensurePager();
-        int frame = pager.ensureResident(current, va, VmAccess.WRITE);
-
-        if (frame == -2) {
+        if (isUart(va)) {
             super.writeWord(va, v);
             return;
         }
+        AddressSpace current = ensureCurrent();
+        ensurePager();
+        int frame = pager.ensureResident(current, va, VmAccess.WRITE);
 
         int pa = (frame << 12) | (va & 0xFFF);
+        bumpHeat(pa);
         super.writeWord(pa, v);
+    }
+
+    @Override
+    public synchronized int debugReadWord(int va, int pid) {
+        if (isUart(va)) {
+            return super.debugReadWord(va, pid); // UART is shared
+        }
+
+        // Find the AddressSpace for this PID
+        AddressSpace as = spaces.get(pid);
+        if (as == null) {
+            return 0; // Or return super.readWord(va) if we assuming raw access? No, stick to context.
+        }
+
+        // We cannot use ensureResident here because it might modify state (allocate
+        // pages)
+        // and we don't want the debugger to cause page faults or allocations.
+        // We only want to peek at what's already resident.
+
+        int vpn = AddressSpace.getVPN(va);
+        AddressSpace.PageTableEntry pte = as.getPTEInternal(vpn);
+
+        if (pte != null && pte.V) {
+            int frame = pte.ppn;
+            int pa = (frame << 12) | (va & 0xFFF);
+            try {
+                return super.readWord(pa); // Read physical
+            } catch (MemoryAccessException e) {
+                return 0;
+            }
+        }
+
+        return 0; // Page not present or not readable
     }
 
     // ---- Minimal UART passthrough (shared-mapped) ----
@@ -234,11 +289,18 @@ public class PagedMemoryManager extends MemoryManager {
         return totalFrames;
     }
 
+    public FrameOwner[] getFrameOwners() {
+        return reverseMap;
+    }
+
     // ---- Internals ----
-    private void ensureCurrent() throws MemoryAccessException {
+    // ---- Internals ----
+    private AddressSpace ensureCurrent() throws MemoryAccessException {
+        AddressSpace current = activeContexts.get(Thread.currentThread().getId());
         if (current == null) {
             throw new MemoryAccessException("No current address space");
         }
+        return current;
     }
 
     private void ensurePager() throws MemoryAccessException {
@@ -248,7 +310,7 @@ public class PagedMemoryManager extends MemoryManager {
     }
 
     // Frame management methods for Pager implementations
-    public int allocateFrame() {
+    public synchronized int allocateFrame() {
         int frame = freeFrames.nextSetBit(0);
         if (frame != -1) {
             freeFrames.clear(frame);
@@ -267,7 +329,7 @@ public class PagedMemoryManager extends MemoryManager {
         return frame;
     }
 
-    public void freeFrame(int frame) {
+    public synchronized void freeFrame(int frame) {
         if (frame >= 0 && frame < totalFrames) {
             // Decrease reference count
             frameRefCount[frame]--;
@@ -285,7 +347,7 @@ public class PagedMemoryManager extends MemoryManager {
         }
     }
 
-    public int openSharedRegion(int key) {
+    public synchronized int openSharedRegion(int key) {
         // If key already exists, return old frame
         if (sharedKeyMap.containsKey(key)) {
             return sharedKeyMap.get(key);
@@ -307,7 +369,7 @@ public class PagedMemoryManager extends MemoryManager {
     }
 
     // Manually map shared memory (set shared = true)
-    public boolean mapSharedPage(AddressSpace as, int vpn, int frame, boolean write) {
+    public synchronized boolean mapSharedPage(AddressSpace as, int vpn, int frame, boolean write) {
         // Call internal mapPageInternal (assume you have access or modify visibility)
         // Or modify mapPage to accept shared parameter
 
@@ -334,11 +396,55 @@ public class PagedMemoryManager extends MemoryManager {
         reverseMap[frame] = owner;
     }
 
+    /**
+     * Get the reference count for a frame.
+     * Used by DemandPager to avoid evicting shared pages.
+     */
+    public int getFrameRefCount(int frame) {
+        if (frame >= 0 && frame < totalFrames) {
+            return frameRefCount[frame];
+        }
+        return 0;
+    }
+
+    // ---- Heat tracking for heatmap ----
+
+    /**
+     * Bump heat for the physical frame containing the given physical address.
+     * Called after VA→PA translation to correctly track physical frame accesses.
+     */
+    private void bumpHeat(int pa) {
+        int frame = pa >>> 12; // pa / PAGE_SIZE
+        if (frame >= 0 && frame < totalFrames) {
+            frameHeat[frame] = Math.min(HEAT_MAX, frameHeat[frame] + HEAT_INC);
+        }
+    }
+
+    /**
+     * Get the heat array for heatmap visualization.
+     * Each element is 0..255 indicating recent access frequency.
+     */
+    public int[] getFrameHeat() {
+        return frameHeat;
+    }
+
+    /**
+     * Decay all frame heat values. Called periodically by the Kernel.
+     * Prevents frames from staying permanently hot after a process exits.
+     */
+    public void decayHeat() {
+        for (int i = 0; i < frameHeat.length; i++) {
+            if (frameHeat[i] > 0) {
+                frameHeat[i] = Math.max(0, frameHeat[i] - HEAT_DECAY);
+            }
+        }
+    }
+
     // ---- Debug helpers ----
     public void dumpStats() {
         int used = totalFrames - freeFrames.cardinality();
-        System.out.println("Memory: " + used + "/" + totalFrames + " frames used");
-        System.out.println("Page tables: " + pageTableFrames.size() + " allocated");
+        cse311.Logger.FileLogger.log("Memory: " + used + "/" + totalFrames + " frames used");
+        cse311.Logger.FileLogger.log("Page tables: " + pageTableFrames.size() + " allocated");
     }
 
     // Page table management methods
@@ -387,7 +493,7 @@ public class PagedMemoryManager extends MemoryManager {
     }
 
     public void copyAddressSpace(AddressSpace oldAS, AddressSpace newAS) throws MemoryAccessException {
-        System.out.println(
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
                 "PagedMemoryManager: Copying address space from PID " + oldAS.getPid() + " to " + newAS.getPid());
 
         for (int l1Index = 0; l1Index < 1024; l1Index++) {
@@ -411,6 +517,14 @@ public class PagedMemoryManager extends MemoryManager {
                 }
 
                 int vpn = (l1Index << 10) | l2Index;
+
+                // Check if the child already has this VPN mapped
+                // (e.g., from mapStack during allocateMemory) and free it before overwriting
+                AddressSpace.PageTableEntry existingChildPTE = newAS.getPTEInternal(vpn);
+                if (existingChildPTE != null && existingChildPTE.V) {
+                    freeFrame(existingChildPTE.ppn);
+                }
+
                 int oldFrame = pte.ppn; // Physical frame of parent
 
                 // --- CHECK: IF IT'S A SHARED PAGE ---
@@ -444,6 +558,16 @@ public class PagedMemoryManager extends MemoryManager {
                     int oldPa = oldFrame << 12; // Source physical address
                     int newPa = newFrame << 12; // Destination physical address
 
+                    if (l1Index == 0 && l2Index == 16) { // Code page usually at index 16 (0x10000)
+                        int sampleData = super.readWord(oldPa);
+                        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.DEBUG,
+                                "copyAddressSpace: Copying Code Page. VPN=" + vpn + " OldFrame="
+                                        + oldFrame
+                                        + " OldPA=" + Integer.toHexString(oldPa) + " Data[0]="
+                                        + Integer.toHexString(sampleData)
+                                        + " NewFrame=" + newFrame);
+                    }
+
                     try {
                         // Deep Copy each byte from parent to child
                         for (int i = 0; i < PAGE_SIZE; i++) {
@@ -468,10 +592,54 @@ public class PagedMemoryManager extends MemoryManager {
                 }
             }
         }
-        System.out.println("PagedMemoryManager: Finished copying address space.");
+
+        // Copy memory region bounds from parent to child
+        // This ensures the child has the same heap and stack boundaries
+        newAS.setHeapLimit(oldAS.getHeapLimit());
+        newAS.setStackBase(oldAS.getStackBase());
+
+        // System.out.println("PagedMemoryManager: Finished copying address space.");
     }
 
     public void writeByteToPhysicalAddress(int physicalAddress, byte value) throws MemoryAccessException {
         super.writeByte(physicalAddress, value);
+    }
+
+    public int unlinkSharedRegion(int key) {
+        if (sharedKeyMap.containsKey(key)) {
+            sharedKeyMap.remove(key); // Remove the key, the frame is still in use
+            return 0; // Success
+        }
+        return -1; // Key not found
+    }
+
+    /**
+     * Check if a frame contains only zeros (for UI visualization).
+     * Samples bytes at intervals to avoid reading entire 4KB.
+     * 
+     * @param frameIndex The frame number to check
+     * @return true if the frame appears empty (all sampled bytes are zero)
+     */
+    public boolean isFrameEmpty(int frameIndex) {
+        if (frameIndex < 0 || frameIndex >= totalFrames) {
+            return true;
+        }
+
+        int baseAddress = frameIndex * PAGE_SIZE;
+
+        // Sample every 64 bytes (64 samples per 4KB frame) for performance
+        try {
+            for (int offset = 0; offset < PAGE_SIZE; offset += 64) {
+                // Read a word (4 bytes) at each sample point
+                int value = super.readWord(baseAddress + offset);
+                if (value != 0) {
+                    return false; // Found non-zero data
+                }
+            }
+        } catch (Exception e) {
+            return true; // On error, consider empty
+        }
+
+        return true; // All samples were zero
     }
 }

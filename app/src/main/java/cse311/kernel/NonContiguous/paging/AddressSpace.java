@@ -1,11 +1,19 @@
 package cse311.kernel.NonContiguous.paging;
 
 import cse311.Exception.MemoryAccessException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class AddressSpace {
     // Root of a 2-level page table (Sv32-like): 4KB pages
     final int pid;
     final PageDirectory root;
+    private final AtomicInteger refCount = new AtomicInteger(1);
+
+    // Memory region bounds for access validation
+    // heapLimit: page-aligned upper boundary of valid heap (grows up via brk)
+    // stackBase: virtual address where the stack region starts (grows down)
+    private volatile int heapLimit;
+    private volatile int stackBase;
 
     AddressSpace(int pid) {
         this.pid = pid;
@@ -42,6 +50,41 @@ public final class AddressSpace {
     // Helper methods for pager - Abstract interface for paging policies
     public int getPid() {
         return pid;
+    }
+
+    /** Increment ref count (e.g. for CLONE_VM). Returns new count. */
+    public int incrementRefCount() {
+        return refCount.incrementAndGet();
+    }
+
+    /** Decrement ref count. Returns new count. */
+    public int decrementRefCount() {
+        return refCount.decrementAndGet();
+    }
+
+    /** Get current ref count. */
+    public int getRefCount() {
+        return refCount.get();
+    }
+
+    /** Set the page-aligned upper boundary of valid heap. */
+    public void setHeapLimit(int heapLimit) {
+        this.heapLimit = heapLimit;
+    }
+
+    /** Get the page-aligned upper boundary of valid heap. */
+    public int getHeapLimit() {
+        return heapLimit;
+    }
+
+    /** Set the virtual address where the stack region starts. */
+    public void setStackBase(int stackBase) {
+        this.stackBase = stackBase;
+    }
+
+    /** Get the virtual address where the stack region starts. */
+    public int getStackBase() {
+        return stackBase;
     }
 
     /**
@@ -141,7 +184,12 @@ public final class AddressSpace {
         if (l2Table == null)
             return false;
 
-        PageTableEntry pte = new PageTableEntry();
+        // Reuse existing PTE object to reduce GC pressure
+        PageTableEntry pte = l2Table.entries[l2Index];
+        if (pte == null) {
+            pte = new PageTableEntry();
+            l2Table.entries[l2Index] = pte;
+        }
         pte.ppn = frame;
         pte.V = true;
         pte.R = true;
@@ -149,8 +197,8 @@ public final class AddressSpace {
         pte.X = exec;
         pte.A = false;
         pte.D = false;
+        pte.shared = false;
 
-        l2Table.entries[l2Index] = pte;
         return true;
     }
 
@@ -171,6 +219,37 @@ public final class AddressSpace {
 
     public static int getPageOffset(int va) {
         return va & 0xFFF; // 12-bit page offset
+    }
+
+    /**
+     * Checks if a virtual address falls within a valid memory region.
+     * Valid regions:
+     * - Text/Data/Heap: [0, heapLimit) (grows up)
+     * - Stack: [stackBase, ...) (grows down from high memory)
+     * Addresses outside these bounds (e.g. NULL when no page is at 0)
+     * are illegal and should cause a Segmentation Fault.
+     *
+     * @param va The virtual address to check.
+     * @return true if the address is within a valid region.
+     */
+    public boolean isValidAccess(int va) {
+        // If heap bounds haven't been established yet (still in ELF loading phase),
+        // allow all access. heapLimit is set after loadProgram completes.
+        if (heapLimit == 0) {
+            return true;
+        }
+
+        // Check if within text/data/heap region: [0, heapLimit)
+        if (Integer.compareUnsigned(va, heapLimit) < 0) {
+            return true;
+        }
+
+        // Check if within stack region: [stackBase, ...)
+        if (stackBase != 0 && Integer.compareUnsigned(va, stackBase) >= 0) {
+            return true;
+        }
+
+        return false;
     }
 
     // Page table management - now handled by PagedMemoryManager

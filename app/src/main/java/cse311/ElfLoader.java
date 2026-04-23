@@ -201,10 +201,23 @@ public class ElfLoader {
         }
     }
 
+    private java.util.Map<Integer, String> symbolMap = new java.util.HashMap<>();
+
     /**
      * Analyzes loaded segments to determine program layout (Text, Data, Heap).
+     * Also parses Symbol Table to extract function names.
      */
     public ProgramInfo getProgramInfo() {
+        // Parse symbols if not already done
+        if (symbolMap.isEmpty()) {
+            try {
+                parseSymbols();
+            } catch (Exception e) {
+                cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                        "Warning: Failed to parse symbols: " + e.getMessage());
+            }
+        }
+
         int entry = getEntryPoint();
         int txtStart = Integer.MAX_VALUE;
         int txtEnd = 0;
@@ -247,7 +260,88 @@ public class ElfLoader {
                 txtEnd - txtStart,
                 datStart,
                 datEnd - datStart,
-                heapStart);
+                heapStart,
+                new java.util.HashMap<>(symbolMap));
+    }
+
+    private void parseSymbols() {
+        ByteBuffer buffer = ByteBuffer.wrap(elfData).order(ByteOrder.LITTLE_ENDIAN);
+
+        // Header Offsets
+        int shOff = buffer.getInt(32); // Section Header Offset
+        int shEntSize = buffer.getShort(46); // Section Header Entry Size
+        int shNum = buffer.getShort(48); // Section Header Count
+        // int shStrNdx = buffer.getShort(50); // String Table Index (for section names)
+
+        int symTabOffset = 0;
+        int symTabSize = 0;
+        int strTabOffset = 0;
+        int strTabSize = 0;
+        int symEntrySize = 16; // Standard 32-bit symbol entry size
+
+        // Iterate Section Headers to find SHT_SYMTAB (2) and SHT_STRTAB (3) linked to
+        // it
+        for (int i = 0; i < shNum; i++) {
+            int offset = shOff + (i * shEntSize);
+            int type = buffer.getInt(offset + 4);
+            // 4 bytes sh_name
+            // 4 bytes sh_type
+
+            if (type == 2) { // SHT_SYMTAB
+                symTabOffset = buffer.getInt(offset + 16); // sh_offset
+                symTabSize = buffer.getInt(offset + 20); // sh_size
+                int link = buffer.getInt(offset + 24); // sh_link (index of associated string table)
+                symEntrySize = buffer.getInt(offset + 36); // sh_entsize
+
+                // Find the associated String Table
+                int linkOffset = shOff + (link * shEntSize);
+                strTabOffset = buffer.getInt(linkOffset + 16);
+                strTabSize = buffer.getInt(linkOffset + 20);
+
+                break; // Found it
+            }
+        }
+
+        if (symTabOffset == 0 || strTabOffset == 0)
+            return;
+
+        // Parse Symbols
+        int numSymbols = symTabSize / symEntrySize;
+        for (int i = 0; i < numSymbols; i++) {
+            int entryAddr = symTabOffset + (i * symEntrySize);
+
+            int st_name = buffer.getInt(entryAddr); // Index into string table
+            int st_value = buffer.getInt(entryAddr + 4); // Value/Address
+            // int st_size = buffer.getInt(entryAddr + 8);
+            byte st_info = buffer.get(entryAddr + 12);
+
+            int type = st_info & 0xF;
+
+            // Type 0 (NOTYPE) or 2 (FUNC) are usually what we want for labels.
+            // Ignore empty names
+            if (st_name != 0 && (type == 0 || type == 2)) {
+                // Read String
+                String name = readString(buffer, strTabOffset + st_name);
+                if (name != null && !name.isEmpty() && !name.startsWith("$")) {
+                    symbolMap.put(st_value, name);
+                }
+            }
+        }
+    }
+
+    private String readString(ByteBuffer buffer, int offset) {
+        if (offset >= buffer.capacity())
+            return null;
+        StringBuilder sb = new StringBuilder();
+        int i = offset;
+        while (i < buffer.capacity()) {
+            byte b = buffer.get(i);
+            if (b == 0)
+                break;
+            sb.append((char) b);
+            i++;
+        }
+        return sb.toString();
     }
 
     public int getEntryPoint() {

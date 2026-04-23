@@ -1,5 +1,6 @@
 package cse311;
 
+import cse311.Logger.FileLogger;
 import cse311.kernel.*;
 import cse311.kernel.process.Task;
 import cse311.kernel.process.TaskState;
@@ -12,54 +13,55 @@ public class SystemCallDemo {
 
     public static void main(String[] args) {
         try {
-            System.out.println("=== System Call Integration Demo ===\n");
+            FileLogger.log("=== System Call Integration Demo ===\n");
 
-            // Create memory and CPU
+            // Create memory
             SimpleMemory simpleMemory = new SimpleMemory(64 * 1024 * 1024);
             MemoryManager memory = new MemoryManager(simpleMemory);
-            RV32Cpu cpu = new RV32Cpu(memory);
 
-            // Create kernel
-            Kernel kernel = new Kernel(cpu, memory);
+            // Create kernel (which creates CPU)
+            Kernel kernel = new Kernel(memory);
+            RV32Cpu cpu = kernel.getCpu(); // Use BSP
 
             // Configure for cooperative scheduling to see system calls clearly
             kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.COOPERATIVE);
 
-            System.out.println("1. Testing ECALL detection...");
+            FileLogger.log("1. Testing ECALL detection...");
             testEcallDetection(cpu);
 
-            System.out.println("\n2. Testing system call handling...");
+            FileLogger.log("\n2. Testing system call handling...");
             testSystemCallHandling(kernel, cpu, memory);
 
-            System.out.println("\n3. Testing kernel integration...");
+            FileLogger.log("\n3. Testing kernel integration...");
             testKernelIntegration(kernel);
 
-            System.out.println("\n=== Demo Complete ===");
+            FileLogger.log("\n=== Demo Complete ===");
 
         } catch (Exception e) {
-            System.err.println("Demo error: " + e.getMessage());
-            e.printStackTrace();
+            FileLogger.log("Demo error: " + e.getMessage());
+            FileLogger.log(e);
         }
     }
 
     private static void testEcallDetection(RV32Cpu cpu) {
-        System.out.println("   - Resetting CPU flags");
+        FileLogger.log("   - Resetting CPU flags");
         cpu.resetFlags();
 
-        System.out.println("   - Initial ECALL state: " + cpu.isEcall());
+        FileLogger.log("   - Initial ECALL state: " + cpu.isEcall());
 
-        System.out.println("   - Executing ECALL instruction (0x73)");
+        FileLogger.log("   - Executing ECALL instruction (0x73)");
         cpu.testExecuteInstruction(0x00000073); // ECALL instruction
 
-        System.out.println("   - ECALL detected: " + cpu.isEcall());
-        System.out.println("   - ECALL flag after check: " + cpu.isEcall() + " (should be false - auto-reset)");
+        FileLogger.log("   - ECALL detected: " + cpu.isEcall());
+        FileLogger
+                .log("   - ECALL flag after check: " + cpu.isEcall() + " (should be false - auto-reset)");
     }
 
     private static void testSystemCallHandling(Kernel kernel, RV32Cpu cpu, MemoryManager memory) throws Exception {
-        System.out.println("   - Creating test task");
+        FileLogger.log("   - Creating test task");
         Task task = new Task(1, "test_task", 0x1000, 4096, 0x7000, null);
 
-        System.out.println("   - Setting up write system call");
+        FileLogger.log("   - Setting up write system call");
         // Set up write system call: write("Hello", 5) to stdout
         task.getRegisters()[17] = SystemCallHandler.SYS_WRITE; // a7 = write
         task.getRegisters()[10] = 1; // a0 = stdout
@@ -72,29 +74,29 @@ public class SystemCallDemo {
             memory.writeByte(0x2000 + i, (byte) testData.charAt(i));
         }
 
-        System.out.println("   - Executing ECALL");
+        FileLogger.log("   - Executing ECALL");
         cpu.resetFlags();
         cpu.testExecuteInstruction(0x00000073); // ECALL
 
         if (cpu.isEcall()) {
-            System.out.println("   - ECALL detected, handling system call");
-            kernel.getSystemCallHandler().handleSystemCall(task);
-            System.out.println("   - System call completed, return value: " + task.getRegisters()[10]);
+            FileLogger.log("   - ECALL detected, handling system call");
+            kernel.getSystemCallHandler().handleSystemCall(task, cpu);
+            FileLogger.log("   - System call completed, return value: " + task.getRegisters()[10]);
         } else {
-            System.out.println("   - ERROR: ECALL not detected!");
+            FileLogger.log("   - ERROR: ECALL not detected!");
         }
     }
 
     private static void testKernelIntegration(Kernel kernel) throws Exception {
-        System.out.println("   - Creating task with exit program");
+        FileLogger.log("   - Creating task with exit program");
         byte[] exitProgram = createExitProgram();
         Task task = kernel.createTask(exitProgram, "exit_demo");
 
-        System.out.println("   - Task created: " + task.getName() + " (PID: " + task.getId() + ")");
-        System.out.println("   - Task state: " + task.getState());
+        FileLogger.log("   - Task created: " + task.getName() + " (PID: " + task.getId() + ")");
+        FileLogger.log("   - Task state: " + task.getState());
 
         // Simulate one execution cycle
-        System.out.println("   - Simulating kernel execution cycle...");
+        FileLogger.log("   - Simulating kernel execution cycle...");
 
         // The kernel would normally handle this in its main loop
         // Here we'll simulate what happens when a task makes a system call
@@ -105,12 +107,12 @@ public class SystemCallDemo {
         try {
             kernel.getCpu().step();
             if (kernel.getCpu().isEcall()) {
-                System.out.println("   - System call detected by kernel");
-                kernel.getSystemCallHandler().handleSystemCall(task);
-                System.out.println("   - Task state after system call: " + task.getState());
+                FileLogger.log("   - System call detected by kernel");
+                kernel.getSystemCallHandler().handleSystemCall(task, kernel.getCpu());
+                FileLogger.log("   - Task state after system call: " + task.getState());
             }
         } catch (Exception e) {
-            System.out.println("   - Execution completed or encountered issue: " + e.getMessage());
+            FileLogger.log("   - Execution completed or encountered issue: " + e.getMessage());
         }
     }
 

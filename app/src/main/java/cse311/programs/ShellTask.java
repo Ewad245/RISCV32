@@ -9,6 +9,8 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Scanner;
 
+// This is not tested
+@Deprecated
 public class ShellTask extends JavaTask {
 
     // The shell's state machine
@@ -39,7 +41,7 @@ public class ShellTask extends JavaTask {
                 // This is a *blocking* call on the host, which is fine
                 // because it just means the *simulation* waits for your input.
                 if (!hostStdin.hasNextLine()) {
-                    System.out.println("sh: EOF, exiting.");
+                    cse311.Logger.FileLogger.log("sh: EOF, exiting.");
                     this.setState(TaskState.TERMINATED); // Exit the shell
                     return;
                 }
@@ -58,7 +60,7 @@ public class ShellTask extends JavaTask {
                 // We are waiting for our child process to finish
                 if (runningChild == null || runningChild.getState() == TaskState.TERMINATED) {
                     if (runningChild != null) {
-                        System.out.println("sh: Reaped child " + runningChild.getId());
+                        cse311.Logger.FileLogger.log("sh: Reaped child " + runningChild.getId());
                         // "wait()" for the child (cleanup)
                         kernel.getTaskManager().cleanupTaskAndNotify(runningChild);
                         runningChild = null;
@@ -81,7 +83,7 @@ public class ShellTask extends JavaTask {
 
         // Handle 'cd' (not implemented, but shows structure)
         if (cmd.equals("cd")) {
-            System.out.println("sh: 'cd' is not implemented in this demo shell.");
+            cse311.Logger.FileLogger.log("sh: 'cd' is not implemented in this demo shell.");
             this.setState(TaskState.READY); // Go back to READ_CMD
             return;
         }
@@ -100,7 +102,7 @@ public class ShellTask extends JavaTask {
             childTask.setParent(this); // Set us as the parent
             this.addChild(childTask);
 
-            System.out.println("sh: Executing '" + cmd + "' as PID " + childTask.getId());
+            cse311.Logger.FileLogger.log("sh: Executing '" + cmd + "' as PID " + childTask.getId());
 
             this.runningChild = childTask;
             this.state = ShellState.CMD_RUNNING;
@@ -109,9 +111,9 @@ public class ShellTask extends JavaTask {
             this.waitFor(WaitReason.PROCESS_EXIT, childTask.getId());
 
         } catch (Exception e) {
-            System.err.println("sh: command not found or failed to load: " + cmd);
-            System.err.println("   (Searched for: " + "app/build/resources/main/" + cmd + ".elf" + ")");
-            System.err.println("   (Error: " + e.getMessage() + ")");
+            cse311.Logger.FileLogger.log("sh: command not found or failed to load: " + cmd);
+            cse311.Logger.FileLogger.log("   (Searched for: " + "app/build/resources/main/" + cmd + ".elf" + ")");
+            cse311.Logger.FileLogger.log("   (Error: " + e.getMessage() + ")");
 
             // Go back to reading the next command
             this.state = ShellState.READ_CMD;

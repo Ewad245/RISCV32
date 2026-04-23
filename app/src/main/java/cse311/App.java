@@ -3,26 +3,27 @@
  */
 package cse311;
 
-import cse311.Enum.MemoryMode;
+import cse311.Constants.MemoryMode;
+import cse311.Constants.OSConstants;
+import cse311.Logger.FileLogger;
 import cse311.kernel.Kernel;
 import cse311.kernel.KernelConfig;
 import cse311.programs.InitTask;
 import java.io.File;
 
 public class App {
-    public static final String file_seperator = System.getProperty("file.separator");
 
     public static void main(String[] args) {
-        System.out.println("==========================================");
-        System.out.println("      RISC-V Java Kernel Bootloader       ");
-        System.out.println("==========================================");
+        FileLogger.log("==========================================");
+        FileLogger.log("      RISC-V Java Kernel Bootloader       ");
+        FileLogger.log("==========================================");
 
         try {
             // --------------------------------------------------------
             // 1. HARDWARE INIT
             // --------------------------------------------------------
             // Initialize 128MB RAM, CPU, Memory Management Techniques
-            RV32Computer computer = new RV32Computer(128 * 1024 * 1024, 100, MemoryMode.CONTIGUOUS);
+            RV32Computer computer = new RV32Computer(1024 * 1024 * 12, Integer.MAX_VALUE, MemoryMode.PAGING);
             Kernel kernel = computer.getKernel();
 
             // --------------------------------------------------------
@@ -30,55 +31,66 @@ public class App {
             // --------------------------------------------------------
             // Use Round Robin to allow Init, Shell, and User apps to share CPU
             kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.ROUND_ROBIN);
-            // 5 instructions per slice
-            kernel.getConfig().setTimeSlice(5);
+            // Set Time Slice to X instructions
+            kernel.getConfig().setTimeSlice(3);
+            // Update the scheduler's time slice since it was already created
+            kernel.getScheduler().setTimeSlice(3);
 
             // --------------------------------------------------------
-            // 3. LAUNCH INIT PROCESS (PID 1)
+            // 3. MOUNT FILE SYSTEM
+            // --------------------------------------------------------
+            String imgPath = ".." + OSConstants.file_seperator + "fs.img";
+            File diskImage = new File(imgPath);
+            if (diskImage.exists()) {
+                kernel.mountFileSystem(imgPath);
+                FileLogger.log("Disk image 'fs.img' loaded.");
+            } else {
+                FileLogger.log("Warning: 'fs.img' not found. File system calls will fail.");
+                FileLogger.log("Run 'cse311.Mkfs' to generate the disk image.");
+            }
+
+            // --------------------------------------------------------
+            // 4. LAUNCH INIT PROCESS (PID 1)
             // Java Simulated Init Task or from ELF
             // --------------------------------------------------------
-            System.out.println("Bootloader: Spawning Init process (PID 1)...");
-            // First Option: Simulated Init (Not tested yet)
-            // We only need to create InitTask manually.
-            // The InitTask code (InitTask.java) will automatically detect
-            // that the Shell is missing and spawn ShellTask for us.
-            // InitTask initTask = new InitTask(1, kernel);
-            // kernel.addTaskToScheduler(initTask);
+            FileLogger.log("Bootloader: Spawning Init process (PID 1)...");
 
-            // Second Option: Loading Init.elf
-            // Pass a filename (e.g., "init.elf"), we load it now.
-            // This is like adding a service to startup scripts.
-
-            String elfPath = "User_Program_ELF" + file_seperator + "init.elf";
-            System.out.println("Current working directory: " + System.getProperty("user.dir"));
-            System.out.println("Looking for ELF at: " + elfPath);
+            // Load Init from ELF
+            String elfPath = "app" + OSConstants.file_seperator + "src" + OSConstants.file_seperator + "main"
+                    + OSConstants.file_seperator +
+                    "resources" + OSConstants.file_seperator + "user_programs" + OSConstants.file_seperator
+                    + "init.elf";
+            FileLogger.log("Current working directory: " + System.getProperty("user.dir"));
+            FileLogger.log("Looking for ELF at: " + elfPath);
             File f = new File(elfPath);
-            System.out.println("File exists: " + f.exists());
-            System.out.println("Absolute path: " + f.getAbsolutePath());
+            FileLogger.log("File exists: " + f.exists());
+            FileLogger.log("Absolute path: " + f.getAbsolutePath());
             if (f.exists()) {
-                System.out.println("Bootloader: Pre-loading user ELF: " + elfPath);
+                FileLogger.log("Bootloader: Pre-loading user ELF: " + elfPath);
                 kernel.createTask(elfPath);
+            } else {
+                // Fallback to old path for backwards compatibility
+                String oldPath = ".." + OSConstants.file_seperator + "User_Program_ELF" + OSConstants.file_seperator
+                        + "init.elf";
+                File oldFile = new File(oldPath);
+                if (oldFile.exists()) {
+                    FileLogger.log("Bootloader: Using legacy ELF path: " + oldPath);
+                    kernel.createTask(oldPath);
+                }
             }
-            // }
 
             // --------------------------------------------------------
-            // 4. START KERNEL
+            // 5. START KERNEL
             // --------------------------------------------------------
-            // This blocks forever in the mainLoop().
-            // 1. Scheduler picks InitTask -> InitTask spawns ShellTask
-            // 2. Scheduler picks ShellTask -> ShellTask prints "$" and waits for input
-            System.out.println("Bootloader: Starting Kernel scheduler...");
-            System.out.println("------------------------------------------");
-            kernel.start();
 
         } catch (NullPointerException e) {
-            System.err.println("Path invalid: " + e.getMessage());
-            e.printStackTrace();
+            FileLogger.log("Path invalid: " + e.getMessage());
+            FileLogger.log(e);
         } catch (Exception e) {
-            System.err.println("\nKERNEL PANIC: " + e.getMessage());
-            e.printStackTrace();
+            FileLogger.log("\nKERNEL PANIC: " + e.getMessage());
+            FileLogger.log(e);
         } finally {
-            System.out.println("\nSystem Halted.");
+            FileLogger.log("\nSystem Halted.");
         }
     }
 }
