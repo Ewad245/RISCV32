@@ -12,7 +12,6 @@ import cse311.RV32Computer;
 import cse311.RV32Cpu;
 import cse311.kernel.process.Task;
 import cse311.gui.components.*;
-import javafx.animation.AnimationTimer;
 
 public class MainController implements Initializable {
 
@@ -61,6 +60,12 @@ public class MainController implements Initializable {
     private SidebarView sidebarView;
     private ConsoleView consoleView;
 
+    private ProcessorHandler processorHandler;
+
+    // Placeholders for dynamic AssemblyView switching (Option B)
+    private VBox[] dashboardAssemblyContainers;
+    private VBox[] datapathAssemblyContainers;
+
     public MainController(Kernel kernel, RV32Computer computer) {
         this.kernel = kernel;
         this.computer = computer;
@@ -69,16 +74,15 @@ public class MainController implements Initializable {
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
-        // This method is called automatically after FXML is loaded.
-        // Initialize your custom dynamic components here.
-
         initializeToolbarLogic();
         initializeDashboard();
         initializeDatapath();
         initializeConsole();
         initializeSidebar();
 
-        startUpdateLoop(); // Your existing animation timer logic
+        processorHandler = new ProcessorHandler(kernel);
+        processorHandler.bindCpuSignals();
+        processorHandler.onUiUpdate(this::updateUI);
     }
 
     private void initializeToolbarLogic() {
@@ -105,17 +109,43 @@ public class MainController implements Initializable {
         int coreCount = kernel.getConfig().getCoreCount();
         cpuViews = new CpuView[coreCount];
         assemblyViews = new AssemblyView[coreCount];
+        dashboardAssemblyContainers = new VBox[coreCount];
 
         for (int i = 0; i < coreCount; i++) {
             var cpu = kernel.getCpu(i);
             cpuViews[i] = new CpuView(cpu);
             assemblyViews[i] = new AssemblyView(cpu, kernel.getMemory());
 
-            VBox hartLayout = new VBox(10, cpuViews[i], new Separator(), new Label("Instruction Stream"),
-                    assemblyViews[i]);
-            VBox.setVgrow(assemblyViews[i], Priority.ALWAYS);
+            // Create placeholder container for this core's AssemblyView in Dashboard
+            dashboardAssemblyContainers[i] = new VBox();
+            VBox.setVgrow(dashboardAssemblyContainers[i], Priority.ALWAYS);
 
-            Tab tab = new Tab("Hart " + i, hartLayout);
+            // Initialize with AssemblyView in Dashboard by default
+            dashboardAssemblyContainers[i].getChildren().setAll(assemblyViews[i]);
+
+            // 1. Wrap the CPU Registers in a ScrollPane so they don't force a massive
+            // height
+            ScrollPane cpuScroll = new ScrollPane(cpuViews[i]);
+            cpuScroll.setFitToWidth(true); // Keeps your responsive grid wrapping active
+
+            // 2. Use a vertical SplitPane instead of a standard VBox
+            SplitPane hartSplit = new SplitPane();
+            hartSplit.setOrientation(javafx.geometry.Orientation.VERTICAL);
+
+            // Top half: CPU Registers
+            VBox topHalf = new VBox(5, cpuScroll);
+            VBox.setVgrow(cpuScroll, Priority.ALWAYS);
+
+            // Bottom half: Assembly View (initialized in Dashboard by default)
+            VBox bottomHalf = new VBox(5, new Label("Instruction Stream"), dashboardAssemblyContainers[i]);
+            VBox.setVgrow(dashboardAssemblyContainers[i], Priority.ALWAYS);
+
+            // Add both halves to the SplitPane and set default sizes (e.g., 40% top, 60%
+            // bottom)
+            hartSplit.getItems().addAll(topHalf, bottomHalf);
+            hartSplit.setDividerPositions(0.4);
+
+            Tab tab = new Tab("Hart " + i, hartSplit);
             tab.setClosable(false);
             cpuTabs.getTabs().add(tab);
         }
@@ -140,30 +170,42 @@ public class MainController implements Initializable {
     private TabPane datapathTabs;
 
     private DatapathView[] datapathViews;
-    private AssemblyView[] datapathAssemblyViews;
+    // We'll reuse the dashboard assemblyViews instead of creating separate
+    // instances
+    // This allows dynamic switching via Option B
 
     private void initializeDatapath() {
         int coreCount = kernel.getConfig().getCoreCount();
         datapathViews = new DatapathView[coreCount];
-        datapathAssemblyViews = new AssemblyView[coreCount];
+        datapathAssemblyContainers = new VBox[coreCount];
 
         for (int i = 0; i < coreCount; i++) {
             var cpu = kernel.getCpu(i);
             datapathViews[i] = new DatapathView(cpu);
-            datapathAssemblyViews[i] = new AssemblyView(cpu, kernel.getMemory());
 
-            VBox datapathContainer = new VBox(10, new Label("CPU Datapath"), datapathViews[i]);
-            VBox.setVgrow(datapathViews[i], Priority.ALWAYS);
-            datapathContainer.getStyleClass().add("datapath-root");
+            // Create placeholder container for this core's AssemblyView in Datapath
+            datapathAssemblyContainers[i] = new VBox();
+            VBox.setVgrow(datapathAssemblyContainers[i], Priority.ALWAYS);
 
-            VBox assemblyContainer = new VBox(10, new Label("Assembly Stream"), datapathAssemblyViews[i]);
-            VBox.setVgrow(datapathAssemblyViews[i], Priority.ALWAYS);
+            // 1. Wrap the large Datapath diagram in a ScrollPane
+            ScrollPane datapathScroll = new ScrollPane(datapathViews[i]);
+            datapathScroll.setPannable(true); // Lets you click and drag to pan around the diagram
+            datapathScroll.setFitToHeight(true);
+            datapathScroll.setFitToWidth(true);
 
-            SplitPane split = new SplitPane(datapathContainer, assemblyContainer);
-            split.setDividerPositions(0.7);
+            // 2. Create the SplitPane with HORIZONTAL orientation (side-by-side)
+            SplitPane datapathSplit = new SplitPane();
+            datapathSplit.setOrientation(javafx.geometry.Orientation.HORIZONTAL);
 
-            Tab tab = new Tab("Hart " + i, split);
+            // 3. Add the scrollable diagram and assembly placeholder
+            datapathSplit.getItems().addAll(datapathScroll, datapathAssemblyContainers[i]);
+
+            // 4. Give the diagram 70% of the space and the assembly view 30%
+            datapathSplit.setDividerPositions(0.7);
+
+            Tab tab = new Tab("Hart " + i, datapathSplit);
             tab.setClosable(false);
+
             datapathTabs.getTabs().add(tab);
         }
     }
@@ -190,18 +232,52 @@ public class MainController implements Initializable {
 
     private void initializeSidebar() {
         sidebarView = new SidebarView(view -> {
-            // Hide all first
-            dashboardPane.setVisible(false);
-            datapathTabs.setVisible(false);
-            memoryTabContainer.setVisible(false);
+            int coreCount = kernel.getConfig().getCoreCount();
 
+            // Teleport AssemblyViews to the correct location based on navigation
             if (view.equals("dashboard")) {
+                // 1. Teleport Assembly Views to the Dashboard
+                for (int i = 0; i < coreCount; i++) {
+                    if (assemblyViews[i] != null) {
+                        // Clear from datapath container
+                        if (datapathAssemblyContainers[i] != null) {
+                            datapathAssemblyContainers[i].getChildren().clear();
+                        }
+                        // Add to dashboard container
+                        if (dashboardAssemblyContainers[i] != null) {
+                            dashboardAssemblyContainers[i].getChildren().setAll(assemblyViews[i]);
+                        }
+                    }
+                }
+
+                // 2. Show Dashboard
+                hideAllViews();
                 dashboardPane.setVisible(true);
                 dashboardPane.toFront();
+
             } else if (view.equals("datapath")) {
+                // 1. Teleport Assembly Views to the Datapath
+                for (int i = 0; i < coreCount; i++) {
+                    if (assemblyViews[i] != null) {
+                        // Clear from dashboard container
+                        if (dashboardAssemblyContainers[i] != null) {
+                            dashboardAssemblyContainers[i].getChildren().clear();
+                        }
+                        // Add to datapath container
+                        if (datapathAssemblyContainers[i] != null) {
+                            datapathAssemblyContainers[i].getChildren().setAll(assemblyViews[i]);
+                        }
+                    }
+                }
+
+                // 2. Show Datapath
+                hideAllViews();
                 datapathTabs.setVisible(true);
                 datapathTabs.toFront();
+
             } else if (view.equals("memory")) {
+                // Memory view doesn't need AssemblyView, just hide everything
+                hideAllViews();
                 memoryTabContainer.setVisible(true);
                 memoryTabContainer.toFront();
             }
@@ -209,14 +285,10 @@ public class MainController implements Initializable {
         sidebarContainer.getChildren().add(sidebarView);
     }
 
-    private void startUpdateLoop() {
-        AnimationTimer timer = new AnimationTimer() {
-            @Override
-            public void handle(long now) {
-                updateUI();
-            }
-        };
-        timer.start();
+    private void hideAllViews() {
+        dashboardPane.setVisible(false);
+        datapathTabs.setVisible(false);
+        memoryTabContainer.setVisible(false);
     }
 
     private void updateUI() {
@@ -234,7 +306,11 @@ public class MainController implements Initializable {
             // Refresh Dashboard sub-views
             for (int i = 0; i < cpuViews.length; i++) {
                 cpuViews[i].update();
-                assemblyViews[i].update();
+                // AssemblyView is updated via the container it's in
+                if (dashboardAssemblyContainers[i] != null &&
+                        !dashboardAssemblyContainers[i].getChildren().isEmpty()) {
+                    assemblyViews[i].update();
+                }
 
                 // Update Tab Title with PID
                 Task task = kernel.getCpu(i).getCurrentTask();
@@ -248,7 +324,11 @@ public class MainController implements Initializable {
         if (datapathTabs.isVisible()) {
             for (int i = 0; i < datapathViews.length; i++) {
                 datapathViews[i].update();
-                datapathAssemblyViews[i].update();
+                // Update AssemblyView if it's in the datapath container
+                if (datapathAssemblyContainers[i] != null &&
+                        !datapathAssemblyContainers[i].getChildren().isEmpty()) {
+                    assemblyViews[i].update();
+                }
             }
         }
 

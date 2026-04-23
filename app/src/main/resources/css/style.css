@@ -171,6 +171,11 @@
     -fx-stroke-width: 2.5;
 }
 
+.wire-inactive:hover,
+.datapath-active:hover {
+    -fx-cursor: hand;
+}
+
 .wire-dataflow {
     -fx-stroke: #ec4899;
     -fx-stroke-width: 5;

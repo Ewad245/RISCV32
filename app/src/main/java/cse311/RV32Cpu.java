@@ -8,8 +8,12 @@ import java.util.HashMap;
 import java.util.Map;
 
 import cse311.kernel.process.Task;
+import cse311.util.Signal;
 
 public class RV32Cpu {
+
+    public final Signal processorWasClocked = new Signal();
+    public final Signal processorWasReset = new Signal();
 
     private int cpuId;
     private int[] x = new int[32];
@@ -251,6 +255,13 @@ public class RV32Cpu {
 
     public void setCurrentTask(Task currentTask) {
         this.currentTask = currentTask;
+        if (currentTask == null) {
+            this.lastDecodedInstruction = null;
+        }
+    }
+
+    public void clearLastDecodedInstruction() {
+        this.lastDecodedInstruction = null;
     }
 
     // Methods needed by the kernel
@@ -304,47 +315,31 @@ public class RV32Cpu {
 
     public void turnOn() {
         Runnable task1 = () -> input.getInput(memory);
-        /*
-         * this.cpuThread = new Thread(new Runnable() {
-         * 
-         * @Override
-         * public void run() {
-         * while (RV32iCpu.this.running) {
-         * try {
-         * // find13And12(memory.getByteMemory());
-         * fetchExecuteCycle();
-         * } catch (Exception e) {
-         * // TODO Auto-generated catch block
-         * e.printStackTrace();
-         * }
-         * }
-         * }
-         * });
-         */
-        new Thread(task1).start();
+        Thread inputThread = new Thread(task1, "CPU-Input-Thread");
+        inputThread.setDaemon(true);
+        inputThread.start();
         this.running = true;
         // this.cpuThread.start();
     }
 
+    public void turnOff() {
+        this.running = false;
+        input.stop();
+    }
+
     private void fetchExecuteCycle() throws Exception {
-        // Infinite loop detection removed to allow spin-waiting and idle loops
         lastPC = pc;
 
         try {
-            // Fetch the instruction from memory at the address in the pc register
             int instructionFetched = fetch();
             InstructionDecoded instructionDecoded = decode(instructionFetched);
             this.lastDecodedInstruction = instructionDecoded;
             execute(instructionDecoded);
-            // System.out.println(instructionDecoded.toString());
-            // displayRegisters();
         } catch (MemoryAccessException e) {
-            // Handle memory access exception using the handleException method
-            handleException(7, pc - lastInstructionSize); // 7 = store/AMO access fault
+            handleException(7, pc - lastInstructionSize);
         } catch (Exception e) {
-            // Handle other exceptions using the handleException method
-            handleException(2, pc - lastInstructionSize); // 2 = illegal instruction
-            cse311.Logger.FileLogger.log(e); // Log the exception for debugging
+            handleException(2, pc - lastInstructionSize);
+            cse311.Logger.FileLogger.log(e);
         }
     }
 

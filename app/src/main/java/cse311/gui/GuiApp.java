@@ -42,13 +42,20 @@ public class GuiApp extends Application {
         scene.getStylesheets().add(
                 getClass().getResource("/css/style.css").toExternalForm());
 
+        // Add shutdown hook to ensure clean JVM exit
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            FileLogger.log(FileLogger.LogLevel.DEBUG, "Shutdown hook triggered");
+            kernel.stop();
+            FileLogger.log(FileLogger.LogLevel.DEBUG, "Shutdown hook complete");
+        }));
+
         // 3. Configure Stage
         primaryStage.setTitle("RISC-V OS Simulator");
         primaryStage.setScene(scene);
         primaryStage.setOnCloseRequest(e -> {
             kernel.stop();
+            Platform.setImplicitExit(true);
             Platform.exit();
-            System.exit(0);
         });
 
         // 4. Start Kernel (in background)

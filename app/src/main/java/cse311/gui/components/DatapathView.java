@@ -720,6 +720,50 @@ public class DatapathView extends AnchorPane {
                             "Calculates the address of the next sequential instruction.\n" +
                             "RISC-V uses 32-bit (4-byte) instructions, so PC increments by 4."));
         }
+
+        if (wirePcIm != null) {
+            Tooltip.install(wirePcIm,
+                    new Tooltip("Sends the current PC address to Instruction Memory to fetch the next instruction."));
+        }
+        if (wireImReg != null) {
+            Tooltip.install(wireImReg, new Tooltip("Sends instruction fields (rs1, rs2, rd) to the Register File."));
+        }
+        if (wireImImm != null) {
+            Tooltip.install(wireImImm,
+                    new Tooltip("Sends the instruction to the Immediate Generator to extract immediate values."));
+        }
+        if (wireRegAluA != null) {
+            Tooltip.install(wireRegAluA, new Tooltip("Carries the value of register 1 (rs1) to the ALU's A input."));
+        }
+        if (wireRegAluB != null) {
+            Tooltip.install(wireRegAluB, new Tooltip("Carries the value of register 2 (rs2) to the ALU's B input."));
+        }
+        if (wireImmAluB != null) {
+            Tooltip.install(wireImmAluB, new Tooltip("Carries the generated immediate value to the ALU's B input."));
+        }
+        if (wireAluDmAddr != null) {
+            Tooltip.install(wireAluDmAddr,
+                    new Tooltip("Sends the computed ALU result as an address to the Data Memory."));
+        }
+        if (wireRegDmData != null) {
+            Tooltip.install(wireRegDmData,
+                    new Tooltip("Carries the value of register 2 (rs2) to be written into Data Memory."));
+        }
+        if (wireDmMux != null) {
+            Tooltip.install(wireDmMux, new Tooltip("Carries data read from Data Memory to the Write-Back Mux."));
+        }
+        if (wireAluMux != null) {
+            Tooltip.install(wireAluMux,
+                    new Tooltip("Bypasses Data Memory, sending the ALU result directly to the Write-Back Mux."));
+        }
+        if (wireWbReg != null) {
+            Tooltip.install(wireWbReg,
+                    new Tooltip("Writes data back to the destination register (rd) in the Register File."));
+        }
+        if (wireImControl != null) {
+            Tooltip.install(wireImControl,
+                    new Tooltip("Sends the instruction opcode/funct fields to the Control Unit."));
+        }
     }
 
     private void setupZoomAndPan() {

@@ -34,10 +34,14 @@ public class GuiOutputStream extends OutputStream {
     public void write(int b) throws IOException {
         char c = (char) b;
 
-        Platform.runLater(() -> {
-            handleChar(c);
-            scrollToEnd();
-        });
+        try {
+            Platform.runLater(() -> {
+                handleChar(c);
+                scrollToEnd();
+            });
+        } catch (IllegalStateException e) {
+            // Ignore: Toolkit is shut down, don't try to log to GUI anymore
+        }
     }
 
     @Override

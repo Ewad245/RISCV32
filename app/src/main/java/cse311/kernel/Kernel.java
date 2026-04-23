@@ -171,6 +171,8 @@ public class Kernel {
         }
     }
 
+    private final List<Thread> kernelThreads = new ArrayList<>();
+
     /**
      * Start the kernel and eventually the APs
      */
@@ -183,28 +185,37 @@ public class Kernel {
         FileLogger.log(FileLogger.LogLevel.DEBUG, "Kernel starting...");
 
         // 1. Launch Maintenance Thread (Handles Interrupts/Timers)
-        new Thread(this::maintenanceLoop, "Kernel-Maintenance").start();
+        Thread maintThread = new Thread(this::maintenanceLoop, "Kernel-Maintenance");
+        maintThread.setDaemon(true);
+        maintThread.start();
+        kernelThreads.add(maintThread);
 
         // 2. Launch Bootstrap Processor (BSP) - Core 0
         RV32Cpu bsp = cpus.get(0);
-        new Thread(() -> {
+        Thread bspThread = new Thread(() -> {
             FileLogger.log(FileLogger.LogLevel.DEBUG, "BSP (Core 0) booting...");
             cpuRunLoop(bsp);
-        }, "CPU-Core-0").start();
+        }, "CPU-Core-0");
+        bspThread.setDaemon(true);
+        bspThread.start();
+        kernelThreads.add(bspThread);
 
         // Note: Application Processors (APs) are NOT started here.
         // They will be started by the BSP calling startOthers().
         // For simulation purposes, we will trigger this automatically after a short
         // delay
         // to mimic the BSP finishing its initialization.
-        new Thread(() -> {
+        Thread apStarterThread = new Thread(() -> {
             try {
                 Thread.sleep(1000); // Simulate BSP initialization time
                 startOthers();
             } catch (InterruptedException e) {
                 FileLogger.log(e);
             }
-        }).start();
+        });
+        apStarterThread.setDaemon(true);
+        apStarterThread.start();
+        kernelThreads.add(apStarterThread);
 
         // 4. Start heat decay timer for memory heatmap visualization
         heatDecayExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -226,16 +237,14 @@ public class Kernel {
     private void startOthers() {
         FileLogger.log(FileLogger.LogLevel.DEBUG,
                 "BSP: Starting Application Processors (APs)...");
-        // Set the flag to allow APs to proceed
         started = true;
 
-        // In simulation, we need to actually start the threads if they aren't already.
-        // But to better match the 'spin wait' logic, we could have started them earlier
-        // and let them spin.
-        // For now, adhering to the plan: we launch them here, and they check the flag.
         for (int i = 1; i < cpus.size(); i++) {
             RV32Cpu ap = cpus.get(i);
-            new Thread(() -> cpuRunLoop(ap), "CPU-Core-" + ap.getId()).start();
+            Thread apThread = new Thread(() -> cpuRunLoop(ap), "CPU-Core-" + ap.getId());
+            apThread.setDaemon(true);
+            apThread.start();
+            kernelThreads.add(apThread);
         }
     }
 
@@ -243,9 +252,18 @@ public class Kernel {
      * Stop the kernel
      */
     public void stop() {
+        running = false;
+        started = false;
+        for (RV32Cpu cpu : cpus) {
+            cpu.turnOff();
+        }
         if (heatDecayExecutor != null)
             heatDecayExecutor.shutdownNow();
-        running = false;
+        for (Thread t : kernelThreads) {
+            if (t != null && t.isAlive()) {
+                t.interrupt();
+            }
+        }
         FileLogger.log("Kernel stopped");
     }
 
@@ -300,6 +318,7 @@ public class Kernel {
 
                 if (currentTask == null) {
                     cpu.setCurrentTask(null);
+                    cpu.processorWasClocked.emit();
                     idle();
                     detectDeadlock();
                     continue;
@@ -392,7 +411,9 @@ public class Kernel {
                 if (task.getState() == TaskState.RUNNING) {
                     task.setState(TaskState.READY);
                 }
+                cpu.processorWasClocked.emit();
             } catch (Exception e) {
+                cpu.clearLastDecodedInstruction();
                 FileLogger.log("JavaTask " + task.getId() + " error: " + e.getMessage());
                 FileLogger.log(e);
                 task.setState(TaskState.TERMINATED);
@@ -422,10 +443,16 @@ public class Kernel {
                         // 1. Save state BEFORE handling syscall (Required for fork/wait to work)
                         task.saveState(cpu);
 
-                        // 2. Handle the syscall (which might change Task state, like exec)
+                        // 2. Clear decoded instruction so UI doesn't show stale ecall state
+                        cpu.clearLastDecodedInstruction();
+
+                        // 3. Handle the syscall (which might change Task state, like exec)
                         handleSystemCall(task, cpu);
 
-                        // 3. Mark that we have already saved/handled the state.
+                        // 4. Emit signal so UI sees the cleared state
+                        cpu.processorWasClocked.emit();
+
+                        // 5. Mark that we have already saved/handled the state.
                         // This prevents the code below the loop from overwriting
                         // changes made by 'exec' (like the new PC).
                         stateSavedBySyscall = true;
@@ -434,20 +461,31 @@ public class Kernel {
 
                     // Check if task hit a breakpoint or exception
                     if (cpu.isException()) {
+                        cpu.clearLastDecodedInstruction();
+                        cpu.processorWasClocked.emit();
                         handleException(task);
                         break;
                     }
 
                     if (task.isKilled()) {
+                        cpu.clearLastDecodedInstruction();
+                        cpu.processorWasClocked.emit();
                         task.setState(TaskState.TERMINATED);
                         break;
                     }
 
+                    // Emit UI signal after each normal instruction (state is clean)
+                    cpu.processorWasClocked.emit();
+
                 } catch (BreakpointException e) {
+                    cpu.clearLastDecodedInstruction();
+                    cpu.processorWasClocked.emit();
                     FileLogger.log("Kernel: " + e.getMessage());
                     this.pause();
                     break;
                 } catch (Exception e) {
+                    cpu.clearLastDecodedInstruction();
+                    cpu.processorWasClocked.emit();
                     FileLogger.log("Task " + task.getId() + " error: " + e.getMessage());
                     task.setState(TaskState.TERMINATED);
                     break;
