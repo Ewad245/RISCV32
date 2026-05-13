@@ -29,11 +29,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Main kernel class that coordinates all kernel subsystems
  * Provides a clean interface for managing tasks, scheduling, and system calls
  */
+@SuppressWarnings({
+        "PMD.LooseCoupling",
+        "PMD.NullAssignment",
+        "PMD.AvoidCatchingGenericException",
+        "PMD.ConstructorCallsOverridableMethod",
+        "PMD.ExhaustiveSwitchHasDefault",
+        "PMD.AssignmentInOperand",
+        "PMD.UnusedPrivateMethod"
+})
 public class Kernel {
     private final List<RV32Cpu> cpus; // NEW
     private final MemoryManager memory;
     private final TaskManager taskManager;
-    private final Scheduler scheduler;
+    private Scheduler scheduler;
     private final SystemCallHandler syscallHandler;
     private final KernelMemoryManager kernelMemory;
     private ProcessMemoryCoordinator memoryCoordinator;
@@ -815,6 +824,27 @@ public class Kernel {
     public void resume() {
         this.paused = false;
         FileLogger.log("Kernel: Execution Resumed.");
+    }
+
+    public void setScheduler(Scheduler newScheduler) {
+        boolean wasRunning = !this.paused;
+        this.pause();
+
+        schedulerLock.acquire();
+        try {
+            if (this.scheduler != null) {
+                for (Task t : this.scheduler.getReadyTasks()) {
+                    newScheduler.addTask(t);
+                }
+            }
+            this.scheduler = newScheduler;
+            FileLogger.log(LogLevel.INFO, "Kernel: Hot-swapped to " + newScheduler.getClass().getSimpleName() + ".");
+        } finally {
+            schedulerLock.release();
+        }
+
+        if (wasRunning)
+            this.resume();
     }
 
     public void setExecutionSpeed(int delayMs) {

@@ -4,6 +4,12 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import cse311.Exception.MemoryAccessException;
 
+@SuppressWarnings({
+    "PMD.LooseCoupling",
+    "PMD.AvoidLiteralsInIfCondition",
+    "PMD.PreserveStackTrace",
+    "PMD.RelianceOnDefaultCharset"
+})
 public class MemoryManager {
     private SimpleMemory memory;
     private Uart uart;

@@ -23,6 +23,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+@SuppressWarnings("PMD.AvoidLiteralsInIfCondition")
 public class MemoryView extends Pane {
 
     private final MemoryManager memory;
@@ -48,10 +49,11 @@ public class MemoryView extends Pane {
     private static final Color LOCALITY_POOR = Color.web("#C0392B");
 
     // Fonts
-    private static final Font METRIC_FONT = Font.font("Segoe UI", 13);
-    private static final Font GAUGE_VALUE_FONT = Font.font("Segoe UI", FontWeight.BOLD, 13);
-    private static final Font GAUGE_WARN_FONT = Font.font("Segoe UI", 11);
-    private static final Font STRIP_FONT = Font.font("Segoe UI", 11);
+    private static final String FONT_FAMILY = "Segoe UI";
+    private static final Font METRIC_FONT = Font.font(FONT_FAMILY, 13);
+    private static final Font GAUGE_VALUE_FONT = Font.font(FONT_FAMILY, FontWeight.BOLD, 13);
+    private static final Font GAUGE_WARN_FONT = Font.font(FONT_FAMILY, 11);
+    private static final Font STRIP_FONT = Font.font(FONT_FAMILY, 11);
 
     public MemoryView(MemoryManager memory, ProcessMemoryCoordinator coordinator) {
         this.memory = memory;
@@ -130,7 +132,7 @@ public class MemoryView extends Pane {
         // Color the fragmentation label by severity
         gc.setFill(fragIndex >= 70 ? FRAG_RED
                 : fragIndex >= 40 ? FRAG_AMBER
-                : FRAG_GREEN);
+                        : FRAG_GREEN);
         gc.fillText(fragStr, 10 + 2 * w / 3, 18);
 
         // --- Draw tape bar ---
@@ -168,14 +170,14 @@ public class MemoryView extends Pane {
     }
 
     private void drawFragGauge(GraphicsContext gc, double cx, double cy,
-                               double r, double fragPct) {
+            double r, double fragPct) {
         gc.setLineWidth(14);
         gc.setLineCap(StrokeLineCap.BUTT);
 
         // Zone arcs: green 0-40%, amber 40-70%, red 70-100%
-        drawArc(gc, cx, cy, r, 180, 72, FRAG_GREEN);   // 40% of 180°
-        drawArc(gc, cx, cy, r, 252, 54, FRAG_AMBER);   // 30% of 180°
-        drawArc(gc, cx, cy, r, 306, 54, FRAG_RED);      // 30% of 180°
+        drawArc(gc, cx, cy, r, 180, 72, FRAG_GREEN); // 40% of 180°
+        drawArc(gc, cx, cy, r, 252, 54, FRAG_AMBER); // 30% of 180°
+        drawArc(gc, cx, cy, r, 306, 54, FRAG_RED); // 30% of 180°
 
         // Needle
         double angle = Math.toRadians(180 + (fragPct / 100.0) * 180);
@@ -184,7 +186,7 @@ public class MemoryView extends Pane {
 
         Color nColor = fragPct >= 70 ? FRAG_RED
                 : fragPct >= 40 ? FRAG_NEEDLE_AMBER
-                : FRAG_NEEDLE_GREEN;
+                        : FRAG_NEEDLE_GREEN;
 
         gc.setStroke(nColor);
         gc.setLineWidth(3);
@@ -207,7 +209,7 @@ public class MemoryView extends Pane {
     }
 
     private void drawArc(GraphicsContext gc, double cx, double cy, double r,
-                         double startDeg, double sweepDeg, Color color) {
+            double startDeg, double sweepDeg, Color color) {
         gc.setStroke(color);
         gc.strokeArc(cx - r, cy - r, r * 2, r * 2,
                 -startDeg, -sweepDeg,
@@ -285,7 +287,8 @@ public class MemoryView extends Pane {
 
         gc.setFill(Color.BLACK);
         gc.fillText(
-                "Paging Mode: " + totalFrames + " Frames (4KB each)  |  Solid = Has Data, Hollow = Allocated but Empty  |  Brightness = Access Heat",
+                "Paging Mode: " + totalFrames
+                        + " Frames (4KB each)  |  Solid = Has Data, Hollow = Allocated but Empty  |  Brightness = Access Heat",
                 10, 20);
 
         // Draw locality strips below the frame grid
@@ -293,8 +296,8 @@ public class MemoryView extends Pane {
     }
 
     private void drawLocalityStrips(GraphicsContext gc, double w, double h,
-                                    FrameOwner[] frames, int totalFrames,
-                                    double gridBottom) {
+            FrameOwner[] frames, int totalFrames,
+            double gridBottom) {
         // Collect frame indices per PID
         Map<Integer, List<Integer>> pidFrames = new LinkedHashMap<>();
         for (int i = 0; i < totalFrames; i++) {
@@ -304,7 +307,8 @@ public class MemoryView extends Pane {
             }
         }
 
-        if (pidFrames.isEmpty()) return;
+        if (pidFrames.isEmpty())
+            return;
 
         // Sort by frame count descending (most significant processes first)
         List<Map.Entry<Integer, List<Integer>>> sorted = new ArrayList<>(pidFrames.entrySet());
@@ -359,7 +363,7 @@ public class MemoryView extends Pane {
             String badge = locality >= 80 ? "Good" : locality >= 50 ? "Moderate" : "Poor";
             gc.setFill(locality >= 80 ? LOCALITY_GOOD
                     : locality >= 50 ? LOCALITY_MODERATE
-                    : LOCALITY_POOR);
+                            : LOCALITY_POOR);
             gc.fillText(badge + String.format(" %.0f%%", locality),
                     barX + (minF / (double) totalFrames) * barW +
                             (span / (double) totalFrames) * barW + 4,

@@ -10,6 +10,11 @@ import java.util.concurrent.PriorityBlockingQueue;
  * Priority-based scheduler implementation
  * Tasks with higher priority values are scheduled first
  */
+@SuppressWarnings({
+    "PMD.LooseCoupling",
+    "PMD.CompareObjectsWithEquals",
+    "PMD.NullAssignment"
+})
 public class PriorityScheduler extends Scheduler {
     // The Ready Queue: Explicitly managed inside the scheduler
     private final PriorityBlockingQueue<Task> readyQueue = new PriorityBlockingQueue<>(

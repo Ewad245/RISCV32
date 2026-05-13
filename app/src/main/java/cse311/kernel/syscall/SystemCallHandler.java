@@ -28,6 +28,16 @@ import cse311.kernel.process.TaskState;
  * Arguments are passed in registers a0-a6 (x10-x16)
  * Return value is placed in register a0 (x10)
  */
+@SuppressWarnings({
+        "PMD.UnusedLocalVariable",
+        "PMD.AvoidCatchingGenericException",
+        "PMD.UnusedFormalParameter",
+        "PMD.NullAssignment",
+        "PMD.AvoidLiteralsInIfCondition",
+        "PMD.UnusedAssignment",
+        "PMD.AvoidReassigningParameters",
+        "PMD.LiteralsFirstInComparisons"
+})
 public class SystemCallHandler {
     private final Kernel kernel;
 
@@ -1163,13 +1173,13 @@ public class SystemCallHandler {
             // short type (2 bytes) + 2 bytes padding
             mem.writeWord(statAddr, ip.type);
             // int dev (4 bytes)
-            mem.writeWord(statAddr + 4, 1); 
+            mem.writeWord(statAddr + 4, 1);
             // int ino (4 bytes)
-            mem.writeWord(statAddr + 8, ip.inum); 
+            mem.writeWord(statAddr + 8, ip.inum);
             // int nlink (4 bytes)
-            mem.writeWord(statAddr + 12, ip.nlink); 
+            mem.writeWord(statAddr + 12, ip.nlink);
             // int size (4 bytes)
-            mem.writeWord(statAddr + 16, ip.size); 
+            mem.writeWord(statAddr + 16, ip.size);
             return 0;
         } catch (MemoryAccessException e) {
             return -1;

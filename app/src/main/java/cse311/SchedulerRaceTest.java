@@ -17,6 +17,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Test to reproduce and verify fix for scheduler race condition.
  * Simulates multiple threads (CPUs/ISRs) adding the same task simultaneously.
  */
+@SuppressWarnings({
+    "PMD.TestClassWithoutTestCases",
+    "PMD.AvoidCatchingGenericException",
+    "PMD.CompareObjectsWithEquals"
+})
 public class SchedulerRaceTest {
 
     public static void main(String[] args) {

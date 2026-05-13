@@ -17,13 +17,14 @@ import javafx.scene.text.Font;
 import java.util.ArrayList;
 import java.util.List;
 
+@SuppressWarnings("PMD.LooseCoupling")
 public class HexMemoryView extends VBox {
 
     private final MemoryManager memory;
     private final ListView<Integer> listView;
     private volatile byte[] memorySnapshot;
-    private final ArrayList<Integer> allAddresses;
-    private volatile ArrayList<Integer> nonZeroAddresses;
+    private final List<Integer> allAddresses;
+    private volatile List<Integer> nonZeroAddresses;
     private final ObservableList<Integer> displayedItems;
     private boolean hideZeroRows = false;
 
@@ -85,7 +86,7 @@ public class HexMemoryView extends VBox {
         // Take snapshot and compute non-zero addresses in background
         Thread computeThread = new Thread(() -> {
             byte[] snapshot = memory.getByteMemory().clone();
-            ArrayList<Integer> nonZero = computeNonZeroAddresses(snapshot);
+            ArrayList<Integer> nonZero = (ArrayList<Integer>) computeNonZeroAddresses(snapshot);
 
             // Update on FX thread
             Platform.runLater(() -> {
@@ -98,8 +99,8 @@ public class HexMemoryView extends VBox {
         computeThread.start();
     }
 
-    private ArrayList<Integer> computeNonZeroAddresses(byte[] mem) {
-        ArrayList<Integer> nonZero = new ArrayList<>();
+    private List<Integer> computeNonZeroAddresses(byte[] mem) {
+        List<Integer> nonZero = new ArrayList<>();
         int memSize = mem.length;
 
         for (int addr = 0; addr < memSize; addr += 16) {

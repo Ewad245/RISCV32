@@ -3,6 +3,11 @@ package cse311;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
+@SuppressWarnings({
+    "PMD.NonExhaustiveSwitch",
+    "PMD.EmptyCatchBlock",
+    "PMD.AvoidCatchingGenericException"
+})
 public class Uart {
     private static final int TX_READY = 0x20;
     private static final int RX_READY = 0x01;

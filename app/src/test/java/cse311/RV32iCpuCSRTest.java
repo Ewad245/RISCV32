@@ -4,6 +4,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+@SuppressWarnings({
+        "PMD.JUnit5TestShouldBePackagePrivate",
+        "PMD.UnitTestContainsTooManyAsserts",
+        "PMD.SystemPrintln"
+})
 public class RV32iCpuCSRTest {
     private RV32Cpu cpu;
     private MemoryManager memory;

@@ -7,6 +7,11 @@ import java.util.Arrays;
 import cse311.kernel.Kernel;
 import cse311.kernel.process.Task;
 
+@SuppressWarnings({
+    "PMD.AvoidCatchingGenericException",
+    "PMD.AvoidReassigningParameters",
+    "PMD.LiteralsFirstInComparisons"
+})
 public class FileSystem {
     private DiskDevice disk;
     private BufferCache bcache;

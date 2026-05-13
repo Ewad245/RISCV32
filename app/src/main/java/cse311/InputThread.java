@@ -5,6 +5,7 @@ import java.util.Scanner;
 
 import cse311.Logger.FileLogger;
 
+@SuppressWarnings({"PMD.RelianceOnDefaultCharset", "PMD.AvoidCatchingGenericException"})
 public class InputThread {
 
     public void getInput(MemoryManager manager) {

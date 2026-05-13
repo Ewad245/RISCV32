@@ -11,6 +11,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import cse311.kernel.NonContiguous.paging.ClockPolicy;
 
+@SuppressWarnings({
+        "PMD.JUnit5TestShouldBePackagePrivate",
+        "PMD.UnitTestContainsTooManyAsserts",
+        "PMD.UnitTestAssertionsShouldIncludeMessage",
+        "PMD.SystemPrintln",
+        "PMD.AvoidCatchingGenericException",
+        "PMD.AvoidPrintStackTrace"
+})
 public class PagingRaceConditionTest {
 
     @Test

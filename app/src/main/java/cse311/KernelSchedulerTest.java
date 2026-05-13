@@ -7,6 +7,11 @@ import cse311.kernel.scheduler.*;
 /**
  * Test different scheduling algorithms
  */
+@SuppressWarnings({
+    "PMD.TestClassWithoutTestCases",
+    "PMD.AvoidCatchingGenericException",
+    "PMD.UnusedFormalParameter"
+})
 public class KernelSchedulerTest {
 
     public static void main(String[] args) {

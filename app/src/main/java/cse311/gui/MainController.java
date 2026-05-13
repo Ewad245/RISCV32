@@ -2,18 +2,53 @@ package cse311.gui;
 
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
-import javafx.scene.control.*;
-import javafx.scene.layout.*;
 import java.net.URL;
 import java.util.ResourceBundle;
 
 import cse311.kernel.Kernel;
 import cse311.RV32Computer;
-import cse311.RV32Cpu;
+import cse311.gui.components.AssemblyView;
+import cse311.gui.components.ConsoleView;
+import cse311.gui.components.CpuView;
+import cse311.gui.components.DatapathView;
+import cse311.gui.components.HexMemoryView;
+import cse311.gui.components.MemoryView;
+import cse311.gui.components.SchedulerView;
+import cse311.gui.components.SidebarView;
 import cse311.kernel.process.Task;
-import cse311.gui.components.*;
+import cse311.kernel.plugin.PluginLoader;
+import cse311.kernel.scheduler.Scheduler;
+import cse311.kernel.contiguous.AllocationStrategy;
+import cse311.kernel.contiguous.ContiguousMemoryManager;
+import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
+import cse311.kernel.NonContiguous.paging.ReplacementPolicy;
+import cse311.kernel.NonContiguous.paging.DemandPager;
+import cse311.MemoryManager;
 import javafx.animation.AnimationTimer;
+import javafx.stage.FileChooser;
+import javafx.scene.control.TextInputDialog;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.Button;
+import javafx.scene.control.Label;
+import javafx.scene.control.Slider;
+import javafx.scene.control.SplitPane;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.layout.VBox;
+import javafx.scene.layout.StackPane;
+import javafx.scene.layout.Priority;
+import javafx.application.Platform;
+import java.io.File;
+import java.util.Optional;
 
+@SuppressWarnings({
+        "PMD.AvoidDuplicateLiterals",
+        "PMD.AvoidCatchingGenericException",
+        "PMD.RelianceOnDefaultCharset",
+        "PMD.AvoidLiteralsInIfCondition"
+})
 public class MainController implements Initializable {
 
     // Inject items from FXML using their fx:id
@@ -49,6 +84,7 @@ public class MainController implements Initializable {
     private SplitPane dashboardPane;
 
     private final Kernel kernel;
+    @SuppressWarnings("PMD.UnusedPrivateField")
     private final RV32Computer computer;
 
     // Sub-components (Logic remains in Java)
@@ -60,6 +96,10 @@ public class MainController implements Initializable {
 
     private SidebarView sidebarView;
     private ConsoleView consoleView;
+
+    // Placeholders for dynamic AssemblyView switching (Option B)
+    private VBox[] dashboardAssemblyContainers;
+    private VBox[] datapathAssemblyContainers;
 
     public MainController(Kernel kernel, RV32Computer computer) {
         this.kernel = kernel;
@@ -100,22 +140,239 @@ public class MainController implements Initializable {
         kernel.resume();
     }
 
+    @SuppressWarnings("PMD.UnusedPrivateMethod")
+    @FXML
+    private void onNewSimulationClicked() {
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.INFO, "New Simulation clicked - placeholder");
+
+        Alert alert = new Alert(AlertType.INFORMATION);
+        alert.setTitle("Not Implemented");
+        alert.setHeaderText("New Simulation");
+        alert.setContentText("This feature is not yet implemented.");
+        alert.showAndWait();
+    }
+
+    @SuppressWarnings("PMD.UnusedPrivateMethod")
+    @FXML
+    private void onExitClicked() {
+        kernel.stop();
+        Platform.exit();
+    }
+
+    @SuppressWarnings("PMD.UnusedPrivateMethod")
+    @FXML
+    private void onAboutClicked() {
+        Alert alert = new Alert(AlertType.INFORMATION);
+        alert.setTitle("About");
+        alert.setHeaderText("RISC-V OS Simulator");
+        alert.setContentText("Designed for CSE311.\nSupports dynamic algorithm hot-swapping.");
+        alert.showAndWait();
+    }
+
+    @FXML
+    public void onImportSchedulerClicked() {
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Select Custom Scheduler JAR");
+        fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("JAR Files", "*.jar"));
+
+        File selectedFile = fileChooser.showOpenDialog(btnPause.getScene().getWindow());
+
+        if (selectedFile != null) {
+            TextInputDialog dialog = new TextInputDialog("MyScheduler");
+            dialog.setTitle("Class Name");
+            dialog.setHeaderText("Enter the fully qualified class name:");
+            dialog.setContentText("Class Name:");
+
+            Optional<String> result = dialog.showAndWait();
+            result.ifPresent(className -> {
+                try {
+                    Scheduler customScheduler = PluginLoader.loadCustomScheduler(selectedFile, className);
+                    kernel.setScheduler(customScheduler);
+
+                    Alert alert = new Alert(AlertType.INFORMATION);
+                    alert.setTitle("Success");
+                    alert.setHeaderText("Scheduler Loaded");
+                    alert.setContentText("Successfully loaded and activated: " + className);
+                    alert.showAndWait();
+                } catch (Exception e) {
+                    if (cse311.Logger.FileLogger.isLoggable(cse311.Logger.FileLogger.LogLevel.ERROR))
+                        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                                "Failed to load plugin: " + e.getMessage());
+
+                    Alert alert = new Alert(AlertType.ERROR);
+                    alert.setTitle("Error");
+                    alert.setHeaderText("Failed to Load Scheduler");
+                    alert.setContentText("Error: " + e.getMessage());
+                    alert.showAndWait();
+                }
+            });
+        }
+    }
+
+    @SuppressWarnings("PMD.UnusedPrivateMethod")
+    @FXML
+    private void onImportMemoryAllocatorClicked() {
+        MemoryManager currentMemory = kernel.getMemory();
+
+        if (!(currentMemory instanceof ContiguousMemoryManager)) {
+            Alert alert = new Alert(AlertType.WARNING);
+            alert.setTitle("Mode Mismatch");
+            alert.setHeaderText("Cannot Load Allocator");
+            alert.setContentText(
+                    "The simulator is currently running in Paging mode. Allocation strategies only apply to Contiguous memory mode.");
+            alert.showAndWait();
+            return;
+        }
+
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Select Custom Memory Allocator JAR");
+        fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("JAR Files", "*.jar"));
+        File selectedFile = fileChooser.showOpenDialog(btnPause.getScene().getWindow());
+
+        if (selectedFile != null) {
+            TextInputDialog dialog = new TextInputDialog("cse311.student.WorstFitStrategy");
+            dialog.setTitle("Plugin Class Name");
+            dialog.setHeaderText("Enter the fully qualified class name:");
+            dialog.setContentText("Class Name:");
+
+            Optional<String> result = dialog.showAndWait();
+            result.ifPresent(className -> {
+                try {
+                    AllocationStrategy customAllocator = PluginLoader.loadCustomAllocator(selectedFile, className);
+
+                    boolean wasRunning = !kernel.isPaused();
+                    kernel.pause();
+
+                    ((ContiguousMemoryManager) currentMemory).setAllocationStrategy(customAllocator);
+
+                    if (wasRunning)
+                        kernel.resume();
+
+                    Alert success = new Alert(AlertType.INFORMATION);
+                    success.setTitle("Success");
+                    success.setHeaderText("Allocator Loaded");
+                    success.setContentText("Successfully hot-swapped memory allocator to: " + className);
+                    success.showAndWait();
+                } catch (Exception e) {
+                    if (cse311.Logger.FileLogger.isLoggable(cse311.Logger.FileLogger.LogLevel.ERROR))
+                        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                                "Failed to load allocator plugin: " + e.getMessage());
+
+                    Alert alert = new Alert(AlertType.ERROR);
+                    alert.setTitle("Import Error");
+                    alert.setHeaderText("Failed to load plugin");
+                    alert.setContentText(e.getMessage());
+                    alert.showAndWait();
+                }
+            });
+        }
+    }
+
+    @SuppressWarnings("PMD.UnusedPrivateMethod")
+    @FXML
+    private void onImportPageReplacementClicked() {
+        MemoryManager currentMemory = kernel.getMemory();
+
+        if (!(currentMemory instanceof PagedMemoryManager)) {
+            Alert alert = new Alert(AlertType.WARNING);
+            alert.setTitle("Mode Mismatch");
+            alert.setHeaderText("Cannot Load Policy");
+            alert.setContentText(
+                    "The simulator is currently running in Contiguous mode. Page replacement policies only apply to Paging mode.");
+            alert.showAndWait();
+            return;
+        }
+
+        PagedMemoryManager pmm = (PagedMemoryManager) currentMemory;
+
+        FileChooser fileChooser = new FileChooser();
+        fileChooser.setTitle("Select Custom Page Replacement JAR");
+        fileChooser.getExtensionFilters().add(new FileChooser.ExtensionFilter("JAR Files", "*.jar"));
+        File selectedFile = fileChooser.showOpenDialog(btnPause.getScene().getWindow());
+
+        if (selectedFile != null) {
+            TextInputDialog dialog = new TextInputDialog("cse311.student.FIFOPolicy");
+            dialog.setTitle("Plugin Class Name");
+            dialog.setHeaderText("Enter the fully qualified class name:");
+            dialog.setContentText("Class Name:");
+
+            Optional<String> result = dialog.showAndWait();
+            result.ifPresent(className -> {
+                try {
+                    ReplacementPolicy customPolicy = PluginLoader.loadCustomReplacementPolicy(selectedFile, className);
+
+                    DemandPager newPager = new DemandPager(pmm, customPolicy);
+
+                    boolean wasRunning = !kernel.isPaused();
+                    kernel.pause();
+
+                    pmm.setPager(newPager);
+
+                    if (wasRunning)
+                        kernel.resume();
+
+                    Alert success = new Alert(AlertType.INFORMATION);
+                    success.setTitle("Success");
+                    success.setHeaderText("Policy Loaded");
+                    success.setContentText("Successfully hot-swapped page replacement to: " + className);
+                    success.showAndWait();
+                } catch (Exception e) {
+                    if (cse311.Logger.FileLogger.isLoggable(cse311.Logger.FileLogger.LogLevel.ERROR))
+                        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                                "Failed to load page replacement plugin: " + e.getMessage());
+
+                    Alert alert = new Alert(AlertType.ERROR);
+                    alert.setTitle("Import Error");
+                    alert.setHeaderText("Failed to load plugin");
+                    alert.setContentText(e.getMessage());
+                    alert.showAndWait();
+                }
+            });
+        }
+    }
+
     private void initializeDashboard() {
         // Logic to create CpuViews and add them to the FXML-injected 'cpuTabs'
         int coreCount = kernel.getConfig().getCoreCount();
         cpuViews = new CpuView[coreCount];
         assemblyViews = new AssemblyView[coreCount];
+        dashboardAssemblyContainers = new VBox[coreCount];
 
         for (int i = 0; i < coreCount; i++) {
             var cpu = kernel.getCpu(i);
             cpuViews[i] = new CpuView(cpu);
             assemblyViews[i] = new AssemblyView(cpu, kernel.getMemory());
 
-            VBox hartLayout = new VBox(10, cpuViews[i], new Separator(), new Label("Instruction Stream"),
-                    assemblyViews[i]);
-            VBox.setVgrow(assemblyViews[i], Priority.ALWAYS);
+            // Create placeholder container for this core's AssemblyView in Dashboard
+            dashboardAssemblyContainers[i] = new VBox();
+            VBox.setVgrow(dashboardAssemblyContainers[i], Priority.ALWAYS);
 
-            Tab tab = new Tab("Hart " + i, hartLayout);
+            // Initialize with AssemblyView in Dashboard by default
+            dashboardAssemblyContainers[i].getChildren().setAll(assemblyViews[i]);
+
+            // 1. Wrap the CPU Registers in a ScrollPane so they don't force a massive
+            // height
+            ScrollPane cpuScroll = new ScrollPane(cpuViews[i]);
+            cpuScroll.setFitToWidth(true); // Keeps your responsive grid wrapping active
+
+            // 2. Use a vertical SplitPane instead of a standard VBox
+            SplitPane hartSplit = new SplitPane();
+            hartSplit.setOrientation(javafx.geometry.Orientation.VERTICAL);
+
+            // Top half: CPU Registers
+            VBox topHalf = new VBox(5, cpuScroll);
+            VBox.setVgrow(cpuScroll, Priority.ALWAYS);
+
+            // Bottom half: Assembly View (initialized in Dashboard by default)
+            VBox bottomHalf = new VBox(5, new Label("Instruction Stream"), dashboardAssemblyContainers[i]);
+            VBox.setVgrow(dashboardAssemblyContainers[i], Priority.ALWAYS);
+
+            // Add both halves to the SplitPane and set default sizes (e.g., 40% top, 60%
+            // bottom)
+            hartSplit.getItems().addAll(topHalf, bottomHalf);
+            hartSplit.setDividerPositions(0.4);
+
+            Tab tab = new Tab("Hart " + i, hartSplit);
             tab.setClosable(false);
             cpuTabs.getTabs().add(tab);
         }
@@ -140,34 +397,47 @@ public class MainController implements Initializable {
     private TabPane datapathTabs;
 
     private DatapathView[] datapathViews;
-    private AssemblyView[] datapathAssemblyViews;
+    // We'll reuse the dashboard assemblyViews instead of creating separate
+    // instances
+    // This allows dynamic switching via Option B
 
     private void initializeDatapath() {
         int coreCount = kernel.getConfig().getCoreCount();
         datapathViews = new DatapathView[coreCount];
-        datapathAssemblyViews = new AssemblyView[coreCount];
+        datapathAssemblyContainers = new VBox[coreCount];
 
         for (int i = 0; i < coreCount; i++) {
             var cpu = kernel.getCpu(i);
             datapathViews[i] = new DatapathView(cpu);
-            datapathAssemblyViews[i] = new AssemblyView(cpu, kernel.getMemory());
 
-            VBox datapathContainer = new VBox(10, new Label("CPU Datapath"), datapathViews[i]);
-            VBox.setVgrow(datapathViews[i], Priority.ALWAYS);
-            datapathContainer.getStyleClass().add("datapath-root");
+            // Create placeholder container for this core's AssemblyView in Datapath
+            datapathAssemblyContainers[i] = new VBox();
+            VBox.setVgrow(datapathAssemblyContainers[i], Priority.ALWAYS);
 
-            VBox assemblyContainer = new VBox(10, new Label("Assembly Stream"), datapathAssemblyViews[i]);
-            VBox.setVgrow(datapathAssemblyViews[i], Priority.ALWAYS);
+            // 1. Wrap the large Datapath diagram in a ScrollPane
+            ScrollPane datapathScroll = new ScrollPane(datapathViews[i]);
+            datapathScroll.setPannable(true); // Lets you click and drag to pan around the diagram
+            datapathScroll.setFitToHeight(true);
+            datapathScroll.setFitToWidth(true);
 
-            SplitPane split = new SplitPane(datapathContainer, assemblyContainer);
-            split.setDividerPositions(0.7);
+            // 2. Create the SplitPane with HORIZONTAL orientation (side-by-side)
+            SplitPane datapathSplit = new SplitPane();
+            datapathSplit.setOrientation(javafx.geometry.Orientation.HORIZONTAL);
 
-            Tab tab = new Tab("Hart " + i, split);
+            // 3. Add the scrollable diagram and assembly placeholder
+            datapathSplit.getItems().addAll(datapathScroll, datapathAssemblyContainers[i]);
+
+            // 4. Give the diagram 70% of the space and the assembly view 30%
+            datapathSplit.setDividerPositions(0.7);
+
+            Tab tab = new Tab("Hart " + i, datapathSplit);
             tab.setClosable(false);
+
             datapathTabs.getTabs().add(tab);
         }
     }
 
+    @SuppressWarnings("PMD.CloseResource")
     private void initializeConsole() {
         consoleView = new ConsoleView(kernel.getMemory());
         consoleView.setPrefHeight(200);
@@ -190,23 +460,63 @@ public class MainController implements Initializable {
 
     private void initializeSidebar() {
         sidebarView = new SidebarView(view -> {
-            // Hide all first
-            dashboardPane.setVisible(false);
-            datapathTabs.setVisible(false);
-            memoryTabContainer.setVisible(false);
+            int coreCount = kernel.getConfig().getCoreCount();
 
-            if (view.equals("dashboard")) {
+            // Teleport AssemblyViews to the correct location based on navigation
+            if ("dashboard".equals(view)) {
+                // 1. Teleport Assembly Views to the Dashboard
+                for (int i = 0; i < coreCount; i++) {
+                    if (assemblyViews[i] != null) {
+                        // Clear from datapath container
+                        if (datapathAssemblyContainers[i] != null) {
+                            datapathAssemblyContainers[i].getChildren().clear();
+                        }
+                        // Add to dashboard container
+                        if (dashboardAssemblyContainers[i] != null) {
+                            dashboardAssemblyContainers[i].getChildren().setAll(assemblyViews[i]);
+                        }
+                    }
+                }
+
+                // 2. Show Dashboard
+                hideAllViews();
                 dashboardPane.setVisible(true);
                 dashboardPane.toFront();
-            } else if (view.equals("datapath")) {
+
+            } else if ("datapath".equals(view)) {
+                // 1. Teleport Assembly Views to the Datapath
+                for (int i = 0; i < coreCount; i++) {
+                    if (assemblyViews[i] != null) {
+                        // Clear from dashboard container
+                        if (dashboardAssemblyContainers[i] != null) {
+                            dashboardAssemblyContainers[i].getChildren().clear();
+                        }
+                        // Add to datapath container
+                        if (datapathAssemblyContainers[i] != null) {
+                            datapathAssemblyContainers[i].getChildren().setAll(assemblyViews[i]);
+                        }
+                    }
+                }
+
+                // 2. Show Datapath
+                hideAllViews();
                 datapathTabs.setVisible(true);
                 datapathTabs.toFront();
-            } else if (view.equals("memory")) {
+
+            } else if ("memory".equals(view)) {
+                // Memory view doesn't need AssemblyView, just hide everything
+                hideAllViews();
                 memoryTabContainer.setVisible(true);
                 memoryTabContainer.toFront();
             }
         });
         sidebarContainer.getChildren().add(sidebarView);
+    }
+
+    private void hideAllViews() {
+        dashboardPane.setVisible(false);
+        datapathTabs.setVisible(false);
+        memoryTabContainer.setVisible(false);
     }
 
     private void startUpdateLoop() {
@@ -234,7 +544,11 @@ public class MainController implements Initializable {
             // Refresh Dashboard sub-views
             for (int i = 0; i < cpuViews.length; i++) {
                 cpuViews[i].update();
-                assemblyViews[i].update();
+                // AssemblyView is updated via the container it's in
+                if (dashboardAssemblyContainers[i] != null &&
+                        !dashboardAssemblyContainers[i].getChildren().isEmpty()) {
+                    assemblyViews[i].update();
+                }
 
                 // Update Tab Title with PID
                 Task task = kernel.getCpu(i).getCurrentTask();
@@ -248,7 +562,11 @@ public class MainController implements Initializable {
         if (datapathTabs.isVisible()) {
             for (int i = 0; i < datapathViews.length; i++) {
                 datapathViews[i].update();
-                datapathAssemblyViews[i].update();
+                // Update AssemblyView if it's in the datapath container
+                if (datapathAssemblyContainers[i] != null &&
+                        !datapathAssemblyContainers[i].getChildren().isEmpty()) {
+                    assemblyViews[i].update();
+                }
             }
         }
 

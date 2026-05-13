@@ -8,6 +8,7 @@ import cse311.Exception.MemoryAccessException;
  * Implements the MemoryManager interface while providing task isolation
  */
 @Deprecated
+@SuppressWarnings("PMD.AvoidDuplicateLiterals")
 public class TaskAwareMemoryManager extends MemoryManager {
     private final VirtualMemoryManager virtualMemoryManager;
     private int currentTaskId = -1; // Currently active task

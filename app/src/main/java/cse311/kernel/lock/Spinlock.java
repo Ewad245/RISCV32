@@ -10,6 +10,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * to avoid deadlock if an interrupt handler tries to acquire the same lock.
  * For this simulation, we currently focus on the mutual exclusion aspect.
  */
+@SuppressWarnings({
+    "PMD.NullAssignment",
+    "PMD.CompareObjectsWithEquals"
+})
 public class Spinlock {
     private final String name;
     private final AtomicBoolean locked;

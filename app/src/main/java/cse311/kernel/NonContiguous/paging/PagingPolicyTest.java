@@ -6,6 +6,7 @@ import cse311.Exception.MemoryAccessException;
  * Test class to verify paging policy abstraction works correctly
  * with the new 2-level page table structure.
  */
+@SuppressWarnings({"PMD.TestClassWithoutTestCases", "PMD.AvoidCatchingGenericException"})
 public class PagingPolicyTest {
     public static void main(String[] args) {
         try {

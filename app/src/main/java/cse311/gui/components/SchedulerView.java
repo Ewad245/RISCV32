@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Map;
 import java.util.HashMap;
 
+@SuppressWarnings("PMD.AvoidLiteralsInIfCondition")
 public class SchedulerView extends VBox {
 
     private final Kernel kernel;

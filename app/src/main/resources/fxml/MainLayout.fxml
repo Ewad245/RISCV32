@@ -3,6 +3,10 @@
 <?import javafx.geometry.Insets?>
 <?import javafx.scene.control.Button?>
 <?import javafx.scene.control.Label?>
+<?import javafx.scene.control.Menu?>
+<?import javafx.scene.control.MenuBar?>
+<?import javafx.scene.control.MenuItem?>
+<?import javafx.scene.control.SeparatorMenuItem?>
 <?import javafx.scene.control.Separator?>
 <?import javafx.scene.control.Slider?>
 <?import javafx.scene.control.SplitPane?>
@@ -16,18 +20,40 @@
             fx:controller="cse311.gui.MainController">
 
     <top>
-        <HBox spacing="10" style="-fx-background-color: #ddd; -fx-border-color: #bbb; -fx-border-width: 0 0 1 0;">
-            <padding>
-                <Insets top="10" right="10" bottom="10" left="10"/>
-            </padding>
-            <Button fx:id="btnPause" text="Pause" onAction="#handlePause"/>
-            <Button fx:id="btnResume" text="Resume" onAction="#handleResume"/>
-            <Separator orientation="VERTICAL"/>
-            <Label text="Delay (ms):"/>
-            <Slider fx:id="speedSlider" min="0" max="500" showTickLabels="true" showTickMarks="true" majorTickUnit="100"/>
-            <Separator orientation="VERTICAL"/>
-            <Label fx:id="lblStatus" text="Status: Running"/>
-        </HBox>
+        <VBox>
+            <MenuBar>
+                <Menu text="File">
+                    <MenuItem text="New Simulation" onAction="#onNewSimulationClicked" />
+                    <SeparatorMenuItem />
+                    <MenuItem text="Exit" onAction="#onExitClicked" />
+                </Menu>
+
+                <Menu text="Plugins">
+                    <MenuItem text="Import Custom Scheduler..." onAction="#onImportSchedulerClicked" />
+                    <MenuItem text="Import Custom Memory Allocator..." onAction="#onImportMemoryAllocatorClicked" />
+                    <MenuItem text="Import Page Replacement Policy..." onAction="#onImportPageReplacementClicked" />
+                    <SeparatorMenuItem />
+                    <MenuItem text="Manage Plugins" disable="true" />
+                </Menu>
+
+                <Menu text="Help">
+                    <MenuItem text="About CSE311 Simulator" onAction="#onAboutClicked" />
+                </Menu>
+            </MenuBar>
+
+            <HBox spacing="10" style="-fx-background-color: #ddd; -fx-border-color: #bbb; -fx-border-width: 0 0 1 0;">
+                <padding>
+                    <Insets top="10" right="10" bottom="10" left="10"/>
+                </padding>
+                <Button fx:id="btnPause" text="Pause" onAction="#handlePause"/>
+                <Button fx:id="btnResume" text="Resume" onAction="#handleResume"/>
+                <Separator orientation="VERTICAL"/>
+                <Label text="Delay (ms):"/>
+                <Slider fx:id="speedSlider" min="0" max="500" showTickLabels="true" showTickMarks="true" majorTickUnit="100"/>
+                <Separator orientation="VERTICAL"/>
+                <Label fx:id="lblStatus" text="Status: Running"/>
+            </HBox>
+        </VBox>
     </top>
 
     <left>

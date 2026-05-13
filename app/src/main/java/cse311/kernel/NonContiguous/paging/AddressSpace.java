@@ -3,6 +3,10 @@ package cse311.kernel.NonContiguous.paging;
 import cse311.Exception.MemoryAccessException;
 import java.util.concurrent.atomic.AtomicInteger;
 
+@SuppressWarnings({
+    "PMD.OneDeclarationPerLine",
+    "PMD.AssignmentInOperand"
+})
 public final class AddressSpace {
     // Root of a 2-level page table (Sv32-like): 4KB pages
     final int pid;

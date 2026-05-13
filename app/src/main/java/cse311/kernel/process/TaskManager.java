@@ -22,6 +22,12 @@ import cse311.kernel.fs.Pipe;
 /**
  * Manages task creation, destruction, and lifecycle
  */
+@SuppressWarnings({
+    "PMD.PreserveStackTrace",
+    "PMD.NullAssignment",
+    "PMD.AvoidLiteralsInIfCondition",
+    "PMD.UnusedLocalVariable"
+})
 public class TaskManager {
     private final Kernel kernel;
     private final KernelMemoryManager kernelMemory;

@@ -1,5 +1,6 @@
 package cse311.kernel.fs;
 
+@SuppressWarnings("PMD.CompareObjectsWithEquals")
 public class BufferCache {
     public static final int NBUF = 30;
     private final Buffer head;

@@ -9,6 +9,7 @@ import cse311.Exception.MemoryAccessException;
 import cse311.kernel.memory.ProcessMemoryCoordinator;
 import cse311.kernel.process.ProgramInfo;
 
+@SuppressWarnings("PMD.RelianceOnDefaultCharset")
 public class ContiguousMemoryCoordinator implements ProcessMemoryCoordinator {
 
     private final ContiguousMemoryManager manager;

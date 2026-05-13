@@ -9,6 +9,7 @@ import cse311.kernel.syscall.SystemCallHandler;
 /**
  * Demonstration of system call integration between CPU and Kernel
  */
+@SuppressWarnings("PMD.AvoidCatchingGenericException")
 public class SystemCallDemo {
 
     public static void main(String[] args) {

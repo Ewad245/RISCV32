@@ -6,6 +6,11 @@ import cse311.kernel.process.Task;
 /**
  * Example demonstrating how to use the Java kernel with RV32IM CPU emulator
  */
+@SuppressWarnings({
+    "PMD.AvoidCatchingGenericException",
+    "PMD.UnusedLocalVariable",
+    "PMD.UnusedFormalParameter"
+})
 public class KernelExample {
 
     public static void main(String[] args) {

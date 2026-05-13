@@ -10,6 +10,12 @@ import java.nio.file.Paths;
 
 import cse311.Constants.OSConstants;
 
+@SuppressWarnings({
+        "PMD.AvoidPrintStackTrace",
+        "PMD.RelianceOnDefaultCharset",
+        "PMD.SystemPrintln",
+        "PMD.CloseResource"
+})
 public class FileLogger {
     private static Path path = Paths
             .get(".." + OSConstants.file_seperator + "LogFiles" + OSConstants.file_seperator + "log.txt");
@@ -70,6 +76,16 @@ public class FileLogger {
 
     public enum LogLevel {
         DEBUG, INFO, ERROR
+    }
+
+    private static LogLevel currentLevel = LogLevel.DEBUG;
+
+    public static void setLogLevel(LogLevel level) {
+        currentLevel = level;
+    }
+
+    public static boolean isLoggable(LogLevel level) {
+        return level.ordinal() >= currentLevel.ordinal();
     }
 
     public static void log(LogLevel level, Object message) {

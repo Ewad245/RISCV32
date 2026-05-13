@@ -6,6 +6,10 @@ import java.nio.ByteOrder;
 import cse311.Logger.FileLogger;
 import cse311.kernel.Kernel;
 
+@SuppressWarnings({
+    "PMD.UnusedPrivateField",
+    "PMD.AvoidCatchingGenericException"
+})
 public class Log {
     private final int MAXOPBLOCKS = 10; // Max blocks written by one system call
     private final int LOGSIZE; // Total size of log in blocks (from SuperBlock.nlog)

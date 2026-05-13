@@ -2,7 +2,6 @@ package cse311.gui;
 
 import cse311.RV32Computer;
 import cse311.Constants.MemoryMode;
-import cse311.Constants.OSConstants;
 import cse311.Logger.FileLogger;
 import cse311.kernel.Kernel;
 import cse311.kernel.KernelConfig;
@@ -16,6 +15,7 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Paths;
 
+@SuppressWarnings("PMD.AvoidCatchingGenericException")
 public class GuiApp extends Application {
 
     private static RV32Computer computer;
@@ -48,7 +48,6 @@ public class GuiApp extends Application {
         primaryStage.setOnCloseRequest(e -> {
             kernel.stop();
             Platform.exit();
-            System.exit(0);
         });
 
         // 4. Start Kernel (in background)
@@ -83,32 +82,38 @@ public class GuiApp extends Application {
         File diskImage = new File(imgPath);
         if (diskImage.exists()) {
             kernel.mountFileSystem(imgPath);
-            FileLogger.log("GUI: Disk image '" + imgPath + "' mounted.");
+            if (FileLogger.isLoggable(FileLogger.LogLevel.INFO))
+                FileLogger.log("GUI: Disk image '" + imgPath + "' mounted.");
         } else {
-            FileLogger.log(FileLogger.LogLevel.INFO,
-                    "GUI: fs.img not found at " + imgPath + ". File system calls will fail.");
+            if (FileLogger.isLoggable(FileLogger.LogLevel.INFO))
+                FileLogger.log(FileLogger.LogLevel.INFO,
+                        "GUI: fs.img not found at " + imgPath + ". File system calls will fail.");
         }
 
         // LAUNCH INIT PROCESS
         // Use user_programs folder inside resources
         String resourcePath = "user_programs/init";
 
-        URL resourceUrl = getClass().getClassLoader().getResource(resourcePath);
+        URL resourceUrl = Thread.currentThread().getContextClassLoader().getResource(resourcePath);
         String elfPath = Paths.get(resourceUrl.toURI()).toString();
         File f = new File(elfPath);
 
-        FileLogger.log(FileLogger.LogLevel.DEBUG,
-                "GUI: Looking for Init ELF at: " + f.getAbsolutePath());
+        if (FileLogger.isLoggable(FileLogger.LogLevel.DEBUG))
+            FileLogger.log(FileLogger.LogLevel.DEBUG,
+                    "GUI: Looking for Init ELF at: " + f.getAbsolutePath());
 
         if (f.exists()) {
             try {
-                FileLogger.log(FileLogger.LogLevel.DEBUG,
-                        "GUI: Found init.elf. Creating task...");
+                if (FileLogger.isLoggable(FileLogger.LogLevel.DEBUG))
+                    FileLogger.log(FileLogger.LogLevel.DEBUG,
+                            "GUI: Found init.elf. Creating task...");
                 kernel.createTask(elfPath);
-                FileLogger.log("GUI: Init task created (PID 1).");
+                if (FileLogger.isLoggable(FileLogger.LogLevel.DEBUG))
+                    FileLogger.log("GUI: Init task created (PID 1).");
             } catch (Exception e) {
-                FileLogger.log(FileLogger.LogLevel.ERROR,
-                        "GUI: Failed to create Init task: " + e.getMessage());
+                if (FileLogger.isLoggable(FileLogger.LogLevel.ERROR))
+                    FileLogger.log(FileLogger.LogLevel.ERROR,
+                            "GUI: Failed to create Init task: " + e.getMessage());
                 FileLogger.log(e);
             }
         } else {
@@ -117,16 +122,20 @@ public class GuiApp extends Application {
             File oldFile = new File(oldPath);
             if (oldFile.exists()) {
                 try {
-                    FileLogger.log("GUI: Using legacy ELF path: " + oldPath);
+                    if (FileLogger.isLoggable(FileLogger.LogLevel.DEBUG))
+                        FileLogger.log("GUI: Using legacy ELF path: " + oldPath);
                     kernel.createTask(oldPath);
-                    FileLogger.log("GUI: Init task created from legacy path.");
+                    if (FileLogger.isLoggable(FileLogger.LogLevel.DEBUG))
+                        FileLogger.log("GUI: Init task created from legacy path.");
                 } catch (Exception e) {
-                    FileLogger.log(FileLogger.LogLevel.ERROR,
-                            "GUI: Failed to create Init task: " + e.getMessage());
+                    if (FileLogger.isLoggable(FileLogger.LogLevel.ERROR))
+                        FileLogger.log(FileLogger.LogLevel.ERROR,
+                                "GUI: Failed to create Init task: " + e.getMessage());
                 }
             } else {
-                FileLogger.log(FileLogger.LogLevel.ERROR,
-                        "GUI: Error - init.elf NOT FOUND at " + f.getAbsolutePath());
+                if (FileLogger.isLoggable(FileLogger.LogLevel.ERROR))
+                    FileLogger.log(FileLogger.LogLevel.ERROR,
+                            "GUI: Error - init.elf NOT FOUND at " + f.getAbsolutePath());
             }
         }
     }

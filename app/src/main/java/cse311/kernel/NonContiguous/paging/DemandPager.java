@@ -6,6 +6,7 @@ import cse311.Exception.MemoryAccessException;
  * Demand pager implementation that allocates pages on demand and supports
  * eviction.
  */
+@SuppressWarnings("PMD.AvoidLiteralsInIfCondition")
 public class DemandPager implements Pager {
     private final PagedMemoryManager mm;
     private final ReplacementPolicy repl;

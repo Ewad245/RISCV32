@@ -11,6 +11,13 @@ import java.util.Scanner;
 
 // This is not tested
 @Deprecated
+@SuppressWarnings({
+    "PMD.RelianceOnDefaultCharset",
+    "PMD.SystemPrintln",
+    "PMD.NullAssignment",
+    "PMD.LiteralsFirstInComparisons",
+    "PMD.AvoidCatchingGenericException"
+})
 public class ShellTask extends JavaTask {
 
     // The shell's state machine

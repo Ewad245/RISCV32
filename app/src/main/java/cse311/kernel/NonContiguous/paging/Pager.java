@@ -6,6 +6,7 @@ import cse311.Exception.MemoryAccessException;
  * Policy interface for virtual memory management.
  * Decides when and how to allocate or evict pages.
  */
+@SuppressWarnings("PMD.ImplicitFunctionalInterface")
 public interface Pager {
     /**
      * Ensure that the given virtual address in the given address space

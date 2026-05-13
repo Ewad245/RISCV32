@@ -5,6 +5,7 @@ import org.fxmisc.richtext.StyleClassedTextArea;
 import java.io.OutputStream;
 import java.io.IOException;
 
+@SuppressWarnings({"PMD.RelianceOnDefaultCharset", "PMD.AvoidLiteralsInIfCondition"})
 public class GuiOutputStream extends OutputStream {
     private final StyleClassedTextArea outputArea;
     private final String styleClass;

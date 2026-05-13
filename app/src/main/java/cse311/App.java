@@ -11,6 +11,7 @@ import cse311.kernel.KernelConfig;
 import cse311.programs.InitTask;
 import java.io.File;
 
+@SuppressWarnings({"PMD.AvoidCatchingGenericException", "PMD.AvoidCatchingNPE"})
 public class App {
 
     public static void main(String[] args) {

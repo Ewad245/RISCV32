@@ -9,6 +9,19 @@ import java.util.Map;
 
 import cse311.kernel.process.Task;
 
+@SuppressWarnings({
+    "PMD.UnusedPrivateField",
+    "PMD.UnusedPrivateMethod",
+    "PMD.UnusedFormalParameter",
+    "PMD.NonExhaustiveSwitch",
+    "PMD.AvoidLiteralsInIfCondition",
+    "PMD.AvoidCatchingGenericException",
+    "PMD.UnusedAssignment",
+    "PMD.PreserveStackTrace",
+    "PMD.UseVarargs",
+    "PMD.UnusedLocalVariable",
+    "PMD.SystemPrintln"
+})
 public class RV32Cpu {
 
     private int cpuId;

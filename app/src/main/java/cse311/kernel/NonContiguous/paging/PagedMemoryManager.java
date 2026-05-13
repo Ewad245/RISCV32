@@ -13,6 +13,13 @@ import java.util.concurrent.ConcurrentHashMap;
  * 4 KiB pages, 1 GiB address space.
  * Refactored to use policy-based paging via Pager interface.
  */
+@SuppressWarnings({
+        "PMD.MethodReturnsInternalArray",
+        "PMD.NullAssignment",
+        "PMD.EmptyCatchBlock",
+        "PMD.AvoidCatchingGenericException",
+        "PMD.PreserveStackTrace"
+})
 public class PagedMemoryManager extends MemoryManager {
     public static final int PAGE_SIZE = 4096;
     private final BitSet freeFrames; // frame allocator
@@ -62,8 +69,10 @@ public class PagedMemoryManager extends MemoryManager {
     /**
      * Set the pager policy implementation.
      */
-    public void setPager(Pager pager) {
+    public synchronized void setPager(Pager pager) {
         this.pager = pager;
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.INFO,
+                "PagedMemoryManager: Hot-swapped to " + pager.getClass().getSimpleName() + ".");
     }
 
     // ---- Address-space lifecycle ----

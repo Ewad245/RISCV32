@@ -13,9 +13,11 @@ import java.util.List;
 import cse311.ElfLoader;
 
 /**
+ * Non-contiguous memory coordinator for paged memory management
  * Handles ALL non-contiguous techniques (Paging, Segmentation).
  * Delegates the specific mapping logic to a 'mapper'.
  */
+@SuppressWarnings("PMD.RelianceOnDefaultCharset")
 public class NonContiguousMemoryCoordinator implements ProcessMemoryCoordinator {
 
     private final NonContiguousMemoryMapper mapper;

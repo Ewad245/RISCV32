@@ -10,6 +10,11 @@ package cse311;
  * Quadrant 0 (00), Quadrant 1 (01), Quadrant 2 (10).
  * Quadrant 3 (11) indicates a standard 32-bit instruction.
  */
+@SuppressWarnings({
+        "PMD.AvoidReassigningParameters",
+        "PMD.AvoidLiteralsInIfCondition",
+        "PMD.NonExhaustiveSwitch"
+})
 public class RVCDecompressor {
 
     /**

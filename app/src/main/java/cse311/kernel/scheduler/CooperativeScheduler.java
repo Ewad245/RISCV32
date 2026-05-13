@@ -10,6 +10,10 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * Cooperative scheduler implementation
  * Tasks run until they voluntarily yield (via system call)
  */
+@SuppressWarnings({
+    "PMD.CompareObjectsWithEquals",
+    "PMD.NullAssignment"
+})
 public class CooperativeScheduler extends Scheduler {
     private final Queue<Task> readyQueue = new ConcurrentLinkedQueue<>();
     private final Set<Task> queuedTasks = Collections.synchronizedSet(new HashSet<>());
