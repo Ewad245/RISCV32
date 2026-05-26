@@ -281,7 +281,7 @@ public class Kernel {
                 // ------------------------------------------------------------
                 // 1. EXECUTION CONTROL (Pause / Speed)
                 // ------------------------------------------------------------
-                while (paused) {
+                while (paused && running) {
                     try {
                         Thread.sleep(100);
                     } catch (InterruptedException e) {

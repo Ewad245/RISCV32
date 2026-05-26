@@ -10,17 +10,17 @@ import java.util.Map;
 import cse311.kernel.process.Task;
 
 @SuppressWarnings({
-    "PMD.UnusedPrivateField",
-    "PMD.UnusedPrivateMethod",
-    "PMD.UnusedFormalParameter",
-    "PMD.NonExhaustiveSwitch",
-    "PMD.AvoidLiteralsInIfCondition",
-    "PMD.AvoidCatchingGenericException",
-    "PMD.UnusedAssignment",
-    "PMD.PreserveStackTrace",
-    "PMD.UseVarargs",
-    "PMD.UnusedLocalVariable",
-    "PMD.SystemPrintln"
+        "PMD.UnusedPrivateField",
+        "PMD.UnusedPrivateMethod",
+        "PMD.UnusedFormalParameter",
+        "PMD.NonExhaustiveSwitch",
+        "PMD.AvoidLiteralsInIfCondition",
+        "PMD.AvoidCatchingGenericException",
+        "PMD.UnusedAssignment",
+        "PMD.PreserveStackTrace",
+        "PMD.UseVarargs",
+        "PMD.UnusedLocalVariable",
+        "PMD.SystemPrintln"
 })
 public class RV32Cpu {
 
@@ -316,7 +316,6 @@ public class RV32Cpu {
     }
 
     public void turnOn() {
-        Runnable task1 = () -> input.getInput(memory);
         /*
          * this.cpuThread = new Thread(new Runnable() {
          * 
@@ -334,7 +333,12 @@ public class RV32Cpu {
          * }
          * });
          */
-        new Thread(task1).start();
+
+        Thread inputThread = new Thread(() -> {
+            input.getInput(memory);
+        });
+        inputThread.setDaemon(true);
+        inputThread.start();
         this.running = true;
         // this.cpuThread.start();
     }
