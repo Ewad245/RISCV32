@@ -4,6 +4,9 @@ FROM eclipse-temurin:17-jdk-jammy AS build
 # Set the working directory inside the container
 WORKDIR /app
 
+# Install unzip
+RUN apt-get update && apt-get install -y unzip && rm -rf /var/lib/apt/lists/*
+
 # Copy gradle wrapper and related files
 COPY gradlew .
 COPY gradle/ gradle/
