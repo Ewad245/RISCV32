@@ -10,7 +10,7 @@ COPY gradle/ gradle/
 RUN chmod +x gradlew
 
 # Copy build configuration files
-COPY build.gradle settings.gradle ./
+COPY settings.gradle ./
 COPY app/build.gradle app/
 COPY example-plugins/build.gradle example-plugins/
 
