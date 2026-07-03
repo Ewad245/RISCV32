@@ -116,7 +116,7 @@ public class GuiApp extends Application {
         String file_separator = System.getProperty("file.separator");
         FileLogger.log("GUI: Initializing Simulation Hardware in " + mode + " mode...");
 
-        computer = new RV32Computer(1024 * 1024 * 12, Integer.MAX_VALUE, mode);
+        computer = new RV32Computer(1024 * 1024 * 8, Integer.MAX_VALUE, mode);
         kernel = computer.getKernel();
 
         // KERNEL CONFIGURATION
