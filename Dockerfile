@@ -1,5 +1,5 @@
 # Stage 1: Build the JPro distribution using Gradle
-FROM eclipse-temurin:21-jdk-jammy AS build
+FROM eclipse-temurin:24-jdk-jammy AS build
 
 # Set the working directory inside the container
 WORKDIR /app
@@ -33,7 +33,7 @@ RUN mkdir /app/unpacked && \
     mv /app/unpacked/*/* /app/unpacked/
 
 # Stage 2: Create the runtime environment
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:24-jre-alpine
 
 # Install necessary libraries for JavaFX
 RUN apk add --no-cache \
