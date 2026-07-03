@@ -1,5 +1,5 @@
 # Stage 1: Build the JPro distribution using Gradle
-FROM eclipse-temurin:24-jdk-jammy AS build
+FROM eclipse-temurin:24-jdk AS build
 
 # Set the working directory inside the container
 WORKDIR /app
