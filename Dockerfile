@@ -46,6 +46,7 @@ RUN apk add --no-cache \
     alsa-lib \
     fontconfig \
     ttf-dejavu \
+    bash \
     unzip
 
 WORKDIR /app
@@ -61,4 +62,4 @@ EXPOSE 8080
 ENV JAVA_OPTS="-Xms128m -Xmx256m -XX:+UseSerialGC -XX:MaxRAMPercentage=50.0"
 
 # Run the JPro launch script
-CMD ["sh", "-c", "bin/start.sh -Djpro.port=${PORT:-8080}"]
+CMD ["bash", "-c", "bin/start.sh -Djpro.port=${PORT:-8080}"]
