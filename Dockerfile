@@ -24,26 +24,38 @@ COPY example-plugins/src/ example-plugins/src/
 # Build the JPro distribution zip
 RUN ./gradlew :app:jproRelease --no-daemon
 
+# Dynamically find the zip, unzip it, and flatten the directory structure
+RUN mkdir /app/unpacked && \
+    unzip /app/app/build/distributions/*-jpro.zip -d /app/unpacked && \
+    mv /app/unpacked/*/* /app/unpacked/
+
 # Stage 2: Create the runtime environment
-FROM eclipse-temurin:17-jre-jammy
+FROM eclipse-temurin:17-jre-alpine
 
 # Install necessary libraries for JavaFX
-RUN apt-get update && apt-get install -y \
-    libgtk-3-0 \
-    libgl1 \
-    libx11-6 \
-    libasound2 \
-    unzip \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache \
+    gtk+3.0 \
+    mesa-gl \
+    libx11 \
+    libxext \
+    libxrender \
+    libxtst \
+    alsa-lib \
+    fontconfig \
+    ttf-dejavu \
+    unzip
 
 WORKDIR /app
 
-# Extract the built distribution from the build stage
-COPY --from=build /app/app/build/distributions/app-jpro.zip /app/
-RUN unzip app-jpro.zip && rm app-jpro.zip && mv app-jpro/* . && rm -r app-jpro
+# Copy the clean, pre-extracted production files directly
+COPY --from=build /app/unpacked /app
 
 # Expose the default port
 EXPOSE 8080
+
+# Hard memory limits to prevent Render OOM crashes
+# -Xmx256m: Restricts the JVM heap to 256MB, leaving the remaining 256MB for off-heap/OS.
+ENV JAVA_OPTS="-Xms128m -Xmx256m -XX:+UseSerialGC -XX:MaxRAMPercentage=50.0"
 
 # Run the JPro launch script
 CMD ["sh", "-c", "bin/start.sh -Djpro.port=${PORT:-8080}"]
