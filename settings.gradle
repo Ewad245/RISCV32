@@ -4,6 +4,12 @@
  * The settings file is used to specify which projects to include in your build.
  * For more detailed information on multi-project builds, please refer to https://docs.gradle.org/8.8/userguide/multi_project_builds.html in the Gradle documentation.
  */
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = "https://sandec.jfrog.io/artifactory/repo" }
+    }
+}
 
 plugins {
     // Apply the foojay-resolver plugin to allow automatic download of JDKs
@@ -12,3 +18,4 @@ plugins {
 
 rootProject.name = 'CSE311'
 include('app')
+// include('example-plugins')

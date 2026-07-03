@@ -1,18 +1,19 @@
 package cse311.gui.components;
 
 import cse311.MemoryManager;
-import javafx.fxml.FXML;
 import javafx.fxml.FXMLLoader;
-import javafx.scene.input.KeyEvent;
-import org.fxmisc.richtext.StyleClassedTextArea;
 import javafx.scene.layout.VBox;
+import javafx.scene.layout.Priority;
+
+import com.techsenger.jeditermfx.ui.JediTermFxWidget;
+import com.techsenger.jeditermfx.ui.settings.DefaultSettingsProvider;
+import com.techsenger.jeditermfx.core.TtyConnector;
 
 import java.io.IOException;
 
 public class ConsoleView extends VBox {
 
-    @FXML
-    private StyleClassedTextArea outputArea;
+    private JediTermFxWidget terminalWidget;
 
     public ConsoleView(MemoryManager memory) {
         FXMLLoader loader = new FXMLLoader(getClass().getResource("/fxml/ConsoleView.fxml"));
@@ -25,80 +26,30 @@ public class ConsoleView extends VBox {
             throw new RuntimeException("Failed to load ConsoleView.fxml", e);
         }
 
-        // Keep editable true so the cursor/caret is visible
-        outputArea.setEditable(true);
-        outputArea.setStyle("-fx-font-family: 'Courier New';");
-
-        // Handle special keys via KEY_PRESSED (before KEY_TYPED)
-        outputArea.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
-            switch (event.getCode()) {
-                case BACK_SPACE:
-                    memory.getInput("\b");
-                    event.consume();
-                    break;
-                case DELETE:
-                    event.consume();
-                    break;
-                case ENTER:
-                    memory.getInput("\n");
-                    event.consume();
-                    break;
-                default:
-                    // Don't consume - let KEY_TYPED handle printable chars
-                    break;
-            }
-        });
-
-        // Handle regular character input via KEY_TYPED
-        outputArea.addEventFilter(KeyEvent.KEY_TYPED, event -> {
-            String character = event.getCharacter();
-
-            if (character == null || character.isEmpty()) {
-                event.consume();
-                return;
-            }
-
-            char c = character.charAt(0);
-
-            // Skip control characters - they are handled by KEY_PRESSED above
-            // Backspace (\b = 8), Tab (\t = 9), Enter/CR (\r = 13, \n = 10), etc.
-            if (c < 32 || c == 127) {
-                event.consume();
-                return;
-            }
-
-            // Send printable character to memory
-            memory.getInput(character);
-            event.consume();
-        });
+        // Initialize JediTermFX Terminal with hardcoded 80 columns, 24 lines per user request
+        terminalWidget = new JediTermFxWidget(80, 24, new DefaultSettingsProvider());
+        
+        VBox.setVgrow(terminalWidget.getPane(), Priority.ALWAYS);
+        this.getChildren().add(terminalWidget.getPane());
     }
 
-    /**
-     * Appends text with a specific style class.
-     * 
-     * @param text       The text to append
-     * @param styleClass The CSS style class to apply (e.g., "user-input",
-     *                   "kernel-error")
-     */
+    public void setTtyConnector(TtyConnector connector) {
+        terminalWidget.setTtyConnector(connector);
+        terminalWidget.start();
+    }
+
+    // Deprecated: Keeping to avoid breaking Kernel or other parts calling this temporarily
     public void appendText(String text, String styleClass) {
-        int start = outputArea.getLength();
-        outputArea.appendText(text);
-        int end = outputArea.getLength();
-        outputArea.setStyleClass(start, end, styleClass);
-        outputArea.moveTo(outputArea.getLength());
+        // Ignored. Use System.out
     }
 
-    /**
-     * Appends plain text without styling.
-     * 
-     * @param text The text to append
-     */
     public void appendText(String text) {
-        outputArea.appendText(text);
-        outputArea.moveTo(outputArea.getLength());
+        // Ignored. Use System.out
     }
 
-    public StyleClassedTextArea getOutputArea() {
-        return outputArea;
+    public void close() {
+        if (terminalWidget != null) {
+            terminalWidget.close();
+        }
     }
 }

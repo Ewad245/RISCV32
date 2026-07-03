@@ -1,0 +1,10 @@
+.git
+.gradle
+.idea
+.vscode
+build/
+app/build/
+example-plugins/build/
+*.class
+*.log
+.DS_Store

@@ -255,6 +255,9 @@ public class Kernel {
         if (heatDecayExecutor != null)
             heatDecayExecutor.shutdownNow();
         running = false;
+        for (RV32Cpu cpu : cpus) {
+            cpu.turnOff();
+        }
         FileLogger.log("Kernel stopped");
     }
 

@@ -5,23 +5,39 @@
  * For more details on building Java & JVM projects, please refer to https://docs.gradle.org/8.8/userguide/building_java_projects.html in the Gradle documentation.
  */
 
+buildscript {
+    repositories {
+        maven { url = "https://sandec.jfrog.io/artifactory/repo" }
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'one.jpro:jpro-gradle-plugin:2026.3.0'
+    }
+}
+
 plugins {
     // Apply the application plugin to add support for building a CLI application in Java.
     id 'application'
     id 'org.openjfx.javafxplugin' version '0.1.0'
     id 'pmd'
-    // id 'checkstyle'
-    // id 'com.github.spotbugs' version '6.0.18' 
 }
 
+apply plugin: 'jpro-gradle-plugin'
+
 javafx {
-    version = "21"
+    version = "17"
     modules = [ 'javafx.controls', 'javafx.fxml' ]
 }
 
 repositories {
     // Use Maven Central for resolving dependencies.
     mavenCentral()
+    maven {
+        url = "https://packages.jetbrains.team/maven/p/ij/intellij-dependencies"
+    }
+    maven {
+        url = "https://sandec.jfrog.io/artifactory/repo"
+    }
 }
 
 dependencies {
@@ -32,20 +48,22 @@ dependencies {
 
     // This dependency is used by the application.
     implementation libs.guava
-    implementation 'org.fxmisc.richtext:richtextfx:0.11.7'
+    implementation 'com.techsenger.jeditermfx:jeditermfx-core:1.1.0'
+    implementation 'com.techsenger.jeditermfx:jeditermfx-ui:1.1.0'
+    
+    // JPro dependency for WebAPI (ignored on desktop)
+    implementation 'one.jpro:jpro-webapi:2026.3.0'
 }
 
 // Apply a specific Java toolchain to ease working on different environments.
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
+        languageVersion = JavaLanguageVersion.of(17)
     }
 }
 
 application {
     // Define the main class for the application.
-    // mainClass = 'cse311.App'
-    // Swapped to GuiApp for JavaFX
     mainClass = 'cse311.gui.GuiApp'
 }
 

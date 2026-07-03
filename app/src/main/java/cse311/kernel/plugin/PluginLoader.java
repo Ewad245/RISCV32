@@ -3,6 +3,7 @@ package cse311.kernel.plugin;
 import java.io.File;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.util.ServiceLoader;
 
 import cse311.Logger.FileLogger;
 import cse311.Logger.FileLogger.LogLevel;
@@ -11,56 +12,53 @@ import cse311.kernel.contiguous.AllocationStrategy;
 import cse311.kernel.scheduler.Scheduler;
 
 @SuppressWarnings("PMD.UseProperClassLoader")
-public class PluginLoader {
+public final class PluginLoader {
 
-    public static Scheduler loadCustomScheduler(File jarFile, String className) throws Exception {
-        URL[] urls = { jarFile.toURI().toURL() };
-
-        try (URLClassLoader loader = new URLClassLoader(urls, PluginLoader.class.getClassLoader())) {
-
-            Class<?> loadedClass = Class.forName(className, true, loader);
-
-            if (Scheduler.class.isAssignableFrom(loadedClass)) {
-                try {
-                    return (Scheduler) loadedClass.getDeclaredConstructor(int.class).newInstance(3);
-                } catch (NoSuchMethodException e) {
-                    FileLogger.log(LogLevel.DEBUG,
-                            "PluginLoader: No int constructor found, trying no-arg constructor.");
-                    return (Scheduler) loadedClass.getDeclaredConstructor().newInstance();
-                }
-            } else {
-                throw new IllegalArgumentException(
-                        "The provided class does not extend cse311.kernel.scheduler.Scheduler");
-            }
-        }
+    private PluginLoader() {
+        // Utility class
     }
 
-    public static AllocationStrategy loadCustomAllocator(File jarFile, String className) throws Exception {
+    /**
+     * Loads the first SPI implementation of the given service interface from a JAR.
+     *
+     * @param jarFile          the plugin JAR
+     * @param serviceInterface the SPI interface or abstract class
+     * @param <T>              the service type
+     * @return the first discovered implementation
+     * @throws IllegalArgumentException if no implementation is found
+     * @throws Exception                if the JAR cannot be read or the service cannot be instantiated
+     */
+    public static <T> T loadPlugin(File jarFile, Class<T> serviceInterface) throws Exception {
         URL[] urls = { jarFile.toURI().toURL() };
 
         try (URLClassLoader loader = new URLClassLoader(urls, PluginLoader.class.getClassLoader())) {
-            Class<?> loadedClass = Class.forName(className, true, loader);
+            ServiceLoader<T> serviceLoader = ServiceLoader.load(serviceInterface, loader);
 
-            if (AllocationStrategy.class.isAssignableFrom(loadedClass)) {
-                return (AllocationStrategy) loadedClass.getDeclaredConstructor().newInstance();
-            } else {
-                throw new IllegalArgumentException("Class does not implement cse311.kernel.contiguous.AllocationStrategy");
+            java.util.Iterator<T> iterator = serviceLoader.iterator();
+            if (iterator.hasNext()) {
+                T implementation = iterator.next();
+                FileLogger.log(LogLevel.DEBUG,
+                        "PluginLoader: Loaded " + serviceInterface.getSimpleName()
+                                + " implementation: " + implementation.getClass().getName());
+                return implementation;
             }
         }
+
+        throw new IllegalArgumentException(
+                "No implementation found for " + serviceInterface.getName()
+                        + " in " + jarFile.getName()
+                        + ". Ensure the JAR contains META-INF/services/" + serviceInterface.getName());
     }
 
-    public static ReplacementPolicy loadCustomReplacementPolicy(File jarFile, String className) throws Exception {
-        URL[] urls = { jarFile.toURI().toURL() };
+    public static Scheduler loadCustomScheduler(File jarFile) throws Exception {
+        return loadPlugin(jarFile, Scheduler.class);
+    }
 
-        try (URLClassLoader loader = new URLClassLoader(urls, PluginLoader.class.getClassLoader())) {
-            Class<?> loadedClass = Class.forName(className, true, loader);
+    public static AllocationStrategy loadCustomAllocator(File jarFile) throws Exception {
+        return loadPlugin(jarFile, AllocationStrategy.class);
+    }
 
-            if (ReplacementPolicy.class.isAssignableFrom(loadedClass)) {
-                return (ReplacementPolicy) loadedClass.getDeclaredConstructor().newInstance();
-            } else {
-                throw new IllegalArgumentException(
-                        "Class does not implement cse311.kernel.NonContiguous.paging.ReplacementPolicy");
-            }
-        }
+    public static ReplacementPolicy loadCustomReplacementPolicy(File jarFile) throws Exception {
+        return loadPlugin(jarFile, ReplacementPolicy.class);
     }
 }

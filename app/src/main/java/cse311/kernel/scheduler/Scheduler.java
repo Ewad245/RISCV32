@@ -11,8 +11,19 @@ import cse311.kernel.process.Task;
 public abstract class Scheduler {
     protected int timeSlice;
 
+    /**
+     * Creates a scheduler with the given time slice.
+     */
     public Scheduler(int timeSlice) {
         this.timeSlice = timeSlice;
+    }
+
+    /**
+     * Protected no-arg constructor for SPI plugin implementations.
+     * The time slice must be set via {@link #setTimeSlice(int)} before use.
+     */
+    protected Scheduler() {
+        this.timeSlice = 1;
     }
 
     /**

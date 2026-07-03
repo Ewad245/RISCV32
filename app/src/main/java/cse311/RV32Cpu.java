@@ -90,6 +90,7 @@ public class RV32Cpu {
     private Scanner reader;
     private Thread cpuThread;
     private boolean running = false;
+    private Thread inputThread;
     private InputThread input;
 
     // Track Current Task (for GUI/Observability)
@@ -170,7 +171,7 @@ public class RV32Cpu {
      * @param accessType The access type (CSR_READ_WRITE, CSR_READ_SET,
      *                   CSR_READ_CLEAR)
      * @return The previous CSR value, or 0 if the CSR is not accessible in the
-     *         current privilege mode
+     *         privilege mode
      */
     private int writeCSR(int csrAddress, int value, int accessType) {
         // Check if the CSR is accessible in the current privilege mode
@@ -334,7 +335,7 @@ public class RV32Cpu {
          * });
          */
 
-        Thread inputThread = new Thread(() -> {
+        inputThread = new Thread(() -> {
             input.getInput(memory);
         });
         inputThread.setDaemon(true);
@@ -1050,6 +1051,13 @@ public class RV32Cpu {
 
         // Hardwired zero register x[0] must always be 0
         x[0] = 0;
+    }
+
+    public void turnOff() {
+        this.running = false;
+        if (this.inputThread != null) {
+            this.inputThread.interrupt();
+        }
     }
 
     private void handleQemuSemihosting() {
