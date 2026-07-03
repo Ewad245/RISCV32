@@ -59,7 +59,7 @@ EXPOSE 8080
 
 # Hard memory limits to prevent Render OOM crashes
 # -Xmx256m: Restricts the JVM heap to 256MB, leaving the remaining 256MB for off-heap/OS.
-ENV JAVA_OPTS="-Xms128m -Xmx256m -XX:+UseSerialGC -XX:MaxRAMPercentage=50.0"
+ENV JAVA_OPTS="-Xms128m -Xmx256m -XX:+UseSerialGC -XX:MaxRAMPercentage=50.0 -Dglass.platform=Monocle -Dheadless=true -Djava.awt.headless=true"
 
 # Run the JPro launch script
 CMD ["bash", "-c", "bin/start.sh -Djpro.port=${PORT:-8080}"]
