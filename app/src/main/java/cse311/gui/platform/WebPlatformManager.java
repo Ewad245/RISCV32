@@ -82,8 +82,36 @@ public class WebPlatformManager implements PlatformManager {
                 }
                 
                 Consumer<File> onFile = file -> dialog.setResult(file);
-                uploaderObj.getClass().getMethod("setOnFileSelected", Consumer.class).invoke(uploaderObj, onFile);
-            } catch (NoSuchMethodException | IllegalAccessException | java.lang.reflect.InvocationTargetException e) {
+                
+                boolean methodFound = false;
+                for (java.lang.reflect.Method m : uploaderObj.getClass().getMethods()) {
+                    if (m.getName().equals("setOnFileSelected") && m.getParameterCount() == 1) {
+                        Class<?> paramType = m.getParameterTypes()[0];
+                        if (paramType == Consumer.class) {
+                            m.invoke(uploaderObj, onFile);
+                            methodFound = true;
+                            break;
+                        } else if (paramType.isInterface()) {
+                            Object proxy = java.lang.reflect.Proxy.newProxyInstance(
+                                paramType.getClassLoader(),
+                                new Class<?>[]{paramType},
+                                (p, method, args) -> {
+                                    if (args != null && args.length > 0 && args[0] instanceof File) {
+                                        onFile.accept((File) args[0]);
+                                    }
+                                    return null;
+                                }
+                            );
+                            m.invoke(uploaderObj, proxy);
+                            methodFound = true;
+                            break;
+                        }
+                    }
+                }
+                if (!methodFound) {
+                    java.util.logging.Logger.getLogger(WebPlatformManager.class.getName()).log(java.util.logging.Level.SEVERE, "Could not find setOnFileSelected method!");
+                }
+            } catch (Exception e) {
                 java.util.logging.Logger.getLogger(WebPlatformManager.class.getName()).log(java.util.logging.Level.SEVERE, "Failed to setup file upload", e);
             }
         }
