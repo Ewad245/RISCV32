@@ -83,7 +83,10 @@ public class WebPlatformManager implements PlatformManager {
                     java.util.logging.Logger.getLogger(WebPlatformManager.class.getName()).log(java.util.logging.Level.FINE, "Method setSelectFileOnClick not found", e);
                 }
                 
-                Consumer<File> onFile = file -> dialog.setResult(file);
+                Consumer<File> onFile = file -> {
+                    dialog.setResult(file);
+                    dialog.close();
+                };
                 
                 boolean methodFound = false;
                 for (java.lang.reflect.Method m : uploaderObj.getClass().getMethods()) {
@@ -98,8 +101,12 @@ public class WebPlatformManager implements PlatformManager {
                                 Thread.currentThread().getContextClassLoader(),
                                 new Class<?>[]{paramType},
                                 (p, method, args) -> {
-                                    if (args != null && args.length > 0 && args[0] instanceof File) {
-                                        onFile.accept((File) args[0]);
+                                    if (args != null && args.length > 0) {
+                                        if (args[0] instanceof File) {
+                                            onFile.accept((File) args[0]);
+                                        } else if (args[0] instanceof String) {
+                                            onFile.accept(new File((String) args[0]));
+                                        }
                                     }
                                     return null;
                                 }
