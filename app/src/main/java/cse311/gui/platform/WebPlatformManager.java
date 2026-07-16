@@ -68,6 +68,8 @@ public class WebPlatformManager implements PlatformManager {
         
         dialog.setResultConverter(dialogButton -> null);
         
+        dialog.show();
+        
         // We need the scene to be shown so WebAPI can attach to it, 
         // but JPro file uploader can wrap the button before it's shown if we use getWebAPIs
         WebAPI webAPI = WebAPI.getWebAPI(dialog.getOwner() != null ? dialog.getOwner() : (node != null && node.getScene() != null ? node.getScene().getWindow() : null));
@@ -85,12 +87,13 @@ public class WebPlatformManager implements PlatformManager {
                 
                 boolean methodFound = false;
                 for (java.lang.reflect.Method m : uploaderObj.getClass().getMethods()) {
+                    System.out.println("JPRO_DEBUG: Method " + m.getName() + " params " + java.util.Arrays.toString(m.getParameterTypes()));
                     if (m.getName().equals("setOnFileSelected") && m.getParameterCount() == 1) {
                         Class<?> paramType = m.getParameterTypes()[0];
                         if (paramType == Consumer.class) {
                             m.invoke(uploaderObj, onFile);
                             methodFound = true;
-                            break;
+                            // don't break yet, we want to print all methods
                         } else if (paramType.isInterface()) {
                             Object proxy = java.lang.reflect.Proxy.newProxyInstance(
                                 paramType.getClassLoader(),
@@ -104,7 +107,7 @@ public class WebPlatformManager implements PlatformManager {
                             );
                             m.invoke(uploaderObj, proxy);
                             methodFound = true;
-                            break;
+                            // don't break yet, print all methods
                         }
                     }
                 }
@@ -115,8 +118,6 @@ public class WebPlatformManager implements PlatformManager {
                 java.util.logging.Logger.getLogger(WebPlatformManager.class.getName()).log(java.util.logging.Level.SEVERE, "Failed to setup file upload", e);
             }
         }
-        
-        dialog.show();
         dialog.resultProperty().addListener((obs, oldVal, newVal) -> {
             if (newVal != null && onFileReady != null) {
                 onFileReady.accept(newVal);
