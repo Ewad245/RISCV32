@@ -54,6 +54,9 @@ public class WebPlatformManager implements PlatformManager {
         // Since it's often triggered from a MenuItem (which is not a Node), 
         // we create a custom Dialog with a Button that acts as the upload trigger.
         Dialog<File> dialog = new Dialog<>();
+        if (node != null && node.getScene() != null) {
+            dialog.initOwner(node.getScene().getWindow());
+        }
         dialog.setTitle(title);
         dialog.setHeaderText("Select file to upload (" + ext + ")");
         
@@ -65,7 +68,7 @@ public class WebPlatformManager implements PlatformManager {
         
         // We need the scene to be shown so WebAPI can attach to it, 
         // but JPro file uploader can wrap the button before it's shown if we use getWebAPIs
-        WebAPI webAPI = WebAPI.getWebAPI(dialog.getOwner());
+        WebAPI webAPI = WebAPI.getWebAPI(dialog.getOwner() != null ? dialog.getOwner() : (node != null && node.getScene() != null ? node.getScene().getWindow() : null));
         if (webAPI != null) {
             try {
                 Object uploaderObj = webAPI.getClass().getMethod("makeFileUploadNode", Node.class).invoke(webAPI, uploadBtn);
