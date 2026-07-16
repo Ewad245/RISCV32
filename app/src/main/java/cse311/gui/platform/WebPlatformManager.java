@@ -78,17 +78,16 @@ public class WebPlatformManager implements PlatformManager {
                 Object uploaderObj = webAPI.getClass().getMethod("makeFileUploadNode", Node.class).invoke(webAPI, uploadBtn);
                 
                 try {
-                    uploaderObj.getClass().getMethod("setSelectFileOnClick", boolean.class).invoke(uploaderObj, true);
+                    uploaderObj.getClass().getMethod("setSelectFileOnClick", Boolean.class).invoke(uploaderObj, Boolean.TRUE);
                 } catch (NoSuchMethodException e) {
-                    // Ignore: Method may be removed or unnecessary in newer JPro versions
+                    java.util.logging.Logger.getLogger(WebPlatformManager.class.getName()).log(java.util.logging.Level.FINE, "Method setSelectFileOnClick not found", e);
                 }
                 
                 Consumer<File> onFile = file -> dialog.setResult(file);
                 
                 boolean methodFound = false;
                 for (java.lang.reflect.Method m : uploaderObj.getClass().getMethods()) {
-                    System.out.println("JPRO_DEBUG: Method " + m.getName() + " params " + java.util.Arrays.toString(m.getParameterTypes()));
-                    if (m.getName().equals("setOnFileSelected") && m.getParameterCount() == 1) {
+                    if ("setOnFileSelected".equals(m.getName()) && m.getParameterCount() == 1) {
                         Class<?> paramType = m.getParameterTypes()[0];
                         if (paramType == Consumer.class) {
                             m.invoke(uploaderObj, onFile);
@@ -96,7 +95,7 @@ public class WebPlatformManager implements PlatformManager {
                             // don't break yet, we want to print all methods
                         } else if (paramType.isInterface()) {
                             Object proxy = java.lang.reflect.Proxy.newProxyInstance(
-                                paramType.getClassLoader(),
+                                Thread.currentThread().getContextClassLoader(),
                                 new Class<?>[]{paramType},
                                 (p, method, args) -> {
                                     if (args != null && args.length > 0 && args[0] instanceof File) {
@@ -114,7 +113,7 @@ public class WebPlatformManager implements PlatformManager {
                 if (!methodFound) {
                     java.util.logging.Logger.getLogger(WebPlatformManager.class.getName()).log(java.util.logging.Level.SEVERE, "Could not find setOnFileSelected method!");
                 }
-            } catch (Exception e) {
+            } catch (NoSuchMethodException | IllegalAccessException | java.lang.reflect.InvocationTargetException e) {
                 java.util.logging.Logger.getLogger(WebPlatformManager.class.getName()).log(java.util.logging.Level.SEVERE, "Failed to setup file upload", e);
             }
         }
