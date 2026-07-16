@@ -66,13 +66,21 @@ public class WebPlatformManager implements PlatformManager {
         dialog.getDialogPane().setContent(vbox);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.CANCEL);
         
+        dialog.setResultConverter(dialogButton -> null);
+        
         // We need the scene to be shown so WebAPI can attach to it, 
         // but JPro file uploader can wrap the button before it's shown if we use getWebAPIs
         WebAPI webAPI = WebAPI.getWebAPI(dialog.getOwner() != null ? dialog.getOwner() : (node != null && node.getScene() != null ? node.getScene().getWindow() : null));
         if (webAPI != null) {
             try {
                 Object uploaderObj = webAPI.getClass().getMethod("makeFileUploadNode", Node.class).invoke(webAPI, uploadBtn);
-                uploaderObj.getClass().getMethod("setSelectFileOnClick", boolean.class).invoke(uploaderObj, true);
+                
+                try {
+                    uploaderObj.getClass().getMethod("setSelectFileOnClick", boolean.class).invoke(uploaderObj, true);
+                } catch (NoSuchMethodException e) {
+                    // Ignore: Method may be removed or unnecessary in newer JPro versions
+                }
+                
                 Consumer<File> onFile = file -> dialog.setResult(file);
                 uploaderObj.getClass().getMethod("setOnFileSelected", Consumer.class).invoke(uploaderObj, onFile);
             } catch (NoSuchMethodException | IllegalAccessException | java.lang.reflect.InvocationTargetException e) {
