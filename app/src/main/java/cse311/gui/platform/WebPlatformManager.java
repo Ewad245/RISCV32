@@ -206,7 +206,7 @@ public class WebPlatformManager implements PlatformManager {
     public void registerSessionCleanup(Window window, Runnable cleanup) {
         WebAPI webAPI = WebAPI.getWebAPI(window);
         if (webAPI != null) {
-            window.setOnCloseRequest(e -> cleanup.run());
+            webAPI.addInstanceCloseListener(cleanup::run);
         }
     }
 
