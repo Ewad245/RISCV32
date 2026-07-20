@@ -51,8 +51,12 @@ RUN apt-get update && apt-get install -y \
     bash \
     && rm -rf /var/lib/apt/lists/*
 
-RUN addgroup -S app && \
-    adduser -S -G app app
+RUN addgroup --system app && \
+    adduser --system \
+            --ingroup app \
+            --home /app \
+            --shell /usr/sbin/nologin \
+            app
 
 WORKDIR /app
 
