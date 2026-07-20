@@ -61,7 +61,12 @@ public class WebPlatformManager implements PlatformManager {
         dialog.setHeaderText("Select file to upload (" + ext + ")");
         
         Button uploadBtn = new Button("Choose File...");
-        VBox vbox = new VBox(10, uploadBtn);
+        javafx.scene.control.Label statusLabel = new javafx.scene.control.Label();
+        javafx.scene.control.ProgressBar progressBar = new javafx.scene.control.ProgressBar(0);
+        progressBar.setVisible(false);
+        progressBar.setPrefWidth(200);
+        
+        VBox vbox = new VBox(10, uploadBtn, statusLabel, progressBar);
         vbox.setStyle("-fx-padding: 20; -fx-alignment: center;");
         dialog.getDialogPane().setContent(vbox);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.CANCEL);
@@ -84,27 +89,69 @@ public class WebPlatformManager implements PlatformManager {
                 }
                 
                 Consumer<File> onFileSelected = file -> {
+                    javafx.application.Platform.runLater(() -> {
+                        statusLabel.setText("Uploading: " + file.getName());
+                        progressBar.setVisible(true);
+                        uploadBtn.setDisable(true);
+                    });
                     try {
-                        // JPro deletes temp files when the dialog containing the upload node closes.
-                        // We must copy it to a persistent temp file before closing the dialog.
-                        java.nio.file.Path tempDest = java.nio.file.Files.createTempFile("jpro_upload_", "_" + file.getName());
-                        java.nio.file.Files.copy(file.toPath(), tempDest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                        File permanentFile = tempDest.toFile();
-                        permanentFile.deleteOnExit();
-                        
-                        javafx.application.Platform.runLater(() -> {
-                            dialog.setResult(permanentFile);
-                            dialog.close();
-                        });
-                    } catch (java.io.IOException e) {
+                        // Start JPro file upload to server
+                        uploaderObj.getClass().getMethod("uploadFile").invoke(uploaderObj);
+                    } catch (NoSuchMethodException | IllegalAccessException | java.lang.reflect.InvocationTargetException e) {
                         java.util.logging.Logger.getLogger(WebPlatformManager.class.getName())
-                            .log(java.util.logging.Level.SEVERE, "Failed to copy uploaded file", e);
-                        javafx.application.Platform.runLater(() -> {
-                            dialog.setResult(file);
-                            dialog.close();
-                        });
+                            .log(java.util.logging.Level.SEVERE, "Failed to call uploadFile()", e);
                     }
                 };
+                
+                // Track progress
+                try {
+                    javafx.beans.value.ObservableValue<?> progressProp = 
+                        (javafx.beans.value.ObservableValue<?>) uploaderObj.getClass().getMethod("progressProperty").invoke(uploaderObj);
+                    progressProp.addListener((obs, oldVal, newVal) -> {
+                        if (newVal instanceof Number) {
+                            double progress = ((Number) newVal).doubleValue();
+                            javafx.application.Platform.runLater(() -> {
+                                progressBar.setProgress(progress);
+                            });
+                        }
+                    });
+                } catch (NoSuchMethodException e) {
+                    java.util.logging.Logger.getLogger(WebPlatformManager.class.getName()).log(java.util.logging.Level.FINE, "Method progressProperty not found", e);
+                }
+                
+                // Track uploaded file completion
+                try {
+                    javafx.beans.value.ObservableValue<?> uploadedFileProp = 
+                        (javafx.beans.value.ObservableValue<?>) uploaderObj.getClass().getMethod("uploadedFileProperty").invoke(uploaderObj);
+                    uploadedFileProp.addListener((obs, oldVal, newVal) -> {
+                        if (newVal instanceof File) {
+                            File uploadedFile = (File) newVal;
+                            try {
+                                // JPro deletes temp files when the dialog containing the upload node closes.
+                                // We must copy it to a persistent temp file before closing the dialog.
+                                java.nio.file.Path tempDest = java.nio.file.Files.createTempFile("jpro_upload_", "_" + uploadedFile.getName());
+                                java.nio.file.Files.copy(uploadedFile.toPath(), tempDest, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                                File permanentFile = tempDest.toFile();
+                                permanentFile.deleteOnExit();
+                                
+                                javafx.application.Platform.runLater(() -> {
+                                    statusLabel.setText("Upload complete!");
+                                    dialog.setResult(permanentFile);
+                                    dialog.close();
+                                });
+                            } catch (java.io.IOException e) {
+                                java.util.logging.Logger.getLogger(WebPlatformManager.class.getName())
+                                    .log(java.util.logging.Level.SEVERE, "Failed to copy uploaded file", e);
+                                javafx.application.Platform.runLater(() -> {
+                                    dialog.setResult(uploadedFile);
+                                    dialog.close();
+                                });
+                            }
+                        }
+                    });
+                } catch (NoSuchMethodException e) {
+                    java.util.logging.Logger.getLogger(WebPlatformManager.class.getName()).log(java.util.logging.Level.FINE, "Method uploadedFileProperty not found", e);
+                }
                 
                 boolean methodFound = false;
                 for (java.lang.reflect.Method m : uploaderObj.getClass().getMethods()) {
