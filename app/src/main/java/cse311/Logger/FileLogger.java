@@ -31,49 +31,50 @@ public class FileLogger {
     }
 
     private void initializeLogFile(Path p, boolean isException) {
+        Path logPath = p;
         boolean success = false;
         try {
-            if (p.getParent() != null) {
-                Files.createDirectories(p.getParent());
+            if (logPath.getParent() != null) {
+                Files.createDirectories(logPath.getParent());
             }
-            if (Files.exists(p)) {
-                Files.delete(p);
+            if (Files.exists(logPath)) {
+                Files.delete(logPath);
             }
-            Files.createFile(p);
+            Files.createFile(logPath);
             success = true;
         } catch (IOException e) {
-            System.err.println("FileLogger: Failed to initialize log file at " + p + ". Error: " + e.getMessage());
+            System.err.println("FileLogger: Failed to initialize log file at " + logPath + ". Error: " + e.getMessage());
         }
 
         // Fallback to temp directory if default path failed (e.g. Docker root permission restrictions)
         if (!success) {
-            String fileName = p.getFileName().toString();
-            p = Paths.get(System.getProperty("java.io.tmpdir"), "LogFiles", fileName);
+            String fileName = logPath.getFileName().toString();
+            logPath = Paths.get(System.getProperty("java.io.tmpdir"), "LogFiles", fileName);
             try {
-                if (p.getParent() != null) {
-                    Files.createDirectories(p.getParent());
+                if (logPath.getParent() != null) {
+                    Files.createDirectories(logPath.getParent());
                 }
-                if (Files.exists(p)) {
-                    Files.delete(p);
+                if (Files.exists(logPath)) {
+                    Files.delete(logPath);
                 }
-                Files.createFile(p);
+                Files.createFile(logPath);
                 success = true;
-                System.out.println("FileLogger: Successfully fell back to log file at " + p);
+                System.out.println("FileLogger: Successfully fell back to log file at " + logPath);
             } catch (IOException e) {
-                System.err.println("FileLogger: Failed fallback to log file at " + p + ". Error: " + e.getMessage());
+                System.err.println("FileLogger: Failed fallback to log file at " + logPath + ". Error: " + e.getMessage());
             }
         }
 
         if (success) {
             try {
-                OutputStream os = Files.newOutputStream(p);
+                OutputStream os = Files.newOutputStream(logPath);
                 if (isException) {
                     exceptionOutputStream = os;
                 } else {
                     logOutputStream = os;
                 }
             } catch (IOException e) {
-                System.err.println("FileLogger: Failed to open output stream for " + p + ". Error: " + e.getMessage());
+                System.err.println("FileLogger: Failed to open output stream for " + logPath + ". Error: " + e.getMessage());
             }
         }
     }

@@ -96,7 +96,7 @@ public class WebPlatformManager implements PlatformManager {
                             dialog.setResult(permanentFile);
                             dialog.close();
                         });
-                    } catch (Exception e) {
+                    } catch (java.io.IOException e) {
                         java.util.logging.Logger.getLogger(WebPlatformManager.class.getName())
                             .log(java.util.logging.Level.SEVERE, "Failed to copy uploaded file", e);
                         javafx.application.Platform.runLater(() -> {
