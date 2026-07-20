@@ -872,12 +872,25 @@ public class SystemCallHandler {
             }
         }
 
-        // Fall back to host filesystem if not found in fs.img
+        // Fall back to resources (for web/JPro or bundled jar execution)
+        if (elfData == null) {
+            String resourcePath = "user_programs/" + path;
+            try (java.io.InputStream is = Thread.currentThread().getContextClassLoader().getResourceAsStream(resourcePath)) {
+                if (is != null) {
+                    elfData = is.readAllBytes();
+                    FileLogger.log("SYS_EXEC: Loaded from resources: " + resourcePath);
+                }
+            } catch (Exception ignored) {
+                FileLogger.log("SYS_EXEC: Failed to load from resources: " + resourcePath);
+            }
+        }
+
+        // Fall back to host filesystem if not found in fs.img or resources
         if (elfData == null) {
             String fullPath = ".." + OSConstants.file_seperator + "User_Program_ELF" + OSConstants.file_seperator + path
                     + ".elf";
             try {
-                elfData = Files.readAllBytes(Paths.get(fullPath));
+                elfData = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(fullPath));
                 FileLogger.log("SYS_EXEC: Loaded from host filesystem: " + fullPath);
             } catch (Exception e) {
                 FileLogger.log("SYS_EXEC: Failed to read file: " + fullPath);
