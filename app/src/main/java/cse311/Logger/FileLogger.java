@@ -31,33 +31,50 @@ public class FileLogger {
     }
 
     private void initializeLogFile(Path p, boolean isException) {
-        if (!Files.exists(p)) {
+        boolean success = false;
+        try {
+            if (p.getParent() != null) {
+                Files.createDirectories(p.getParent());
+            }
+            if (Files.exists(p)) {
+                Files.delete(p);
+            }
+            Files.createFile(p);
+            success = true;
+        } catch (IOException e) {
+            System.err.println("FileLogger: Failed to initialize log file at " + p + ". Error: " + e.getMessage());
+        }
+
+        // Fallback to temp directory if default path failed (e.g. Docker root permission restrictions)
+        if (!success) {
+            String fileName = p.getFileName().toString();
+            p = Paths.get(System.getProperty("java.io.tmpdir"), "LogFiles", fileName);
             try {
                 if (p.getParent() != null) {
                     Files.createDirectories(p.getParent());
                 }
+                if (Files.exists(p)) {
+                    Files.delete(p);
+                }
                 Files.createFile(p);
+                success = true;
+                System.out.println("FileLogger: Successfully fell back to log file at " + p);
             } catch (IOException e) {
-                e.printStackTrace();
-            }
-        } else {
-            File file = p.toFile();
-            file.delete();
-            try {
-                Files.createFile(p);
-            } catch (IOException e) {
-                e.printStackTrace();
+                System.err.println("FileLogger: Failed fallback to log file at " + p + ". Error: " + e.getMessage());
             }
         }
-        try {
-            OutputStream os = Files.newOutputStream(p);
-            if (isException) {
-                exceptionOutputStream = os;
-            } else {
-                logOutputStream = os;
+
+        if (success) {
+            try {
+                OutputStream os = Files.newOutputStream(p);
+                if (isException) {
+                    exceptionOutputStream = os;
+                } else {
+                    logOutputStream = os;
+                }
+            } catch (IOException e) {
+                System.err.println("FileLogger: Failed to open output stream for " + p + ". Error: " + e.getMessage());
             }
-        } catch (IOException e) {
-            e.printStackTrace();
         }
     }
 
