@@ -64,7 +64,7 @@ This project uses **Gradle** (incompatible with Gradle < 8.0, supports Gradle 9.
 
 ## 📚 Configuration & Swapping Algorithms
 
-Please take a look at [Plugin & Library Loading Guide](file:///g:/RISCV32_Final_V2/RISCV32_TestOldFork/PLUGIN_DEVELOPMENT_GUIDE.md)
+Please take a look at [Plugin & Library Loading Guide](PLUGIN_DEVELOPMENT_GUIDE.md)
 
 ---
 
