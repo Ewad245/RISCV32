@@ -8,6 +8,7 @@ import javafx.scene.layout.VBox;
 import java.io.IOException;
 import java.util.function.Consumer;
 
+@SuppressWarnings({"PMD.UnusedPrivateMethod", "PMD.AvoidDuplicateLiterals"})
 public class SidebarView extends VBox {
 
     private final Consumer<String> onNavigation;

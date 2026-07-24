@@ -9,6 +9,12 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Simple test to verify compilation works
  */
+@SuppressWarnings({
+    "PMD.JUnit5TestShouldBePackagePrivate",
+    "PMD.UnitTestContainsTooManyAsserts",
+    "PMD.UnitTestAssertionsShouldIncludeMessage",
+    "PMD.SystemPrintln"
+})
 public class CompilationTest {
 
     @Test

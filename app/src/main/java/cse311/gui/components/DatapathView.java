@@ -12,7 +12,11 @@ import javafx.scene.layout.HBox;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
-import javafx.scene.shape.*;
+import javafx.scene.shape.Circle;
+import javafx.scene.shape.Polygon;
+import javafx.scene.shape.Polyline;
+import javafx.scene.shape.Rectangle;
+import javafx.scene.shape.Shape;
 import javafx.scene.text.Text;
 import javafx.scene.transform.Scale;
 import javafx.util.Duration;
@@ -24,6 +28,7 @@ import java.util.Map;
  * Responsive DatapathView - uses percentage-based positioning
  * that automatically scales with container size.
  */
+@SuppressWarnings("PMD.AvoidDuplicateLiterals")
 public class DatapathView extends AnchorPane {
 
     private RV32Cpu cpu;
@@ -45,29 +50,103 @@ public class DatapathView extends AnchorPane {
     private static final double[] LEGEND_POS = { 83, 3, 15, 38 };
 
     // Component shapes
-    private StackPane pcPane, imPane, regPane, immPane, aluPane, dmPane, muxWbPane, controlPane, pcAddPane;
-    private Rectangle compPc, compIm, compReg, compImm, compAlu, compDm, compMuxWb, compControl, compPcAdd;
+    private StackPane pcPane;
+    private StackPane imPane;
+    private StackPane regPane;
+    private StackPane immPane;
+    private StackPane aluPane;
+    private StackPane dmPane;
+    private StackPane muxWbPane;
+    private StackPane controlPane;
+    private StackPane pcAddPane;
+    private Rectangle compPc;
+    private Rectangle compIm;
+    private Rectangle compReg;
+    private Rectangle compImm;
+    private Rectangle compAlu;
+    private Rectangle compDm;
+    private Rectangle compMuxWb;
+    private Rectangle compControl;
+    private Rectangle compPcAdd;
 
     // Wires and arrows
-    private Polyline wirePcIm, wireImReg, wireImImm, wireRegAluA, wireRegAluB, wireImmAluB;
-    private Polyline wireAluDmAddr, wireRegDmData, wireDmMux, wireAluMux, wireWbReg;
-    private Polyline wireImControl, wirePcAdd;
+    private Polyline wirePcIm;
+    private Polyline wireImReg;
+    private Polyline wireImImm;
+    private Polyline wireRegAluA;
+    private Polyline wireRegAluB;
+    private Polyline wireImmAluB;
+    private Polyline wireAluDmAddr;
+    private Polyline wireRegDmData;
+    private Polyline wireDmMux;
+    private Polyline wireAluMux;
+    private Polyline wireWbReg;
+    private Polyline wireImControl;
+    private Polyline wirePcAdd;
 
-    private Polygon arrowPcIm, arrowImReg, arrowImImm, arrowRegAluA, arrowRegAluB, arrowImmAluB;
-    private Polygon arrowAluDmAddr, arrowRegDmData, arrowDmMux, arrowAluMux, arrowWbReg;
-    private Polygon arrowImControl, arrowPcAdd;
+    private Polygon arrowPcIm;
+    private Polygon arrowImReg;
+    private Polygon arrowImImm;
+    private Polygon arrowRegAluA;
+    private Polygon arrowRegAluB;
+    private Polygon arrowImmAluB;
+    private Polygon arrowAluDmAddr;
+    private Polygon arrowRegDmData;
+    private Polygon arrowDmMux;
+    private Polygon arrowAluMux;
+    private Polygon arrowWbReg;
+    private Polygon arrowImControl;
+    private Polygon arrowPcAdd;
 
     // Labels
-    private Text txtPC, txtInstruction, txtControlSignals;
-    private Text txtRs1Val, txtRs2Val, txtAluResult, txtAluOp;
-    private Label lblRegWrite, lblMemRead, lblMemWrite, lblALUSrc;
-    private Label lblPcTitle, lblImTitle, lblRegTitle, lblImmTitle, lblAluTitle, lblDmTitle, lblMuxTitle;
+    private Text txtPC;
+    private Text txtInstruction;
+    private Text txtControlSignals;
+    private Text txtRs1Val;
+    private Text txtRs2Val;
+    private Text txtAluResult;
+    private Text txtAluOp;
+    private Label lblRegWrite;
+    private Label lblMemRead;
+    private Label lblMemWrite;
+    private Label lblALUSrc;
+    private Label lblPcTitle;
+    private Label lblImTitle;
+    private Label lblRegTitle;
+    private Label lblImmTitle;
+    private Label lblAluTitle;
+    private Label lblDmTitle;
+    private Label lblMuxTitle;
     private VBox legendBox;
 
     // Maps for highlighting
     private final Map<String, Shape> components = new HashMap<>();
     private final Map<String, Shape> wires = new HashMap<>();
     private final Map<String, Polygon> arrows = new HashMap<>();
+
+    // Component map keys
+    private static final String KEY_PC = "PC";
+    private static final String KEY_IM = "IM";
+    private static final String KEY_REG = "REG";
+    private static final String KEY_IMM = "IMM";
+    private static final String KEY_ALU = "ALU";
+    private static final String KEY_DM = "DM";
+    private static final String KEY_MUX_WB = "MUX_WB";
+    private static final String KEY_CONTROL = "CONTROL";
+    private static final String KEY_PC_ADD = "PC_ADD";
+
+    // Wire map keys
+    private static final String KEY_WIRE_PC_IM = "PC_IM";
+    private static final String KEY_WIRE_IM_REG = "IM_REG";
+    private static final String KEY_WIRE_IM_IMM = "IM_IMM";
+    private static final String KEY_WIRE_REG_ALU_A = "REG_ALU_A";
+    private static final String KEY_WIRE_REG_ALU_B = "REG_ALU_B";
+    private static final String KEY_WIRE_IMM_ALU_B = "IMM_ALU_B";
+    private static final String KEY_WIRE_ALU_DM_ADDR = "ALU_DM_ADDR";
+    private static final String KEY_WIRE_REG_DM_DATA = "REG_DM_DATA";
+    private static final String KEY_WIRE_DM_MUX = "DM_MUX";
+    private static final String KEY_WIRE_ALU_MUX = "ALU_MUX";
+    private static final String KEY_WIRE_WB_REG = "WB_REG";
 
     public DatapathView(RV32Cpu cpu) {
         this.cpu = cpu;
@@ -142,6 +221,7 @@ public class DatapathView extends AnchorPane {
         getChildren().addAll(pcPane, pcAddPane, imPane, controlPane, regPane, immPane, aluPane, dmPane, muxWbPane);
     }
 
+    @SuppressWarnings("PMD.UnusedFormalParameter")
     private StackPane createComponent(String label, String typeClass, double widthPct, double heightPct) {
         Rectangle rect = new Rectangle();
         rect.getStyleClass().addAll("datapath-component", typeClass);
@@ -159,6 +239,7 @@ public class DatapathView extends AnchorPane {
         return pane;
     }
 
+    @SuppressWarnings("PMD.UnusedFormalParameter")
     private StackPane createComponentWithSublabel(String label, String sublabel, String typeClass, double widthPct,
             double heightPct) {
         Rectangle rect = new Rectangle();
@@ -569,6 +650,9 @@ public class DatapathView extends AnchorPane {
             case "down":
                 arrow.getPoints().addAll(x - 5.0, y, x, y + 10, x + 5.0, y);
                 break;
+            default:
+                arrow.getPoints().addAll(x, y - 5.0, x + 10, y, x, y + 5.0);
+                break;
         }
     }
 
@@ -628,39 +712,39 @@ public class DatapathView extends AnchorPane {
     // ===================== INITIALIZATION =====================
 
     private void initializeMaps() {
-        components.put("PC", compPc);
-        components.put("IM", compIm);
-        components.put("REG", compReg);
-        components.put("IMM", compImm);
-        components.put("ALU", compAlu);
-        components.put("DM", compDm);
-        components.put("MUX_WB", compMuxWb);
-        components.put("CONTROL", compControl);
-        components.put("PC_ADD", compPcAdd);
+        components.put(KEY_PC, compPc);
+        components.put(KEY_IM, compIm);
+        components.put(KEY_REG, compReg);
+        components.put(KEY_IMM, compImm);
+        components.put(KEY_ALU, compAlu);
+        components.put(KEY_DM, compDm);
+        components.put(KEY_MUX_WB, compMuxWb);
+        components.put(KEY_CONTROL, compControl);
+        components.put(KEY_PC_ADD, compPcAdd);
 
-        wires.put("PC_IM", wirePcIm);
-        wires.put("IM_REG", wireImReg);
-        wires.put("IM_IMM", wireImImm);
-        wires.put("REG_ALU_A", wireRegAluA);
-        wires.put("REG_ALU_B", wireRegAluB);
-        wires.put("IMM_ALU_B", wireImmAluB);
-        wires.put("ALU_DM_ADDR", wireAluDmAddr);
-        wires.put("REG_DM_DATA", wireRegDmData);
-        wires.put("DM_MUX", wireDmMux);
-        wires.put("ALU_MUX", wireAluMux);
-        wires.put("WB_REG", wireWbReg);
+        wires.put(KEY_WIRE_PC_IM, wirePcIm);
+        wires.put(KEY_WIRE_IM_REG, wireImReg);
+        wires.put(KEY_WIRE_IM_IMM, wireImImm);
+        wires.put(KEY_WIRE_REG_ALU_A, wireRegAluA);
+        wires.put(KEY_WIRE_REG_ALU_B, wireRegAluB);
+        wires.put(KEY_WIRE_IMM_ALU_B, wireImmAluB);
+        wires.put(KEY_WIRE_ALU_DM_ADDR, wireAluDmAddr);
+        wires.put(KEY_WIRE_REG_DM_DATA, wireRegDmData);
+        wires.put(KEY_WIRE_DM_MUX, wireDmMux);
+        wires.put(KEY_WIRE_ALU_MUX, wireAluMux);
+        wires.put(KEY_WIRE_WB_REG, wireWbReg);
 
-        arrows.put("PC_IM", arrowPcIm);
-        arrows.put("IM_REG", arrowImReg);
-        arrows.put("IM_IMM", arrowImImm);
-        arrows.put("REG_ALU_A", arrowRegAluA);
-        arrows.put("REG_ALU_B", arrowRegAluB);
-        arrows.put("IMM_ALU_B", arrowImmAluB);
-        arrows.put("ALU_DM_ADDR", arrowAluDmAddr);
-        arrows.put("REG_DM_DATA", arrowRegDmData);
-        arrows.put("DM_MUX", arrowDmMux);
-        arrows.put("ALU_MUX", arrowAluMux);
-        arrows.put("WB_REG", arrowWbReg);
+        arrows.put(KEY_WIRE_PC_IM, arrowPcIm);
+        arrows.put(KEY_WIRE_IM_REG, arrowImReg);
+        arrows.put(KEY_WIRE_IM_IMM, arrowImImm);
+        arrows.put(KEY_WIRE_REG_ALU_A, arrowRegAluA);
+        arrows.put(KEY_WIRE_REG_ALU_B, arrowRegAluB);
+        arrows.put(KEY_WIRE_IMM_ALU_B, arrowImmAluB);
+        arrows.put(KEY_WIRE_ALU_DM_ADDR, arrowAluDmAddr);
+        arrows.put(KEY_WIRE_REG_DM_DATA, arrowRegDmData);
+        arrows.put(KEY_WIRE_DM_MUX, arrowDmMux);
+        arrows.put(KEY_WIRE_ALU_MUX, arrowAluMux);
+        arrows.put(KEY_WIRE_WB_REG, arrowWbReg);
     }
 
     private void initializeTooltips() {
@@ -766,6 +850,7 @@ public class DatapathView extends AnchorPane {
         }
     }
 
+    @SuppressWarnings("PMD.AvoidLiteralsInIfCondition")
     private void setupZoomAndPan() {
         Scale scaleTransform = new Scale(1, 1, 0, 0);
         this.getTransforms().add(scaleTransform);
@@ -826,10 +911,10 @@ public class DatapathView extends AnchorPane {
         }
 
         resetHighlights();
-        highlight("PC");
-        highlight("PC_IM");
-        highlight("IM");
-        highlight("IM_REG");
+        highlight(KEY_PC);
+        highlight(KEY_WIRE_PC_IM);
+        highlight(KEY_IM);
+        highlight(KEY_WIRE_IM_REG);
 
         int opcode = inst.getOpcode();
 
@@ -845,119 +930,119 @@ public class DatapathView extends AnchorPane {
         boolean isSystem = (opcode == 0b1110011);
         boolean isFence = (opcode == 0b0001111);
 
-        highlight("CONTROL");
+        highlight(KEY_CONTROL);
         updateControlSignals(isLoad, isStore, isRType, isIType, isBranch, isJal, isJalr, isLui, isAuipc);
 
         String typeStr = "UNKNOWN";
 
         if (isRType) {
             typeStr = "R-Type";
-            highlight("REG");
-            highlight("REG_ALU_A");
-            animateDataFlow("REG_ALU_A");
-            highlight("REG_ALU_B");
-            animateDataFlow("REG_ALU_B");
-            highlight("ALU");
-            highlight("ALU_MUX");
-            animateDataFlow("ALU_MUX");
-            highlight("MUX_WB");
-            highlight("WB_REG");
-            animateDataFlow("WB_REG");
+            highlight(KEY_REG);
+            highlight(KEY_WIRE_REG_ALU_A);
+            animateDataFlow(KEY_WIRE_REG_ALU_A);
+            highlight(KEY_WIRE_REG_ALU_B);
+            animateDataFlow(KEY_WIRE_REG_ALU_B);
+            highlight(KEY_ALU);
+            highlight(KEY_WIRE_ALU_MUX);
+            animateDataFlow(KEY_WIRE_ALU_MUX);
+            highlight(KEY_MUX_WB);
+            highlight(KEY_WIRE_WB_REG);
+            animateDataFlow(KEY_WIRE_WB_REG);
         } else if (isIType) {
             typeStr = "I-Type";
-            highlight("REG");
-            highlight("IM_IMM");
-            highlight("IMM");
-            highlight("REG_ALU_A");
-            animateDataFlow("REG_ALU_A");
-            highlight("IMM_ALU_B");
-            animateDataFlow("IMM_ALU_B");
-            highlight("ALU");
-            highlight("ALU_MUX");
-            animateDataFlow("ALU_MUX");
-            highlight("MUX_WB");
-            highlight("WB_REG");
-            animateDataFlow("WB_REG");
+            highlight(KEY_REG);
+            highlight(KEY_WIRE_IM_IMM);
+            highlight(KEY_IMM);
+            highlight(KEY_WIRE_REG_ALU_A);
+            animateDataFlow(KEY_WIRE_REG_ALU_A);
+            highlight(KEY_WIRE_IMM_ALU_B);
+            animateDataFlow(KEY_WIRE_IMM_ALU_B);
+            highlight(KEY_ALU);
+            highlight(KEY_WIRE_ALU_MUX);
+            animateDataFlow(KEY_WIRE_ALU_MUX);
+            highlight(KEY_MUX_WB);
+            highlight(KEY_WIRE_WB_REG);
+            animateDataFlow(KEY_WIRE_WB_REG);
         } else if (isLoad) {
             typeStr = "LOAD";
-            highlight("REG");
-            highlight("IM_IMM");
-            highlight("IMM");
-            highlight("REG_ALU_A");
-            animateDataFlow("REG_ALU_A");
-            highlight("IMM_ALU_B");
-            animateDataFlow("IMM_ALU_B");
-            highlight("ALU");
-            highlight("ALU_DM_ADDR");
-            animateDataFlow("ALU_DM_ADDR");
-            highlight("DM");
-            highlight("DM_MUX");
-            animateDataFlow("DM_MUX");
-            highlight("MUX_WB");
-            highlight("WB_REG");
-            animateDataFlow("WB_REG");
+            highlight(KEY_REG);
+            highlight(KEY_WIRE_IM_IMM);
+            highlight(KEY_IMM);
+            highlight(KEY_WIRE_REG_ALU_A);
+            animateDataFlow(KEY_WIRE_REG_ALU_A);
+            highlight(KEY_WIRE_IMM_ALU_B);
+            animateDataFlow(KEY_WIRE_IMM_ALU_B);
+            highlight(KEY_ALU);
+            highlight(KEY_WIRE_ALU_DM_ADDR);
+            animateDataFlow(KEY_WIRE_ALU_DM_ADDR);
+            highlight(KEY_DM);
+            highlight(KEY_WIRE_DM_MUX);
+            animateDataFlow(KEY_WIRE_DM_MUX);
+            highlight(KEY_MUX_WB);
+            highlight(KEY_WIRE_WB_REG);
+            animateDataFlow(KEY_WIRE_WB_REG);
         } else if (isStore) {
             typeStr = "STORE";
-            highlight("REG");
-            highlight("IM_IMM");
-            highlight("IMM");
-            highlight("REG_ALU_A");
-            animateDataFlow("REG_ALU_A");
-            highlight("IMM_ALU_B");
-            animateDataFlow("IMM_ALU_B");
-            highlight("ALU");
-            highlight("ALU_DM_ADDR");
-            animateDataFlow("ALU_DM_ADDR");
-            highlight("REG_DM_DATA");
-            animateDataFlow("REG_DM_DATA");
-            highlight("DM");
+            highlight(KEY_REG);
+            highlight(KEY_WIRE_IM_IMM);
+            highlight(KEY_IMM);
+            highlight(KEY_WIRE_REG_ALU_A);
+            animateDataFlow(KEY_WIRE_REG_ALU_A);
+            highlight(KEY_WIRE_IMM_ALU_B);
+            animateDataFlow(KEY_WIRE_IMM_ALU_B);
+            highlight(KEY_ALU);
+            highlight(KEY_WIRE_ALU_DM_ADDR);
+            animateDataFlow(KEY_WIRE_ALU_DM_ADDR);
+            highlight(KEY_WIRE_REG_DM_DATA);
+            animateDataFlow(KEY_WIRE_REG_DM_DATA);
+            highlight(KEY_DM);
         } else if (isBranch) {
             typeStr = "BRANCH";
-            highlight("REG");
-            highlight("IM_IMM");
-            highlight("IMM");
-            highlight("REG_ALU_A");
-            animateDataFlow("REG_ALU_A");
-            highlight("REG_ALU_B");
-            animateDataFlow("REG_ALU_B");
-            highlight("ALU");
+            highlight(KEY_REG);
+            highlight(KEY_WIRE_IM_IMM);
+            highlight(KEY_IMM);
+            highlight(KEY_WIRE_REG_ALU_A);
+            animateDataFlow(KEY_WIRE_REG_ALU_A);
+            highlight(KEY_WIRE_REG_ALU_B);
+            animateDataFlow(KEY_WIRE_REG_ALU_B);
+            highlight(KEY_ALU);
         } else if (isJal) {
             typeStr = "JAL";
-            highlight("IM_IMM");
-            highlight("IMM");
-            highlight("MUX_WB");
-            highlight("WB_REG");
-            animateDataFlow("WB_REG");
+            highlight(KEY_WIRE_IM_IMM);
+            highlight(KEY_IMM);
+            highlight(KEY_MUX_WB);
+            highlight(KEY_WIRE_WB_REG);
+            animateDataFlow(KEY_WIRE_WB_REG);
         } else if (isJalr) {
             typeStr = "JALR";
-            highlight("REG");
-            highlight("IM_IMM");
-            highlight("IMM");
-            highlight("REG_ALU_A");
-            animateDataFlow("REG_ALU_A");
-            highlight("IMM_ALU_B");
-            animateDataFlow("IMM_ALU_B");
-            highlight("ALU");
-            highlight("MUX_WB");
-            highlight("WB_REG");
-            animateDataFlow("WB_REG");
+            highlight(KEY_REG);
+            highlight(KEY_WIRE_IM_IMM);
+            highlight(KEY_IMM);
+            highlight(KEY_WIRE_REG_ALU_A);
+            animateDataFlow(KEY_WIRE_REG_ALU_A);
+            highlight(KEY_WIRE_IMM_ALU_B);
+            animateDataFlow(KEY_WIRE_IMM_ALU_B);
+            highlight(KEY_ALU);
+            highlight(KEY_MUX_WB);
+            highlight(KEY_WIRE_WB_REG);
+            animateDataFlow(KEY_WIRE_WB_REG);
         } else if (isLui) {
             typeStr = "LUI";
-            highlight("IM_IMM");
-            highlight("IMM");
-            highlight("MUX_WB");
-            highlight("WB_REG");
-            animateDataFlow("WB_REG");
+            highlight(KEY_WIRE_IM_IMM);
+            highlight(KEY_IMM);
+            highlight(KEY_MUX_WB);
+            highlight(KEY_WIRE_WB_REG);
+            animateDataFlow(KEY_WIRE_WB_REG);
         } else if (isAuipc) {
             typeStr = "AUIPC";
-            highlight("IM_IMM");
-            highlight("IMM");
-            highlight("ALU");
-            highlight("ALU_MUX");
-            animateDataFlow("ALU_MUX");
-            highlight("MUX_WB");
-            highlight("WB_REG");
-            animateDataFlow("WB_REG");
+            highlight(KEY_WIRE_IM_IMM);
+            highlight(KEY_IMM);
+            highlight(KEY_ALU);
+            highlight(KEY_WIRE_ALU_MUX);
+            animateDataFlow(KEY_WIRE_ALU_MUX);
+            highlight(KEY_MUX_WB);
+            highlight(KEY_WIRE_WB_REG);
+            animateDataFlow(KEY_WIRE_WB_REG);
         } else if (isSystem) {
             typeStr = "SYSTEM";
         } else if (isFence) {
@@ -1042,6 +1127,7 @@ public class DatapathView extends AnchorPane {
         }
     }
 
+    @SuppressWarnings("PMD.UnusedFormalParameter")
     private void updateControlSignals(boolean isLoad, boolean isStore, boolean isRType,
             boolean isIType, boolean isBranch, boolean isJal, boolean isJalr,
             boolean isLui, boolean isAuipc) {

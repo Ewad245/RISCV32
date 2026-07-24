@@ -4,6 +4,10 @@ import java.util.Arrays;
 
 import cse311.Exception.MemoryAccessException;
 
+@SuppressWarnings({
+    "PMD.AvoidLiteralsInIfCondition",
+    "PMD.MethodReturnsInternalArray"
+})
 public class SimpleMemory {
     private byte[] memory;
     private int MEMORY_SIZE = 128 * 1024 * 1024; // 1KB of memory

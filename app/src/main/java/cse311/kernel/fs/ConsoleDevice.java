@@ -7,6 +7,7 @@ import cse311.kernel.Kernel;
 import cse311.kernel.process.Task;
 import cse311.RV32Cpu;
 
+@SuppressWarnings("PMD.AvoidCatchingGenericException")
 public class ConsoleDevice implements Device {
     private final Kernel kernel;
 

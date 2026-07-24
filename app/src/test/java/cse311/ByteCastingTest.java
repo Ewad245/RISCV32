@@ -6,6 +6,11 @@ import static org.junit.jupiter.api.Assertions.*;
 /**
  * Test to verify all byte casting issues are resolved
  */
+@SuppressWarnings({
+    "PMD.JUnit5TestShouldBePackagePrivate",
+    "PMD.UnitTestContainsTooManyAsserts",
+    "PMD.UnitTestAssertionsShouldIncludeMessage"
+})
 public class ByteCastingTest {
     
     @Test

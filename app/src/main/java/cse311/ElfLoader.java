@@ -14,6 +14,15 @@ import cse311.kernel.NonContiguous.paging.AddressSpace;
 import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
 import cse311.kernel.process.ProgramInfo;
 
+@SuppressWarnings({
+    "PMD.UnusedPrivateField",
+    "PMD.AvoidLiteralsInIfCondition",
+    "PMD.AvoidCatchingGenericException",
+    "PMD.UnusedLocalVariable",
+    "PMD.UnusedAssignment",
+    "PMD.ArrayIsStoredDirectly",
+    "PMD.PreserveStackTrace"
+})
 public class ElfLoader {
     private byte[] elfData;
     private MemoryManager memory;

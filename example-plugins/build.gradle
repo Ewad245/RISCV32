@@ -1,0 +1,14 @@
+plugins {
+    id 'java-library'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+dependencies {
+    // The main simulator provides the plugin API at compile time only.
+    compileOnly project(':app')
+}

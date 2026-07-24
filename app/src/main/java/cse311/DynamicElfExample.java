@@ -8,6 +8,7 @@ import cse311.Logger.FileLogger;
 /**
  * Example demonstrating how to use the new dynamic ELF loading system
  */
+@SuppressWarnings({"PMD.AvoidCatchingGenericException", "PMD.RelianceOnDefaultCharset"})
 public class DynamicElfExample {
 
     public static void main(String[] args) {

@@ -7,6 +7,11 @@ import cse311.kernel.scheduler.*;
 /**
  * Test different scheduling algorithms
  */
+@SuppressWarnings({
+    "PMD.TestClassWithoutTestCases",
+    "PMD.AvoidCatchingGenericException",
+    "PMD.UnusedFormalParameter"
+})
 public class KernelSchedulerTest {
 
     public static void main(String[] args) {
@@ -34,7 +39,7 @@ public class KernelSchedulerTest {
         Kernel kernel = new Kernel(memManager);
 
         kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.ROUND_ROBIN);
-        kernel.getConfig().setTimeSlice(100); // Small time slice for demonstration
+        kernel.setTimeSlice(100); // Small time slice for demonstration
 
         // Create test tasks
         createTestTasks(kernel, "RR");

@@ -2,6 +2,7 @@ package cse311.kernel.contiguous;
 
 import java.util.List;
 
+@SuppressWarnings("PMD.ImplicitFunctionalInterface")
 public interface AllocationStrategy {
     /**
      * Finds a memory region (hole) for the requested size.

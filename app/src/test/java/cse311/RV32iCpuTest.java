@@ -7,6 +7,10 @@ import cse311.Exception.MemoryAccessException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@SuppressWarnings({
+        "PMD.JUnit5TestShouldBePackagePrivate",
+        "PMD.UnitTestContainsTooManyAsserts"
+})
 public class RV32iCpuTest {
     private RV32Cpu cpu;
     private MemoryManager memory;

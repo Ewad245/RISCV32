@@ -10,6 +10,10 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * Round-robin scheduler implementation
  * Tasks are scheduled in a circular fashion with equal time slices
  */
+@SuppressWarnings({
+    "PMD.CompareObjectsWithEquals",
+    "PMD.NullAssignment"
+})
 public class RoundRobinScheduler extends Scheduler {
     private final Queue<Task> readyQueue = new ConcurrentLinkedQueue<>();
     private final Set<Task> queuedTasks = Collections.synchronizedSet(new HashSet<>());

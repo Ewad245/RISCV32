@@ -2,17 +2,54 @@ package cse311.gui;
 
 import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
-import javafx.scene.control.*;
-import javafx.scene.layout.*;
 import java.net.URL;
 import java.util.ResourceBundle;
 
 import cse311.kernel.Kernel;
 import cse311.RV32Computer;
-import cse311.RV32Cpu;
+import cse311.Constants.MemoryMode;
+import cse311.gui.components.AssemblyView;
+import cse311.gui.components.ConsoleView;
+import cse311.gui.components.CpuView;
+import cse311.gui.components.DatapathView;
+import cse311.gui.components.HexMemoryView;
+import cse311.gui.components.MemoryView;
+import cse311.gui.components.SchedulerView;
+import cse311.gui.components.SidebarView;
 import cse311.kernel.process.Task;
-import cse311.gui.components.*;
+import cse311.kernel.plugin.PluginLoader;
+import cse311.kernel.scheduler.Scheduler;
+import cse311.kernel.contiguous.AllocationStrategy;
+import cse311.kernel.contiguous.ContiguousMemoryManager;
+import cse311.kernel.NonContiguous.paging.PagedMemoryManager;
+import cse311.kernel.NonContiguous.paging.ReplacementPolicy;
+import cse311.kernel.NonContiguous.paging.DemandPager;
+import cse311.MemoryManager;
+import javafx.animation.AnimationTimer;
+import javafx.stage.FileChooser;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Alert.AlertType;
+import javafx.scene.control.Button;
+import javafx.scene.control.ButtonType;
+import javafx.scene.control.Label;
+import javafx.scene.control.Slider;
+import javafx.scene.control.SplitPane;
+import javafx.scene.control.Tab;
+import javafx.scene.control.TabPane;
+import javafx.scene.control.ScrollPane;
+import javafx.scene.layout.VBox;
+import javafx.scene.layout.StackPane;
+import javafx.scene.layout.Priority;
+import javafx.application.Platform;
+import cse311.gui.platform.PlatformEnvironment;
+import java.io.File;
 
+@SuppressWarnings({
+        "PMD.AvoidDuplicateLiterals",
+        "PMD.AvoidCatchingGenericException",
+        "PMD.RelianceOnDefaultCharset",
+        "PMD.AvoidLiteralsInIfCondition"
+})
 public class MainController implements Initializable {
 
     // Inject items from FXML using their fx:id
@@ -48,7 +85,9 @@ public class MainController implements Initializable {
     private SplitPane dashboardPane;
 
     private final Kernel kernel;
+    @SuppressWarnings("PMD.UnusedPrivateField")
     private final RV32Computer computer;
+    private final GuiApp guiApp;
 
     // Sub-components (Logic remains in Java)
     private CpuView[] cpuViews;
@@ -60,29 +99,29 @@ public class MainController implements Initializable {
     private SidebarView sidebarView;
     private ConsoleView consoleView;
 
-    private ProcessorHandler processorHandler;
-
     // Placeholders for dynamic AssemblyView switching (Option B)
     private VBox[] dashboardAssemblyContainers;
     private VBox[] datapathAssemblyContainers;
 
-    public MainController(Kernel kernel, RV32Computer computer) {
+    public MainController(Kernel kernel, RV32Computer computer, GuiApp guiApp) {
         this.kernel = kernel;
         this.computer = computer;
+        this.guiApp = guiApp;
         // NOTE: We don't build UI here anymore!
     }
 
     @Override
     public void initialize(URL location, ResourceBundle resources) {
+        // This method is called automatically after FXML is loaded.
+        // Initialize your custom dynamic components here.
+
         initializeToolbarLogic();
         initializeDashboard();
         initializeDatapath();
         initializeConsole();
         initializeSidebar();
 
-        processorHandler = new ProcessorHandler(kernel);
-        processorHandler.bindCpuSignals();
-        processorHandler.onUiUpdate(this::updateUI);
+        startUpdateLoop(); // Your existing animation timer logic
     }
 
     private void initializeToolbarLogic() {
@@ -102,6 +141,156 @@ public class MainController implements Initializable {
     @FXML
     public void handleResume() {
         kernel.resume();
+    }
+
+    @SuppressWarnings("PMD.UnusedPrivateMethod")
+    @FXML
+    private void onNewSimulationClicked() {
+        PlatformEnvironment.getManager().showConfirmationAlert(
+            "New Simulation",
+            "Start a New Simulation?",
+            "This will stop the current simulation and reset all memory, registers, and loaded processes. Are you sure you want to continue?",
+            btnPause.getScene().getWindow(),
+            () -> {
+                cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.INFO, "Starting new simulation from menu.");
+                MemoryMode currentMode = (kernel.getMemory() instanceof ContiguousMemoryManager) ? 
+                        MemoryMode.CONTIGUOUS : MemoryMode.PAGING;
+                guiApp.restartInMode(currentMode);
+            }
+        );
+    }
+
+    @FXML
+    public void onLoadDiskImageClicked() {
+        PlatformEnvironment.getManager().chooseOpenFile(
+            btnPause,
+            "Select Disk Image",
+            "Disk Image Files",
+            "*.img",
+            selectedFile -> {
+                guiApp.setDiskImagePath(selectedFile.getAbsolutePath());
+                PlatformEnvironment.getManager().showConfirmationAlert(
+                    "Restart Required",
+                    "Load Disk Image",
+                    "The new disk image path has been set. The simulator must restart to mount the new image. Do you want to restart now?",
+                    btnPause.getScene().getWindow(),
+                    () -> {
+                        MemoryMode currentMode = (kernel.getMemory() instanceof ContiguousMemoryManager) ? 
+                                MemoryMode.CONTIGUOUS : MemoryMode.PAGING;
+                        guiApp.restartInMode(currentMode);
+                    }
+                );
+            }
+        );
+    }
+
+    @SuppressWarnings("PMD.UnusedPrivateMethod")
+    @FXML
+    private void onExitClicked() {
+        shutdown();
+        PlatformEnvironment.getManager().exit(btnPause.getScene().getWindow());
+    }
+
+    @SuppressWarnings("PMD.UnusedPrivateMethod")
+    @FXML
+    private void onAboutClicked() {
+        PlatformEnvironment.getManager().showInfoAlert("About", "RISC-V OS Simulator", "Designed for CSE311.\nSupports dynamic algorithm hot-swapping.", btnPause.getScene().getWindow());
+    }
+
+    @FXML
+    public void onImportSchedulerClicked() {
+        PlatformEnvironment.getManager().chooseOpenFile(
+            btnPause, "Select Custom Scheduler JAR", "JAR Files", "*.jar", selectedFile -> {
+                try {
+                    Scheduler customScheduler = PluginLoader.loadCustomScheduler(selectedFile);
+                    customScheduler.setTimeSlice(kernel.getConfig().getTimeSlice());
+                    kernel.setScheduler(customScheduler);
+                    
+                    PlatformEnvironment.getManager().showInfoAlert("Success", "Scheduler Loaded", 
+                        "Successfully loaded and activated: " + customScheduler.getClass().getSimpleName(), 
+                        btnPause.getScene().getWindow());
+                } catch (Exception e) {
+                    if (cse311.Logger.FileLogger.isLoggable(cse311.Logger.FileLogger.LogLevel.ERROR))
+                        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                                "Failed to load scheduler plugin: " + e.getMessage());
+                    cse311.Logger.FileLogger.log(e);
+                    PlatformEnvironment.getManager().showErrorAlert("Error", "Failed to Load Scheduler", 
+                        "Error: " + e.getMessage(), btnPause.getScene().getWindow());
+                }
+            });
+    }
+
+    @SuppressWarnings("PMD.UnusedPrivateMethod")
+    @FXML
+    private void onImportMemoryAllocatorClicked() {
+        MemoryManager currentMemory = kernel.getMemory();
+
+        if (!(currentMemory instanceof ContiguousMemoryManager)) {
+            PlatformEnvironment.getManager().showConfirmationAlert("Mode Mismatch", "Switch to Contiguous Memory Mode?",
+                "Allocation strategies only apply to Contiguous memory mode.\nSwitching will restart the simulator and reset all running processes.",
+                btnPause.getScene().getWindow(), () -> {
+                    guiApp.restartInMode(MemoryMode.CONTIGUOUS);
+                });
+            return;
+        }
+
+        PlatformEnvironment.getManager().chooseOpenFile(btnPause, "Select Custom Memory Allocator JAR", "JAR Files", "*.jar", selectedFile -> {
+            try {
+                AllocationStrategy customAllocator = PluginLoader.loadCustomAllocator(selectedFile);
+                boolean wasRunning = !kernel.isPaused();
+                kernel.pause();
+                ((ContiguousMemoryManager) currentMemory).setAllocationStrategy(customAllocator);
+                if (wasRunning) kernel.resume();
+                PlatformEnvironment.getManager().showInfoAlert("Success", "Allocator Loaded", 
+                    "Successfully hot-swapped memory allocator to: " + customAllocator.getClass().getSimpleName(), 
+                    btnPause.getScene().getWindow());
+            } catch (Exception e) {
+                if (cse311.Logger.FileLogger.isLoggable(cse311.Logger.FileLogger.LogLevel.ERROR))
+                    cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                            "Failed to load allocator plugin: " + e.getMessage());
+                cse311.Logger.FileLogger.log(e);
+                PlatformEnvironment.getManager().showErrorAlert("Import Error", "Failed to load plugin", 
+                    e.getMessage(), btnPause.getScene().getWindow());
+            }
+        });
+    }
+
+    @SuppressWarnings("PMD.UnusedPrivateMethod")
+    @FXML
+    private void onImportPageReplacementClicked() {
+        MemoryManager currentMemory = kernel.getMemory();
+
+        if (!(currentMemory instanceof PagedMemoryManager)) {
+            PlatformEnvironment.getManager().showConfirmationAlert("Mode Mismatch", "Switch to Paging Memory Mode?",
+                "Page replacement policies only apply to Paging memory mode.\nSwitching will restart the simulator and reset all running processes.",
+                btnPause.getScene().getWindow(), () -> {
+                    guiApp.restartInMode(MemoryMode.PAGING);
+                });
+            return;
+        }
+
+        PagedMemoryManager pmm = (PagedMemoryManager) currentMemory;
+
+        PlatformEnvironment.getManager().chooseOpenFile(btnPause, "Select Custom Page Replacement JAR", "JAR Files", "*.jar", selectedFile -> {
+            try {
+                ReplacementPolicy customPolicy = PluginLoader.loadCustomReplacementPolicy(selectedFile);
+                DemandPager newPager = new DemandPager(pmm, customPolicy);
+                boolean wasRunning = !kernel.isPaused();
+                kernel.pause();
+                pmm.setPager(newPager);
+                if (wasRunning) kernel.resume();
+                PlatformEnvironment.getManager().showInfoAlert("Success", "Policy Loaded", 
+                    "Successfully hot-swapped page replacement to: " + customPolicy.getClass().getSimpleName(), 
+                    btnPause.getScene().getWindow());
+            } catch (Exception e) {
+                if (cse311.Logger.FileLogger.isLoggable(cse311.Logger.FileLogger.LogLevel.ERROR))
+                    cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
+                            "Failed to load page replacement plugin: " + e.getMessage());
+                cse311.Logger.FileLogger.log(e);
+                PlatformEnvironment.getManager().showErrorAlert("Import Error", "Failed to load plugin", 
+                    e.getMessage(), btnPause.getScene().getWindow());
+            }
+        });
     }
 
     private void initializeDashboard() {
@@ -210,9 +399,10 @@ public class MainController implements Initializable {
         }
     }
 
+    @SuppressWarnings("PMD.CloseResource")
     private void initializeConsole() {
         consoleView = new ConsoleView(kernel.getMemory());
-        consoleView.setPrefHeight(200);
+        javafx.scene.layout.VBox.setVgrow(consoleView, javafx.scene.layout.Priority.ALWAYS);
         consoleContainer.getChildren().add(consoleView);
 
         // Pass ConsoleView reference to Kernel for deadlock warnings
@@ -220,11 +410,73 @@ public class MainController implements Initializable {
 
         // Redirect System.out and System.err to ConsoleView
         try {
-            cse311.gui.util.GuiOutputStream guiOut = new cse311.gui.util.GuiOutputStream(consoleView.getOutputArea());
-            java.io.PrintStream printStream = new java.io.PrintStream(guiOut, true);
+            java.io.PipedOutputStream pipedOut = new java.io.PipedOutputStream();
+            java.io.PipedInputStream pipedIn = new java.io.PipedInputStream(pipedOut);
+
+            // Create the connector that links the OS emulator to the terminal UI
+            cse311.gui.components.EmulatorTtyConnector connector = 
+                new cse311.gui.components.EmulatorTtyConnector(pipedIn, kernel.getMemory());
+            consoleView.setTtyConnector(connector);
+
+            // Filter to convert \n to \r\n for JediTermFX
+            java.io.OutputStream crlfFilter = new java.io.OutputStream() {
+                private int lastByte = -1;
+                @Override
+                public void write(int b) throws java.io.IOException {
+                    if (b == '\n' && lastByte != '\r') {
+                        pipedOut.write('\r');
+                    }
+                    pipedOut.write(b);
+                    lastByte = b;
+                }
+
+                @Override
+                public void write(byte[] b, int off, int len) throws java.io.IOException {
+                    int extra = 0;
+                    for (int i = 0; i < len; i++) {
+                        int current = b[off + i];
+                        int prev = (i == 0) ? lastByte : b[off + i - 1];
+                        if (current == '\n' && prev != '\r') {
+                            extra++;
+                        }
+                    }
+
+                    if (extra == 0) {
+                        pipedOut.write(b, off, len);
+                        if (len > 0) {
+                            lastByte = b[off + len - 1];
+                        }
+                        return;
+                    }
+
+                    byte[] newB = new byte[len + extra];
+                    int j = 0;
+                    for (int i = 0; i < len; i++) {
+                        int current = b[off + i];
+                        int prev = (i == 0) ? lastByte : b[off + i - 1];
+                        if (current == '\n' && prev != '\r') {
+                            newB[j] = '\r';
+                            j++;
+                        }
+                        newB[j] = (byte) current;
+                        j++;
+                    }
+                    pipedOut.write(newB, 0, newB.length);
+                    if (len > 0) {
+                        lastByte = b[off + len - 1];
+                    }
+                }
+
+                @Override
+                public void flush() throws java.io.IOException {
+                    pipedOut.flush();
+                }
+            };
+
+            java.io.PrintStream printStream = new java.io.PrintStream(crlfFilter, true);
             System.setOut(printStream);
             System.setErr(printStream);
-            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.INFO, "GUI: Console Output Redirected.");
+            cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.INFO, "GUI: Console Output Redirected to JediTermFX.");
         } catch (Exception e) {
             cse311.Logger.FileLogger.log(e);
         }
@@ -235,7 +487,7 @@ public class MainController implements Initializable {
             int coreCount = kernel.getConfig().getCoreCount();
 
             // Teleport AssemblyViews to the correct location based on navigation
-            if (view.equals("dashboard")) {
+            if ("dashboard".equals(view)) {
                 // 1. Teleport Assembly Views to the Dashboard
                 for (int i = 0; i < coreCount; i++) {
                     if (assemblyViews[i] != null) {
@@ -255,7 +507,7 @@ public class MainController implements Initializable {
                 dashboardPane.setVisible(true);
                 dashboardPane.toFront();
 
-            } else if (view.equals("datapath")) {
+            } else if ("datapath".equals(view)) {
                 // 1. Teleport Assembly Views to the Datapath
                 for (int i = 0; i < coreCount; i++) {
                     if (assemblyViews[i] != null) {
@@ -275,7 +527,7 @@ public class MainController implements Initializable {
                 datapathTabs.setVisible(true);
                 datapathTabs.toFront();
 
-            } else if (view.equals("memory")) {
+            } else if ("memory".equals(view)) {
                 // Memory view doesn't need AssemblyView, just hide everything
                 hideAllViews();
                 memoryTabContainer.setVisible(true);
@@ -289,6 +541,16 @@ public class MainController implements Initializable {
         dashboardPane.setVisible(false);
         datapathTabs.setVisible(false);
         memoryTabContainer.setVisible(false);
+    }
+
+    private void startUpdateLoop() {
+        AnimationTimer timer = new AnimationTimer() {
+            @Override
+            public void handle(long now) {
+                updateUI();
+            }
+        };
+        timer.start();
     }
 
     private void updateUI() {
@@ -334,6 +596,12 @@ public class MainController implements Initializable {
 
         if (memoryTabContainer.isVisible()) {
             hexMemoryView.update();
+        }
+    }
+
+    public void shutdown() {
+        if (consoleView != null) {
+            consoleView.close();
         }
     }
 }

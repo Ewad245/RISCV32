@@ -29,11 +29,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * Main kernel class that coordinates all kernel subsystems
  * Provides a clean interface for managing tasks, scheduling, and system calls
  */
+@SuppressWarnings({
+        "PMD.LooseCoupling",
+        "PMD.NullAssignment",
+        "PMD.AvoidCatchingGenericException",
+        "PMD.ConstructorCallsOverridableMethod",
+        "PMD.ExhaustiveSwitchHasDefault",
+        "PMD.AssignmentInOperand",
+        "PMD.UnusedPrivateMethod"
+})
 public class Kernel {
     private final List<RV32Cpu> cpus; // NEW
     private final MemoryManager memory;
     private final TaskManager taskManager;
-    private final Scheduler scheduler;
+    private Scheduler scheduler;
     private final SystemCallHandler syscallHandler;
     private final KernelMemoryManager kernelMemory;
     private ProcessMemoryCoordinator memoryCoordinator;
@@ -171,8 +180,6 @@ public class Kernel {
         }
     }
 
-    private final List<Thread> kernelThreads = new ArrayList<>();
-
     /**
      * Start the kernel and eventually the APs
      */
@@ -185,37 +192,28 @@ public class Kernel {
         FileLogger.log(FileLogger.LogLevel.DEBUG, "Kernel starting...");
 
         // 1. Launch Maintenance Thread (Handles Interrupts/Timers)
-        Thread maintThread = new Thread(this::maintenanceLoop, "Kernel-Maintenance");
-        maintThread.setDaemon(true);
-        maintThread.start();
-        kernelThreads.add(maintThread);
+        new Thread(this::maintenanceLoop, "Kernel-Maintenance").start();
 
         // 2. Launch Bootstrap Processor (BSP) - Core 0
         RV32Cpu bsp = cpus.get(0);
-        Thread bspThread = new Thread(() -> {
+        new Thread(() -> {
             FileLogger.log(FileLogger.LogLevel.DEBUG, "BSP (Core 0) booting...");
             cpuRunLoop(bsp);
-        }, "CPU-Core-0");
-        bspThread.setDaemon(true);
-        bspThread.start();
-        kernelThreads.add(bspThread);
+        }, "CPU-Core-0").start();
 
         // Note: Application Processors (APs) are NOT started here.
         // They will be started by the BSP calling startOthers().
         // For simulation purposes, we will trigger this automatically after a short
         // delay
         // to mimic the BSP finishing its initialization.
-        Thread apStarterThread = new Thread(() -> {
+        new Thread(() -> {
             try {
                 Thread.sleep(1000); // Simulate BSP initialization time
                 startOthers();
             } catch (InterruptedException e) {
                 FileLogger.log(e);
             }
-        });
-        apStarterThread.setDaemon(true);
-        apStarterThread.start();
-        kernelThreads.add(apStarterThread);
+        }).start();
 
         // 4. Start heat decay timer for memory heatmap visualization
         heatDecayExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -237,14 +235,16 @@ public class Kernel {
     private void startOthers() {
         FileLogger.log(FileLogger.LogLevel.DEBUG,
                 "BSP: Starting Application Processors (APs)...");
+        // Set the flag to allow APs to proceed
         started = true;
 
+        // In simulation, we need to actually start the threads if they aren't already.
+        // But to better match the 'spin wait' logic, we could have started them earlier
+        // and let them spin.
+        // For now, adhering to the plan: we launch them here, and they check the flag.
         for (int i = 1; i < cpus.size(); i++) {
             RV32Cpu ap = cpus.get(i);
-            Thread apThread = new Thread(() -> cpuRunLoop(ap), "CPU-Core-" + ap.getId());
-            apThread.setDaemon(true);
-            apThread.start();
-            kernelThreads.add(apThread);
+            new Thread(() -> cpuRunLoop(ap), "CPU-Core-" + ap.getId()).start();
         }
     }
 
@@ -252,17 +252,11 @@ public class Kernel {
      * Stop the kernel
      */
     public void stop() {
-        running = false;
-        started = false;
-        for (RV32Cpu cpu : cpus) {
-            cpu.turnOff();
-        }
         if (heatDecayExecutor != null)
             heatDecayExecutor.shutdownNow();
-        for (Thread t : kernelThreads) {
-            if (t != null && t.isAlive()) {
-                t.interrupt();
-            }
+        running = false;
+        for (RV32Cpu cpu : cpus) {
+            cpu.turnOff();
         }
         FileLogger.log("Kernel stopped");
     }
@@ -290,7 +284,7 @@ public class Kernel {
                 // ------------------------------------------------------------
                 // 1. EXECUTION CONTROL (Pause / Speed)
                 // ------------------------------------------------------------
-                while (paused) {
+                while (paused && running) {
                     try {
                         Thread.sleep(100);
                     } catch (InterruptedException e) {
@@ -318,7 +312,6 @@ public class Kernel {
 
                 if (currentTask == null) {
                     cpu.setCurrentTask(null);
-                    cpu.processorWasClocked.emit();
                     idle();
                     detectDeadlock();
                     continue;
@@ -411,9 +404,7 @@ public class Kernel {
                 if (task.getState() == TaskState.RUNNING) {
                     task.setState(TaskState.READY);
                 }
-                cpu.processorWasClocked.emit();
             } catch (Exception e) {
-                cpu.clearLastDecodedInstruction();
                 FileLogger.log("JavaTask " + task.getId() + " error: " + e.getMessage());
                 FileLogger.log(e);
                 task.setState(TaskState.TERMINATED);
@@ -443,16 +434,10 @@ public class Kernel {
                         // 1. Save state BEFORE handling syscall (Required for fork/wait to work)
                         task.saveState(cpu);
 
-                        // 2. Clear decoded instruction so UI doesn't show stale ecall state
-                        cpu.clearLastDecodedInstruction();
-
-                        // 3. Handle the syscall (which might change Task state, like exec)
+                        // 2. Handle the syscall (which might change Task state, like exec)
                         handleSystemCall(task, cpu);
 
-                        // 4. Emit signal so UI sees the cleared state
-                        cpu.processorWasClocked.emit();
-
-                        // 5. Mark that we have already saved/handled the state.
+                        // 3. Mark that we have already saved/handled the state.
                         // This prevents the code below the loop from overwriting
                         // changes made by 'exec' (like the new PC).
                         stateSavedBySyscall = true;
@@ -461,31 +446,20 @@ public class Kernel {
 
                     // Check if task hit a breakpoint or exception
                     if (cpu.isException()) {
-                        cpu.clearLastDecodedInstruction();
-                        cpu.processorWasClocked.emit();
                         handleException(task);
                         break;
                     }
 
                     if (task.isKilled()) {
-                        cpu.clearLastDecodedInstruction();
-                        cpu.processorWasClocked.emit();
                         task.setState(TaskState.TERMINATED);
                         break;
                     }
 
-                    // Emit UI signal after each normal instruction (state is clean)
-                    cpu.processorWasClocked.emit();
-
                 } catch (BreakpointException e) {
-                    cpu.clearLastDecodedInstruction();
-                    cpu.processorWasClocked.emit();
                     FileLogger.log("Kernel: " + e.getMessage());
                     this.pause();
                     break;
                 } catch (Exception e) {
-                    cpu.clearLastDecodedInstruction();
-                    cpu.processorWasClocked.emit();
                     FileLogger.log("Task " + task.getId() + " error: " + e.getMessage());
                     task.setState(TaskState.TERMINATED);
                     break;
@@ -855,6 +829,27 @@ public class Kernel {
         FileLogger.log("Kernel: Execution Resumed.");
     }
 
+    public void setScheduler(Scheduler newScheduler) {
+        boolean wasRunning = !this.paused;
+        this.pause();
+
+        schedulerLock.acquire();
+        try {
+            if (this.scheduler != null) {
+                for (Task t : this.scheduler.getReadyTasks()) {
+                    newScheduler.addTask(t);
+                }
+            }
+            this.scheduler = newScheduler;
+            FileLogger.log(LogLevel.INFO, "Kernel: Hot-swapped to " + newScheduler.getClass().getSimpleName() + ".");
+        } finally {
+            schedulerLock.release();
+        }
+
+        if (wasRunning)
+            this.resume();
+    }
+
     public void setExecutionSpeed(int delayMs) {
         this.executionDelayMs = delayMs;
         FileLogger.log(LogLevel.DEBUG, "Kernel: Speed set to " + delayMs + "ms delay.");
@@ -910,6 +905,24 @@ public class Kernel {
 
     public KernelConfig getConfig() {
         return config;
+    }
+
+    /**
+     * Set the time slice (instruction quantum per schedule cycle).
+     * Thread-safe for live UI hot-reloading and kernel operations.
+     *
+     * @param timeSlice Number of instructions per time slice.
+     */
+    public void setTimeSlice(int timeSlice) {
+        schedulerLock.acquire();
+        try {
+            config.setTimeSlice(timeSlice);
+            if (scheduler != null) {
+                scheduler.setTimeSlice(timeSlice);
+            }
+        } finally {
+            schedulerLock.release();
+        }
     }
 
     public void setConsoleView(cse311.gui.components.ConsoleView consoleView) {

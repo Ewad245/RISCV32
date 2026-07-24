@@ -5,6 +5,7 @@ import cse311.kernel.process.Task;
 /**
  * Simple test to verify paging implementation
  */
+@SuppressWarnings({"PMD.TestClassWithoutTestCases", "PMD.AvoidCatchingGenericException"})
 public class PagingTest {
     public static void main(String[] args) {
         try {

@@ -389,3 +389,5 @@ LogFiles/
 .agent/
 
 /User_Program_Source_Code
+/app/src/main/resources/user_programs
+/C_Library

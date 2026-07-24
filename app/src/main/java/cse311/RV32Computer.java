@@ -8,6 +8,10 @@ import cse311.kernel.contiguous.BestFitStrategy;
 import cse311.kernel.contiguous.ContiguousMemoryManager;
 import cse311.kernel.process.Task;
 
+@SuppressWarnings({
+    "PMD.AvoidCatchingGenericException",
+    "PMD.UnusedFormalParameter"
+})
 public class RV32Computer {
     // private RV32Cpu cpu;
     private MemoryManager memory;

@@ -7,6 +7,12 @@ import cse311.kernel.process.Task;
 /**
  * Demonstration of individual address spaces for tasks
  */
+@SuppressWarnings({
+    "PMD.AvoidDuplicateLiterals",
+    "PMD.LiteralsFirstInComparisons",
+    "PMD.AvoidCatchingGenericException",
+    "PMD.UnusedFormalParameter"
+})
 public class VirtualMemoryDemo {
 
     public static void main(String[] args) {

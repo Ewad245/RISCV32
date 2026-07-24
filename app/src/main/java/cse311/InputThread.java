@@ -6,6 +6,7 @@ import java.util.Scanner;
 
 import cse311.Logger.FileLogger;
 
+@SuppressWarnings({"PMD.RelianceOnDefaultCharset", "PMD.AvoidCatchingGenericException"})
 public class InputThread {
 
     private volatile boolean running = true;

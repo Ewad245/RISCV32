@@ -15,6 +15,13 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Each task has its own program counter, register state, and stack.
  * Enhanced with kernel management features and process hierarchy.
  */
+@SuppressWarnings({
+        "PMD.NullAssignment",
+        "PMD.MethodReturnsInternalArray",
+        "PMD.UseVarargs",
+        "PMD.ArrayIsStoredDirectly",
+        "PMD.CompareObjectsWithEquals"
+})
 public class Task {
     private int id;
     private int pc; // Program counter

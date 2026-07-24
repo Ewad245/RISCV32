@@ -11,6 +11,7 @@ import cse311.kernel.process.TaskState;
 
 // This is not tested
 @Deprecated
+@SuppressWarnings("PMD.ConstructorCallsOverridableMethod")
 public abstract class JavaTask extends Task {
 
     protected Kernel kernel;

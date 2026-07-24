@@ -3,6 +3,11 @@ package cse311.kernel.fs;
 import java.io.RandomAccessFile;
 import java.io.IOException;
 
+@SuppressWarnings({
+    "PMD.UnusedPrivateField",
+    "PMD.AvoidPrintStackTrace",
+    "PMD.EmptyCatchBlock"
+})
 public class DiskDevice {
     public static final int BSIZE = 1024; // Block size
 

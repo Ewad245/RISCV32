@@ -19,6 +19,11 @@ import javafx.scene.text.Font;
 import java.io.IOException;
 import java.util.Map;
 
+@SuppressWarnings({
+    "PMD.AvoidLiteralsInIfCondition",
+    "PMD.AvoidCatchingGenericException",
+    "PMD.IdenticalConditionalBranches"
+})
 public class AssemblyView extends VBox {
 
     private RV32Cpu cpu;
@@ -152,8 +157,6 @@ public class AssemblyView extends VBox {
 
             // Update Task Info
             Task task = cpu.getCurrentTask();
-            String taskName = "Idle";
-            int tid = 0;
 
             if (task == null) {
                 taskLabel.setText("Task: Idle");
@@ -164,8 +167,8 @@ public class AssemblyView extends VBox {
                     cachedInstructionsPid = 0;
                 }
             } else {
-                tid = task.getId();
-                taskName = task.getName();
+                int tid = task.getId();
+                String taskName = task.getName();
                 taskLabel.setText(String.format("Task: [%d] %s", tid, taskName));
 
                 // Rebuild list only if Task ID changed

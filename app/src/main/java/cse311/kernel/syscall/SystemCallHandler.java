@@ -28,6 +28,16 @@ import cse311.kernel.process.TaskState;
  * Arguments are passed in registers a0-a6 (x10-x16)
  * Return value is placed in register a0 (x10)
  */
+@SuppressWarnings({
+        "PMD.UnusedLocalVariable",
+        "PMD.AvoidCatchingGenericException",
+        "PMD.UnusedFormalParameter",
+        "PMD.NullAssignment",
+        "PMD.AvoidLiteralsInIfCondition",
+        "PMD.UnusedAssignment",
+        "PMD.AvoidReassigningParameters",
+        "PMD.LiteralsFirstInComparisons"
+})
 public class SystemCallHandler {
     private final Kernel kernel;
 
@@ -862,12 +872,25 @@ public class SystemCallHandler {
             }
         }
 
-        // Fall back to host filesystem if not found in fs.img
+        // Fall back to resources (for web/JPro or bundled jar execution)
+        if (elfData == null) {
+            String resourcePath = "user_programs/" + path;
+            try (java.io.InputStream is = Thread.currentThread().getContextClassLoader().getResourceAsStream(resourcePath)) {
+                if (is != null) {
+                    elfData = is.readAllBytes();
+                    FileLogger.log("SYS_EXEC: Loaded from resources: " + resourcePath);
+                }
+            } catch (Exception ignored) {
+                FileLogger.log("SYS_EXEC: Failed to load from resources: " + resourcePath);
+            }
+        }
+
+        // Fall back to host filesystem if not found in fs.img or resources
         if (elfData == null) {
             String fullPath = ".." + OSConstants.file_seperator + "User_Program_ELF" + OSConstants.file_seperator + path
                     + ".elf";
             try {
-                elfData = Files.readAllBytes(Paths.get(fullPath));
+                elfData = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(fullPath));
                 FileLogger.log("SYS_EXEC: Loaded from host filesystem: " + fullPath);
             } catch (Exception e) {
                 FileLogger.log("SYS_EXEC: Failed to read file: " + fullPath);
@@ -1163,13 +1186,13 @@ public class SystemCallHandler {
             // short type (2 bytes) + 2 bytes padding
             mem.writeWord(statAddr, ip.type);
             // int dev (4 bytes)
-            mem.writeWord(statAddr + 4, 1); 
+            mem.writeWord(statAddr + 4, 1);
             // int ino (4 bytes)
-            mem.writeWord(statAddr + 8, ip.inum); 
+            mem.writeWord(statAddr + 8, ip.inum);
             // int nlink (4 bytes)
-            mem.writeWord(statAddr + 12, ip.nlink); 
+            mem.writeWord(statAddr + 12, ip.nlink);
             // int size (4 bytes)
-            mem.writeWord(statAddr + 16, ip.size); 
+            mem.writeWord(statAddr + 16, ip.size);
             return 0;
         } catch (MemoryAccessException e) {
             return -1;

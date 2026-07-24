@@ -13,6 +13,7 @@
 *.hpp text eol=lf
 *.fxml text eol=lf
 *.css text eol=lf
+*.md text eol=lf
 
 # Build files
 *.sh text eol=lf
@@ -23,4 +24,14 @@ build.gradle text eol=lf
 
 # These are Windows script files and should use crlf
 *.bat           text eol=crlf
+
+# Ensure these file should not be converted due to malfunction git
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.jar binary
+*.war binary
+*.img binary
 

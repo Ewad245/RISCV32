@@ -11,7 +11,6 @@ import javafx.scene.layout.VBox;
 
 import java.io.IOException;
 
-// Extend the container type used in fx:root
 public class CpuView extends VBox {
 
     private final RV32Cpu cpu;
@@ -26,7 +25,6 @@ public class CpuView extends VBox {
 
     // Width of one name+value pair (Name: 40px, Gap: 5px, Value: 80px, Gap: 15px)
     // Approximate, or we can use constraints.
-    private static final double ITEM_WIDTH = 150.0;
     private int currentColumnCount = 0;
 
     public CpuView(RV32Cpu cpu) {
@@ -53,7 +51,7 @@ public class CpuView extends VBox {
 
         // Initial layout (might need Platform.runLater if width is 0 initially)
         updateLayout(this.getWidth());
-        update();
+        updateView();
     }
 
     private void initializeLabels() {
@@ -83,10 +81,6 @@ public class CpuView extends VBox {
 
         // How many *name-value pairs* fit ≈
         int pairsPerRow = Math.max(1, (int) (usableWidth / 220)); // wider because more relaxed
-
-        // But we can also consider height if you want (more advanced)
-        double approxHeightPerRow = 28; // guess
-        int approxVisibleRows = (int) (this.getHeight() / approxHeightPerRow);
 
         // Option A: only care about width (simplest)
         int targetColumns = pairsPerRow * 2; // name + value = 2 grid columns
@@ -130,7 +124,8 @@ public class CpuView extends VBox {
         }
     }
 
-    public void update() {
+    @SuppressWarnings("PMD.AvoidLiteralsInIfCondition")
+    private void updateView() {
         if (cpu == null)
             return;
 
@@ -146,5 +141,9 @@ public class CpuView extends VBox {
                 }
             }
         }
+    }
+
+    public void update() {
+        updateView();
     }
 }

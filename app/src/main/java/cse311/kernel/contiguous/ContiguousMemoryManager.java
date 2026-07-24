@@ -15,10 +15,14 @@ import cse311.Exception.MemoryAccessException;
  * Implements Contiguous Memory Allocation using Base/Limit registers.
  * Acts as the MemoryManager for the CPU in Contiguous Mode.
  */
+@SuppressWarnings({
+    "PMD.AvoidCatchingGenericException",
+    "PMD.AvoidReassigningLoopVariables"
+})
 public class ContiguousMemoryManager extends MemoryManager {
 
     private final int totalMemory;
-    private final AllocationStrategy allocator;
+    private AllocationStrategy allocator;
 
     // Simulates the Hardware Registers (Per-Core)
     private static class CpuContext {
@@ -44,12 +48,16 @@ public class ContiguousMemoryManager extends MemoryManager {
     }
 
     public ContiguousMemoryManager(int totalMemory, AllocationStrategy allocator) {
-        // Initialize the underlying physical RAM
         super(new SimpleMemory(totalMemory));
         this.totalMemory = totalMemory;
         this.allocator = allocator;
-        // Initially one giant free block (hole)
         freeList.add(new MemoryBlock(0, totalMemory));
+    }
+
+    public synchronized void setAllocationStrategy(AllocationStrategy newAllocator) {
+        this.allocator = newAllocator;
+        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.INFO,
+                "MemoryManager: Hot-swapped to " + newAllocator.getClass().getSimpleName() + ".");
     }
 
     public int getLimitRegister() {

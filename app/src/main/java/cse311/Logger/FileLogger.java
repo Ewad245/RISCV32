@@ -10,6 +10,12 @@ import java.nio.file.Paths;
 
 import cse311.Constants.OSConstants;
 
+@SuppressWarnings({
+        "PMD.AvoidPrintStackTrace",
+        "PMD.RelianceOnDefaultCharset",
+        "PMD.SystemPrintln",
+        "PMD.CloseResource"
+})
 public class FileLogger {
     private static Path path = Paths
             .get(".." + OSConstants.file_seperator + "LogFiles" + OSConstants.file_seperator + "log.txt");
@@ -25,33 +31,51 @@ public class FileLogger {
     }
 
     private void initializeLogFile(Path p, boolean isException) {
-        if (!Files.exists(p)) {
-            try {
-                if (p.getParent() != null) {
-                    Files.createDirectories(p.getParent());
-                }
-                Files.createFile(p);
-            } catch (IOException e) {
-                e.printStackTrace();
+        Path logPath = p;
+        boolean success = false;
+        try {
+            if (logPath.getParent() != null) {
+                Files.createDirectories(logPath.getParent());
             }
-        } else {
-            File file = p.toFile();
-            file.delete();
+            if (Files.exists(logPath)) {
+                Files.delete(logPath);
+            }
+            Files.createFile(logPath);
+            success = true;
+        } catch (IOException e) {
+            System.err.println("FileLogger: Failed to initialize log file at " + logPath + ". Error: " + e.getMessage());
+        }
+
+        // Fallback to temp directory if default path failed (e.g. Docker root permission restrictions)
+        if (!success) {
+            String fileName = logPath.getFileName().toString();
+            logPath = Paths.get(System.getProperty("java.io.tmpdir"), "LogFiles", fileName);
             try {
-                Files.createFile(p);
+                if (logPath.getParent() != null) {
+                    Files.createDirectories(logPath.getParent());
+                }
+                if (Files.exists(logPath)) {
+                    Files.delete(logPath);
+                }
+                Files.createFile(logPath);
+                success = true;
+                System.out.println("FileLogger: Successfully fell back to log file at " + logPath);
             } catch (IOException e) {
-                e.printStackTrace();
+                System.err.println("FileLogger: Failed fallback to log file at " + logPath + ". Error: " + e.getMessage());
             }
         }
-        try {
-            OutputStream os = Files.newOutputStream(p);
-            if (isException) {
-                exceptionOutputStream = os;
-            } else {
-                logOutputStream = os;
+
+        if (success) {
+            try {
+                OutputStream os = Files.newOutputStream(logPath);
+                if (isException) {
+                    exceptionOutputStream = os;
+                } else {
+                    logOutputStream = os;
+                }
+            } catch (IOException e) {
+                System.err.println("FileLogger: Failed to open output stream for " + logPath + ". Error: " + e.getMessage());
             }
-        } catch (IOException e) {
-            e.printStackTrace();
         }
     }
 
@@ -70,6 +94,16 @@ public class FileLogger {
 
     public enum LogLevel {
         DEBUG, INFO, ERROR
+    }
+
+    private static LogLevel currentLevel = LogLevel.DEBUG;
+
+    public static void setLogLevel(LogLevel level) {
+        currentLevel = level;
+    }
+
+    public static boolean isLoggable(LogLevel level) {
+        return level.ordinal() >= currentLevel.ordinal();
     }
 
     public static void log(LogLevel level, Object message) {

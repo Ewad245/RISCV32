@@ -8,12 +8,21 @@ import java.util.HashMap;
 import java.util.Map;
 
 import cse311.kernel.process.Task;
-import cse311.util.Signal;
 
+@SuppressWarnings({
+        "PMD.UnusedPrivateField",
+        "PMD.UnusedPrivateMethod",
+        "PMD.UnusedFormalParameter",
+        "PMD.NonExhaustiveSwitch",
+        "PMD.AvoidLiteralsInIfCondition",
+        "PMD.AvoidCatchingGenericException",
+        "PMD.UnusedAssignment",
+        "PMD.PreserveStackTrace",
+        "PMD.UseVarargs",
+        "PMD.UnusedLocalVariable",
+        "PMD.SystemPrintln"
+})
 public class RV32Cpu {
-
-    public final Signal processorWasClocked = new Signal();
-    public final Signal processorWasReset = new Signal();
 
     private int cpuId;
     private int[] x = new int[32];
@@ -81,6 +90,7 @@ public class RV32Cpu {
     private Scanner reader;
     private Thread cpuThread;
     private boolean running = false;
+    private Thread inputThread;
     private InputThread input;
 
     // Track Current Task (for GUI/Observability)
@@ -161,7 +171,7 @@ public class RV32Cpu {
      * @param accessType The access type (CSR_READ_WRITE, CSR_READ_SET,
      *                   CSR_READ_CLEAR)
      * @return The previous CSR value, or 0 if the CSR is not accessible in the
-     *         current privilege mode
+     *         privilege mode
      */
     private int writeCSR(int csrAddress, int value, int accessType) {
         // Check if the CSR is accessible in the current privilege mode
@@ -255,13 +265,6 @@ public class RV32Cpu {
 
     public void setCurrentTask(Task currentTask) {
         this.currentTask = currentTask;
-        if (currentTask == null) {
-            this.lastDecodedInstruction = null;
-        }
-    }
-
-    public void clearLastDecodedInstruction() {
-        this.lastDecodedInstruction = null;
     }
 
     // Methods needed by the kernel
@@ -314,32 +317,52 @@ public class RV32Cpu {
     }
 
     public void turnOn() {
-        Runnable task1 = () -> input.getInput(memory);
-        Thread inputThread = new Thread(task1, "CPU-Input-Thread");
+        /*
+         * this.cpuThread = new Thread(new Runnable() {
+         * 
+         * @Override
+         * public void run() {
+         * while (RV32iCpu.this.running) {
+         * try {
+         * // find13And12(memory.getByteMemory());
+         * fetchExecuteCycle();
+         * } catch (Exception e) {
+         * // TODO Auto-generated catch block
+         * e.printStackTrace();
+         * }
+         * }
+         * }
+         * });
+         */
+
+        inputThread = new Thread(() -> {
+            input.getInput(memory);
+        });
         inputThread.setDaemon(true);
         inputThread.start();
         this.running = true;
         // this.cpuThread.start();
     }
 
-    public void turnOff() {
-        this.running = false;
-        input.stop();
-    }
-
     private void fetchExecuteCycle() throws Exception {
+        // Infinite loop detection removed to allow spin-waiting and idle loops
         lastPC = pc;
 
         try {
+            // Fetch the instruction from memory at the address in the pc register
             int instructionFetched = fetch();
             InstructionDecoded instructionDecoded = decode(instructionFetched);
             this.lastDecodedInstruction = instructionDecoded;
             execute(instructionDecoded);
+            // System.out.println(instructionDecoded.toString());
+            // displayRegisters();
         } catch (MemoryAccessException e) {
-            handleException(7, pc - lastInstructionSize);
+            // Handle memory access exception using the handleException method
+            handleException(7, pc - lastInstructionSize); // 7 = store/AMO access fault
         } catch (Exception e) {
-            handleException(2, pc - lastInstructionSize);
-            cse311.Logger.FileLogger.log(e);
+            // Handle other exceptions using the handleException method
+            handleException(2, pc - lastInstructionSize); // 2 = illegal instruction
+            cse311.Logger.FileLogger.log(e); // Log the exception for debugging
         }
     }
 
@@ -1028,6 +1051,13 @@ public class RV32Cpu {
 
         // Hardwired zero register x[0] must always be 0
         x[0] = 0;
+    }
+
+    public void turnOff() {
+        this.running = false;
+        if (this.inputThread != null) {
+            this.inputThread.interrupt();
+        }
     }
 
     private void handleQemuSemihosting() {

@@ -14,6 +14,11 @@ import java.util.Arrays;
  * Layout:
  * [ boot | sb | log | inodes | bit | data ... ]
  */
+@SuppressWarnings({
+    "PMD.SystemPrintln",
+    "PMD.AssignmentInOperand",
+    "PMD.AvoidReassigningParameters"
+})
 public class Mkfs {
     // Disk Configuration
     static final int NBLOCKS = 2000; // Total disk size

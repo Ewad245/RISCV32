@@ -11,6 +11,7 @@ import java.util.Map;
  * Uses a 2D array approach where each task has its own memory space
  */
 @Deprecated
+@SuppressWarnings("PMD.RelianceOnDefaultCharset")
 public class VirtualMemoryManager {
     // 2D array: [taskId][address] = byte value
     private final Map<Integer, byte[]> taskMemorySpaces = new ConcurrentHashMap<>();

@@ -5,6 +5,15 @@ package cse311;
  * Converts 32-bit machine code into human-readable assembly.
  * Supports RV32I + M-extension + RVC (Compressed).
  */
+@SuppressWarnings({
+    "PMD.NonExhaustiveSwitch",
+    "PMD.AvoidLiteralsInIfCondition",
+    "PMD.AvoidDuplicateLiterals",
+    "PMD.AvoidCatchingGenericException",
+    "PMD.AvoidReassigningParameters",
+    "PMD.UnusedAssignment",
+    "PMD.LiteralsFirstInComparisons"
+})
 public class Disassembler {
 
     private static final String[] REG_NAMES = {

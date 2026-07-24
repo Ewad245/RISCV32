@@ -6,6 +6,11 @@ import cse311.kernel.process.Task;
 /**
  * Example demonstrating how to use the Java kernel with RV32IM CPU emulator
  */
+@SuppressWarnings({
+    "PMD.AvoidCatchingGenericException",
+    "PMD.UnusedLocalVariable",
+    "PMD.UnusedFormalParameter"
+})
 public class KernelExample {
 
     public static void main(String[] args) {
@@ -19,7 +24,7 @@ public class KernelExample {
 
             // Configure kernel for cooperative scheduling
             kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.COOPERATIVE);
-            kernel.getConfig().setTimeSlice(500);
+            kernel.setTimeSlice(500);
 
             // Create some example tasks
             createExampleTasks(kernel);
