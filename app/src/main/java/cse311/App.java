@@ -32,10 +32,8 @@ public class App {
             // --------------------------------------------------------
             // Use Round Robin to allow Init, Shell, and User apps to share CPU
             kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.ROUND_ROBIN);
-            // Set Time Slice to X instructions
-            kernel.getConfig().setTimeSlice(3);
-            // Update the scheduler's time slice since it was already created
-            kernel.getScheduler().setTimeSlice(3);
+            // Set Time Slice to X instructions (Thread-safe delegate call)
+            kernel.setTimeSlice(3);
 
             // --------------------------------------------------------
             // 3. MOUNT FILE SYSTEM

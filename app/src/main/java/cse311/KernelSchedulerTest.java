@@ -39,7 +39,7 @@ public class KernelSchedulerTest {
         Kernel kernel = new Kernel(memManager);
 
         kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.ROUND_ROBIN);
-        kernel.getConfig().setTimeSlice(100); // Small time slice for demonstration
+        kernel.setTimeSlice(100); // Small time slice for demonstration
 
         // Create test tasks
         createTestTasks(kernel, "RR");

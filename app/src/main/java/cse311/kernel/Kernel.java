@@ -907,6 +907,24 @@ public class Kernel {
         return config;
     }
 
+    /**
+     * Set the time slice (instruction quantum per schedule cycle).
+     * Thread-safe for live UI hot-reloading and kernel operations.
+     *
+     * @param timeSlice Number of instructions per time slice.
+     */
+    public void setTimeSlice(int timeSlice) {
+        schedulerLock.acquire();
+        try {
+            config.setTimeSlice(timeSlice);
+            if (scheduler != null) {
+                scheduler.setTimeSlice(timeSlice);
+            }
+        } finally {
+            schedulerLock.release();
+        }
+    }
+
     public void setConsoleView(cse311.gui.components.ConsoleView consoleView) {
         this.consoleView = consoleView;
     }

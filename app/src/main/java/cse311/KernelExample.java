@@ -24,7 +24,7 @@ public class KernelExample {
 
             // Configure kernel for cooperative scheduling
             kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.COOPERATIVE);
-            kernel.getConfig().setTimeSlice(500);
+            kernel.setTimeSlice(500);
 
             // Create some example tasks
             createExampleTasks(kernel);

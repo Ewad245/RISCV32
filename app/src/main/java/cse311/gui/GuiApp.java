@@ -121,8 +121,7 @@ public class GuiApp extends Application {
 
         // KERNEL CONFIGURATION
         kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.ROUND_ROBIN);
-        kernel.getConfig().setTimeSlice(3);
-        kernel.getScheduler().setTimeSlice(3);
+        kernel.setTimeSlice(1000);
 
         // MOUNT FILE SYSTEM
         String imgPath;

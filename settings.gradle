@@ -18,4 +18,6 @@ plugins {
 
 rootProject.name = 'CSE311'
 include('app')
-// include('example-plugins')
+
+// This is where you will include your custom plugins to be build
+include('example-plugins')

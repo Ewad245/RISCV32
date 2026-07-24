@@ -1,8 +1,12 @@
 package cse311.kernel.plugin;
 
 import java.io.File;
+import java.io.IOException;
 import java.net.URL;
 import java.net.URLClassLoader;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.ServiceLoader;
 
 import cse311.Logger.FileLogger;
@@ -11,11 +15,19 @@ import cse311.kernel.NonContiguous.paging.ReplacementPolicy;
 import cse311.kernel.contiguous.AllocationStrategy;
 import cse311.kernel.scheduler.Scheduler;
 
-@SuppressWarnings("PMD.UseProperClassLoader")
 public final class PluginLoader {
+
+    private static final List<URLClassLoader> ACTIVE_LOADERS = Collections.synchronizedList(new ArrayList<>());
 
     private PluginLoader() {
         // Utility class
+    }
+
+    private static URLClassLoader createAndRegisterClassLoader(URL... urls) {
+        ClassLoader parentLoader = Thread.currentThread().getContextClassLoader();
+        URLClassLoader loader = new URLClassLoader(urls, parentLoader);
+        ACTIVE_LOADERS.add(loader);
+        return loader;
     }
 
     /**
@@ -28,20 +40,28 @@ public final class PluginLoader {
      * @throws IllegalArgumentException if no implementation is found
      * @throws Exception                if the JAR cannot be read or the service cannot be instantiated
      */
+    @SuppressWarnings("PMD.CloseResource")
     public static <T> T loadPlugin(File jarFile, Class<T> serviceInterface) throws Exception {
         URL[] urls = { jarFile.toURI().toURL() };
 
-        try (URLClassLoader loader = new URLClassLoader(urls, PluginLoader.class.getClassLoader())) {
-            ServiceLoader<T> serviceLoader = ServiceLoader.load(serviceInterface, loader);
+        URLClassLoader loader = createAndRegisterClassLoader(urls);
+        ServiceLoader<T> serviceLoader = ServiceLoader.load(serviceInterface, loader);
 
-            java.util.Iterator<T> iterator = serviceLoader.iterator();
-            if (iterator.hasNext()) {
-                T implementation = iterator.next();
-                FileLogger.log(LogLevel.DEBUG,
-                        "PluginLoader: Loaded " + serviceInterface.getSimpleName()
-                                + " implementation: " + implementation.getClass().getName());
-                return implementation;
-            }
+        java.util.Iterator<T> iterator = serviceLoader.iterator();
+        if (iterator.hasNext()) {
+            T implementation = iterator.next();
+            FileLogger.log(LogLevel.DEBUG,
+                    "PluginLoader: Loaded " + serviceInterface.getSimpleName()
+                            + " implementation: " + implementation.getClass().getName());
+            return implementation;
+        }
+
+        try {
+            ACTIVE_LOADERS.remove(loader);
+            loader.close();
+        } catch (IOException e) {
+            FileLogger.log(LogLevel.ERROR, "PluginLoader: Failed to close unused class loader: " + e.getMessage());
+            FileLogger.log(e);
         }
 
         throw new IllegalArgumentException(
