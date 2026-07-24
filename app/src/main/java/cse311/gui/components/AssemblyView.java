@@ -162,8 +162,9 @@ public class AssemblyView extends VBox {
                 taskLabel.setText("Task: Idle");
                 // If idle, we switch to a special "Idle" state display
                 if (cachedInstructionsPid != 0) {
+                    instructions.clear();
                     addressToIndexMap.clear();
-                    instructions.setAll(new InstructionItem(0, 0, "CPU is not running", false));
+                    instructions.add(new InstructionItem(0, 0, "CPU is not running", false));
                     cachedInstructionsPid = 0;
                 }
             } else {
@@ -195,10 +196,11 @@ public class AssemblyView extends VBox {
     }
 
     private void rebuildFullList(Task task) {
+        instructions.clear();
         addressToIndexMap.clear();
 
         if (task.getProgramInfo() == null) {
-            instructions.setAll(new InstructionItem(0, 0, "No Program Info Available", false));
+            instructions.add(new InstructionItem(0, 0, "No Program Info Available", false));
             return;
         }
 
@@ -213,39 +215,42 @@ public class AssemblyView extends VBox {
         int pid = task.getId();
 
         int listIndex = 0;
+
         int addr = start;
-
-        // 1. Create a temporary standard list to hold the items
-        java.util.List<InstructionItem> newInstructions = new java.util.ArrayList<>();
-
         while (addr < end) {
             // Check for Symbol Label
             if (symbolMap != null && symbolMap.containsKey(addr)) {
                 String symName = symbolMap.get(addr);
                 String labelStr = String.format("%08x <%s>:", addr, symName);
-                newInstructions.add(new InstructionItem(addr, 0, labelStr, true));
+                instructions.add(new InstructionItem(addr, 0, labelStr, true));
                 listIndex++;
             }
 
             try {
+                // Read lower 16 bits first to check for compressed instruction
                 int lower16 = memory.debugReadWord(addr, pid) & 0xFFFF;
+
                 String asm;
                 int code;
                 int step;
 
                 if (lower16 == 0) {
+                    // Zero instruction
                     code = memory.debugReadWord(addr, pid);
                     asm = ".word 0";
-                    step = 4;
+                    step = (code == 0) ? 4 : 4; // If whole word is 0, step 4
+                    // But check if only lower half is 0 (compressed NOP-like)
                     if ((lower16 & 0x3) != 0x3) {
                         step = 2;
                         code = lower16;
                     }
                 } else if ((lower16 & 0x3) != 0x3) {
+                    // Compressed (16-bit) instruction
                     code = lower16;
                     asm = Disassembler.disassembleCompressed(lower16, addr);
                     step = 2;
                 } else {
+                    // Standard (32-bit) instruction
                     code = memory.debugReadWord(addr, pid);
                     asm = Disassembler.disassemble(code, addr);
                     step = 4;
@@ -257,22 +262,19 @@ public class AssemblyView extends VBox {
                     asm += "  <-- Ecall java side is running";
                 }
 
-                // 2. Add to the temporary list instead of the ObservableList
-                newInstructions.add(new InstructionItem(addr, code, asm, false));
+                instructions.add(new InstructionItem(addr, code, asm, false));
 
+                // Map Address -> List Index
                 addressToIndexMap.put(addr, listIndex);
                 listIndex++;
                 addr += step;
 
             } catch (Exception e) {
-                newInstructions.add(new InstructionItem(addr, 0, "???", false));
+                instructions.add(new InstructionItem(addr, 0, "???", false));
                 listIndex++;
-                addr += 2;
+                addr += 2; // Step by 2 on error to avoid skipping compressed instructions
             }
         }
-
-        // 3. Batch update the JavaFX UI in one single atomic operation!
-        instructions.setAll(newInstructions);
     }
 
     public static class InstructionItem {
