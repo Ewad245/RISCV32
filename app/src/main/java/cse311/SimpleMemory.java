@@ -28,8 +28,9 @@ public class SimpleMemory {
     // Add MMIO ranges
     private static final int MMIO_START = 0x10000000;
     private static final int MMIO_END = 0x10001000;
+    private static final String OUT_OF_BOUNDS_PREFIX = "Memory access out of bounds: 0x";
 
-    public synchronized byte readByte(int address) throws MemoryAccessException {
+    public byte readByte(int address) throws MemoryAccessException {
         // Check if address is in MMIO range
         if (address >= MMIO_START && address < MMIO_END) {
             // Let MemoryManager handle MMIO
@@ -38,13 +39,13 @@ public class SimpleMemory {
 
         int physicalAddress = translateAddress(address);
         if (physicalAddress < 0 || physicalAddress >= MEMORY_SIZE) {
-            throw new MemoryAccessException("Memory access out of bounds: 0x" +
+            throw new MemoryAccessException(OUT_OF_BOUNDS_PREFIX +
                     Integer.toHexString(address) + " -> 0x" + Integer.toHexString(physicalAddress));
         }
         return memory[physicalAddress];
     }
 
-    public synchronized void writeByte(int address, byte value) throws MemoryAccessException {
+    public void writeByte(int address, byte value) throws MemoryAccessException {
         // Check if address is in MMIO range
         if (address >= MMIO_START && address < MMIO_END) {
             // Let MemoryManager handle MMIO
@@ -59,7 +60,7 @@ public class SimpleMemory {
         memory[physicalAddress] = value;
     }
 
-    public synchronized short readHalfWord(int address) throws MemoryAccessException {
+    public short readHalfWord(int address) throws MemoryAccessException {
         checkAddress(address, HALF_WORD_ALIGN);
         checkAlignment(address, HALF_WORD_ALIGN);
 
@@ -68,7 +69,7 @@ public class SimpleMemory {
                 (memory[physicalAddress] & 0xFF));
     }
 
-    public synchronized int readWord(int address) throws MemoryAccessException {
+    public int readWord(int address) throws MemoryAccessException {
         checkAddress(address, WORD_ALIGN);
         checkAlignment(address, WORD_ALIGN);
 
@@ -79,7 +80,7 @@ public class SimpleMemory {
                 (memory[physicalAddress] & 0xFF);
     }
 
-    public synchronized void writeHalfWord(int address, short value) throws MemoryAccessException {
+    public void writeHalfWord(int address, short value) throws MemoryAccessException {
         checkAddress(address, HALF_WORD_ALIGN);
         checkAlignment(address, HALF_WORD_ALIGN);
 
@@ -88,7 +89,7 @@ public class SimpleMemory {
         memory[physicalAddress + 1] = (byte) ((value >> 8) & 0xFF);
     }
 
-    public synchronized void writeWord(int address, int value) throws MemoryAccessException {
+    public void writeWord(int address, int value) throws MemoryAccessException {
         checkAddress(address, WORD_ALIGN);
         checkAlignment(address, WORD_ALIGN);
 
@@ -133,7 +134,7 @@ public class SimpleMemory {
     }
 
     private void checkAlignment(int address, int alignment) throws MemoryAccessException {
-        if ((address % alignment) != 0) {
+        if ((address & (alignment - 1)) != 0) {
             throw new MemoryAccessException(
                     String.format("Misaligned memory access: address=%d, required alignment=%d",
                             address, alignment));
@@ -177,5 +178,61 @@ public class SimpleMemory {
 
     public byte[] getMemory() {
         return memory;
+    }
+
+    // Fast-path memory accessors with single-primitive inlined bounds check and bitwise physical mapping
+    public byte readByteFast(int addr) throws MemoryAccessException {
+        int pa = (addr < 0) ? (addr & 0x07FFFFFF) : addr;
+        if (pa < 0 || pa >= MEMORY_SIZE) {
+            throw new MemoryAccessException(OUT_OF_BOUNDS_PREFIX + Integer.toHexString(addr));
+        }
+        return memory[pa];
+    }
+
+    public short readHalfWordFast(int addr) throws MemoryAccessException {
+        int pa = (addr < 0) ? (addr & 0x07FFFFFF) : addr;
+        if (pa < 0 || pa > MEMORY_SIZE - 2) {
+            throw new MemoryAccessException(OUT_OF_BOUNDS_PREFIX + Integer.toHexString(addr));
+        }
+        return (short) (((memory[pa + 1] & 0xFF) << 8) | (memory[pa] & 0xFF));
+    }
+
+    public int readWordFast(int addr) throws MemoryAccessException {
+        int pa = (addr < 0) ? (addr & 0x07FFFFFF) : addr;
+        if (pa < 0 || pa > MEMORY_SIZE - 4) {
+            throw new MemoryAccessException(OUT_OF_BOUNDS_PREFIX + Integer.toHexString(addr));
+        }
+        return ((memory[pa + 3] & 0xFF) << 24)
+             | ((memory[pa + 2] & 0xFF) << 16)
+             | ((memory[pa + 1] & 0xFF) << 8)
+             | (memory[pa] & 0xFF);
+    }
+
+    public void writeByteFast(int addr, byte v) throws MemoryAccessException {
+        int pa = (addr < 0) ? (addr & 0x07FFFFFF) : addr;
+        if (pa < 0 || pa >= MEMORY_SIZE) {
+            throw new MemoryAccessException(OUT_OF_BOUNDS_PREFIX + Integer.toHexString(addr));
+        }
+        memory[pa] = v;
+    }
+
+    public void writeHalfWordFast(int addr, short v) throws MemoryAccessException {
+        int pa = (addr < 0) ? (addr & 0x07FFFFFF) : addr;
+        if (pa < 0 || pa > MEMORY_SIZE - 2) {
+            throw new MemoryAccessException(OUT_OF_BOUNDS_PREFIX + Integer.toHexString(addr));
+        }
+        memory[pa]     = (byte) (v & 0xFF);
+        memory[pa + 1] = (byte) ((v >> 8) & 0xFF);
+    }
+
+    public void writeWordFast(int addr, int v) throws MemoryAccessException {
+        int pa = (addr < 0) ? (addr & 0x07FFFFFF) : addr;
+        if (pa < 0 || pa > MEMORY_SIZE - 4) {
+            throw new MemoryAccessException(OUT_OF_BOUNDS_PREFIX + Integer.toHexString(addr));
+        }
+        memory[pa]     = (byte) (v & 0xFF);
+        memory[pa + 1] = (byte) ((v >> 8) & 0xFF);
+        memory[pa + 2] = (byte) ((v >> 16) & 0xFF);
+        memory[pa + 3] = (byte) ((v >> 24) & 0xFF);
     }
 }

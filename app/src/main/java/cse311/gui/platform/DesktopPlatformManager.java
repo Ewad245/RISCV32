@@ -59,6 +59,9 @@ public class DesktopPlatformManager implements PlatformManager {
     
     @Override
     public void exit(Window window) {
+        if (window != null) {
+            window.hide();
+        }
         Platform.exit();
     }
     

@@ -65,7 +65,8 @@ public class ContiguousMemoryManager extends MemoryManager {
     }
 
     private boolean isMMIO(int address) {
-        return address >= UART_BASE && address < (UART_BASE + UART_SIZE);
+        return (address >= UART_BASE && address < (UART_BASE + UART_SIZE)) ||
+               (address >= cse311.FramebufferDevice.FB_BASE && address < cse311.FramebufferDevice.CTRL_BASE + 0x100);
     }
 
     /**

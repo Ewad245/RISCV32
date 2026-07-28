@@ -83,6 +83,7 @@ public class SystemCallHandler {
     public static final int SYS_CHDIR = 49;
     public static final int SYS_OPEN = 56; // openat/open
     public static final int SYS_CLOSE = 57;
+    public static final int SYS_LSEEK = 62;
     public static final int SYS_FSTAT = 80;
     public static final int SYS_PIPE = 59; // Linux RISC-V pipe syscall
 
@@ -198,6 +199,10 @@ public class SystemCallHandler {
 
                 case SYS_CLOSE:
                     result = handleClose(task, arg0); // arg0=fd
+                    break;
+
+                case SYS_LSEEK:
+                    result = handleLseek(task, arg0, arg1, arg2); // arg0=fd, arg1=offset, arg2=whence
                     break;
 
                 case SYS_DUP:
@@ -1197,6 +1202,35 @@ public class SystemCallHandler {
         } catch (MemoryAccessException e) {
             return -1;
         }
+    }
+
+    private int handleLseek(Task task, int fd, int offset, int whence) {
+        FileDescriptor file = task.getFileDescriptor(fd);
+        if (file == null) {
+            return -1;
+        }
+
+        int newOffset;
+        if (whence == 0) { // SEEK_SET
+            newOffset = offset;
+        } else if (whence == 1) { // SEEK_CUR
+            newOffset = file.offset + offset;
+        } else if (whence == 2) { // SEEK_END
+            if (file.type == FileDescriptor.FD_INODE && file.inode != null) {
+                newOffset = file.inode.size + offset;
+            } else {
+                return -1;
+            }
+        } else {
+            return -1;
+        }
+
+        if (newOffset < 0) {
+            return -1;
+        }
+
+        file.offset = newOffset;
+        return newOffset;
     }
 
     private int handleMkdir(Task task, int pathAddr, int mode) {

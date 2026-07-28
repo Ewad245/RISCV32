@@ -16,7 +16,6 @@ import cse311.kernel.process.Task;
         "PMD.NonExhaustiveSwitch",
         "PMD.AvoidLiteralsInIfCondition",
         "PMD.AvoidCatchingGenericException",
-        "PMD.UnusedAssignment",
         "PMD.PreserveStackTrace",
         "PMD.UseVarargs",
         "PMD.UnusedLocalVariable",
@@ -313,6 +312,14 @@ public class RV32Cpu {
     }
 
     public InstructionDecoded getLastDecodedInstruction() {
+        if (lastDecodedInstruction == null && lastPC != -1 && memory != null) {
+            try {
+                int inst = memory.readWord(lastPC);
+                lastDecodedInstruction = decode(inst);
+            } catch (Exception ignored) {
+                // Ignore decoding exception on disassembly preview
+            }
+        }
         return lastDecodedInstruction;
     }
 
@@ -344,26 +351,45 @@ public class RV32Cpu {
         // this.cpuThread.start();
     }
 
-    private void fetchExecuteCycle() throws Exception {
-        // Infinite loop detection removed to allow spin-waiting and idle loops
+    private long cycleCount = 0;
+    private static final java.util.concurrent.atomic.AtomicLong totalCycleCount = new java.util.concurrent.atomic.AtomicLong(0);
+
+    public long getCycleCount() {
+        return cycleCount;
+    }
+
+    public static long getTotalCycleCount() {
+        return totalCycleCount.get();
+    }
+
+    public void fetchExecuteCycle() throws Exception {
+        cycleCount++;
+        if ((cycleCount & 0x3FF) == 0) {
+            totalCycleCount.addAndGet(1024);
+        }
         lastPC = pc;
 
         try {
-            // Fetch the instruction from memory at the address in the pc register
             int instructionFetched = fetch();
-            InstructionDecoded instructionDecoded = decode(instructionFetched);
-            this.lastDecodedInstruction = instructionDecoded;
-            execute(instructionDecoded);
-            // System.out.println(instructionDecoded.toString());
-            // displayRegisters();
+            executeFast(instructionFetched);
         } catch (MemoryAccessException e) {
-            // Handle memory access exception using the handleException method
-            handleException(7, pc - lastInstructionSize); // 7 = store/AMO access fault
+            handleException(7, pc - lastInstructionSize);
         } catch (Exception e) {
-            // Handle other exceptions using the handleException method
-            handleException(2, pc - lastInstructionSize); // 2 = illegal instruction
-            cse311.Logger.FileLogger.log(e); // Log the exception for debugging
+            handleException(2, pc - lastInstructionSize);
+            cse311.Logger.FileLogger.log(e);
         }
+    }
+
+    public int runBatch(int maxInstructions) throws Exception {
+        int executed = 0;
+        while (executed < maxInstructions) {
+            fetchExecuteCycle();
+            executed++;
+            if (lastInstructionWasEcall || exceptionOccurred) {
+                break;
+            }
+        }
+        return executed;
     }
 
     /**
@@ -482,12 +508,16 @@ public class RV32Cpu {
     // --- Breakpoints ---
     private final java.util.Set<Integer> breakpoints = new java.util.HashSet<>();
 
+    private boolean hasBreakpoints = false;
+
     public void addBreakpoint(int addr) {
         breakpoints.add(addr);
+        hasBreakpoints = true;
     }
 
     public void removeBreakpoint(int addr) {
         breakpoints.remove(addr);
+        hasBreakpoints = !breakpoints.isEmpty();
     }
 
     public void toggleBreakpoint(int addr) {
@@ -496,6 +526,7 @@ public class RV32Cpu {
         } else {
             breakpoints.add(addr);
         }
+        hasBreakpoints = !breakpoints.isEmpty();
     }
 
     public boolean hasBreakpoint(int addr) {
@@ -504,57 +535,63 @@ public class RV32Cpu {
 
     private int fetch() throws MemoryAccessException {
         // Check for Breakpoint BEFORE fetch
-        if (breakpoints.contains(pc)) {
+        if (hasBreakpoints && breakpoints.contains(pc)) {
             throw new cse311.Exception.BreakpointException("Breakpoint hit at " + Integer.toHexString(pc));
         }
 
-        int instruction = 0;
-
         try {
-            // Step 1: Read the lower 16 bits (2 bytes) at PC
+            // Fast Path: Aligned 32-bit instruction fetch
+            if ((pc & 0x3) == 0) {
+                int instruction = memory.readWord(pc);
+                if ((instruction & 0x3) != 0x3) {
+                    // Compressed (16-bit) instruction on 32-bit boundary
+                    int lower16 = instruction & 0xFFFF;
+                    int decompressed = RVCDecompressor.decompress(lower16);
+                    lastInstructionSize = 2;
+                    pc += 2;
+                    return decompressed;
+                }
+                lastInstructionSize = 4;
+                pc += INSTRUCTION_SIZE;
+                return instruction;
+            }
+
+            // Fallback Path: Unaligned or byte-by-byte instruction fetch
             byte byte0 = memory.readByte(pc);
             byte byte1 = memory.readByte(pc + 1);
             int lower16 = ((byte1 & 0xFF) << 8) | (byte0 & 0xFF);
 
-            // Step 2: Check bits [1:0] to determine instruction length
             if ((lower16 & 0x3) != 0x3) {
                 // --- COMPRESSED (16-bit) instruction ---
-                // Expand to 32-bit equivalent using the decompressor
-                instruction = RVCDecompressor.decompress(lower16);
+                int instruction = RVCDecompressor.decompress(lower16);
                 lastInstructionSize = 2;
                 pc += 2;
+                return instruction;
             } else {
                 // --- STANDARD (32-bit) instruction ---
-                // Read the upper 16 bits
                 byte byte2 = memory.readByte(pc + 2);
                 byte byte3 = memory.readByte(pc + 3);
 
-                instruction = (byte3 & 0xFF) << 24
-                        | (byte2 & 0xFF) << 16
-                        | (byte1 & 0xFF) << 8
+                int instruction = ((byte3 & 0xFF) << 24)
+                        | ((byte2 & 0xFF) << 16)
+                        | ((byte1 & 0xFF) << 8)
                         | (byte0 & 0xFF);
 
                 lastInstructionSize = 4;
                 pc += INSTRUCTION_SIZE;
+                return instruction;
             }
         } catch (cse311.Exception.BreakpointException e) {
-            throw e; // Re-throw breakpoint exceptions
+            throw e;
         } catch (Exception e) {
             throw new MemoryAccessException("Failed to fetch instruction at PC: " + pc);
         }
-
-        return instruction;
     }
 
+    private final InstructionDecoded reusableDecoded = new InstructionDecoded();
+
     private InstructionDecoded decode(int instructionInt) {
-        // Combine the bytes into a 32-bit instruction
-        /*
-         * int instructionInt = (instruction[3] & 0xFF) << 24
-         * | (instruction[2] & 0xFF) << 16
-         * | (instruction[1] & 0xFF) << 8
-         * | (instruction[0] & 0xFF);
-         */
-        InstructionDecoded instruction = new InstructionDecoded();
+        InstructionDecoded instruction = reusableDecoded;
 
         // Extract instruction fields based on RISC-V RV32I format
         int opcode = instructionInt & 0x7F; // bits 0-6
@@ -606,7 +643,185 @@ public class RV32Cpu {
         imm_j = (imm_j << 11) >> 11; // Sign extend
         instruction.setImm_j(imm_j);
         return instruction;
+    }
 
+    private void executeFast(int inst) {
+        int opcode = inst & 0x7F;
+        int rd = (inst >> 7) & 0x1F;
+        int func3 = (inst >> 12) & 0x7;
+        int rs1 = (inst >> 15) & 0x1F;
+        int rs2 = (inst >> 20) & 0x1F;
+        int func7 = (inst >> 25) & 0x7F;
+
+        switch (opcode) {
+            case 0b0110011: { // R-type
+                int val1 = x[rs1];
+                int val2 = x[rs2];
+                switch (func3) {
+                    case 0b000:
+                        if (func7 == 0) { x[rd] = val1 + val2; }
+                        else if (func7 == 0b0100000) { x[rd] = val1 - val2; }
+                        else if (func7 == 0b0000001) { x[rd] = val1 * val2; }
+                        else { handleException(2, pc - lastInstructionSize); }
+                        break;
+                    case 0b001:
+                        if (func7 == 0) { x[rd] = val1 << (val2 & 0x1F); }
+                        else if (func7 == 0b0000001) {
+                            long a = val1; long b = val2;
+                            if ((a & 0x80000000L) != 0) a |= 0xFFFFFFFF00000000L;
+                            if ((b & 0x80000000L) != 0) b |= 0xFFFFFFFF00000000L;
+                            x[rd] = (int) ((a * b) >> 32);
+                        } else { handleException(2, pc - lastInstructionSize); }
+                        break;
+                    case 0b010:
+                        if (func7 == 0) { x[rd] = (val1 < val2) ? 1 : 0; }
+                        else if (func7 == 0b0000001) {
+                            long a = val1; long b = Integer.toUnsignedLong(val2);
+                            if ((a & 0x80000000L) != 0) a |= 0xFFFFFFFF00000000L;
+                            x[rd] = (int) ((a * b) >> 32);
+                        } else { handleException(2, pc - lastInstructionSize); }
+                        break;
+                    case 0b011:
+                        if (func7 == 0) { x[rd] = (Integer.compareUnsigned(val1, val2) < 0) ? 1 : 0; }
+                        else if (func7 == 0b0000001) {
+                            long a = Integer.toUnsignedLong(val1); long b = Integer.toUnsignedLong(val2);
+                            x[rd] = (int) ((a * b) >> 32);
+                        } else { handleException(2, pc - lastInstructionSize); }
+                        break;
+                    case 0b100:
+                        if (func7 == 0) { x[rd] = val1 ^ val2; }
+                        else if (func7 == 0b0000001) {
+                            if (val2 == 0) { x[rd] = -1; }
+                            else if (val1 == Integer.MIN_VALUE && val2 == -1) { x[rd] = Integer.MIN_VALUE; }
+                            else { x[rd] = val1 / val2; }
+                        } else { handleException(2, pc - lastInstructionSize); }
+                        break;
+                    case 0b101:
+                        if (func7 == 0) { x[rd] = val1 >>> (val2 & 0x1F); }
+                        else if (func7 == 0b0100000) { x[rd] = val1 >> (val2 & 0x1F); }
+                        else if (func7 == 0b0000001) {
+                            if (val2 == 0) { x[rd] = -1; }
+                            else { x[rd] = Integer.divideUnsigned(val1, val2); }
+                        } else { handleException(2, pc - lastInstructionSize); }
+                        break;
+                    case 0b110:
+                        if (func7 == 0) { x[rd] = val1 | val2; }
+                        else if (func7 == 0b0000001) {
+                            if (val2 == 0) { x[rd] = val1; }
+                            else if (val1 == Integer.MIN_VALUE && val2 == -1) { x[rd] = 0; }
+                            else { x[rd] = val1 % val2; }
+                        } else { handleException(2, pc - lastInstructionSize); }
+                        break;
+                    case 0b111:
+                        if (func7 == 0) { x[rd] = val1 & val2; }
+                        else if (func7 == 0b0000001) {
+                            if (val2 == 0) { x[rd] = val1; }
+                            else { x[rd] = Integer.remainderUnsigned(val1, val2); }
+                        } else { handleException(2, pc - lastInstructionSize); }
+                        break;
+                }
+                break;
+            }
+            case 0b0010011: { // I-type ALU
+                int imm_i = inst >> 20;
+                int val1 = x[rs1];
+                switch (func3) {
+                    case 0b000: x[rd] = val1 + imm_i; break;
+                    case 0b001: x[rd] = val1 << (imm_i & 0x1F); break;
+                    case 0b010: x[rd] = (val1 < imm_i) ? 1 : 0; break;
+                    case 0b011: x[rd] = (Integer.compareUnsigned(val1, imm_i) < 0) ? 1 : 0; break;
+                    case 0b100: x[rd] = val1 ^ imm_i; break;
+                    case 0b101:
+                        if ((imm_i & 0xFE0) == 0) { x[rd] = val1 >>> (imm_i & 0x1F); }
+                        else if ((imm_i & 0xFE0) == 0x400) { x[rd] = val1 >> (imm_i & 0x1F); }
+                        break;
+                    case 0b110: x[rd] = val1 | imm_i; break;
+                    case 0b111: x[rd] = val1 & imm_i; break;
+                }
+                break;
+            }
+            case 0b0000011: { // LOAD
+                int imm_i = inst >> 20;
+                int rawAddr = x[rs1] + imm_i;
+                try {
+                    switch (func3) {
+                        case 0b000: x[rd] = memory.readByte(rawAddr); break;
+                        case 0b001: x[rd] = memory.readHalfWord(rawAddr); break;
+                        case 0b010: x[rd] = memory.readWord(rawAddr); break;
+                        case 0b100: x[rd] = memory.readByte(rawAddr) & 0xFF; break;
+                        case 0b101: x[rd] = memory.readHalfWord(rawAddr) & 0xFFFF; break;
+                    }
+                } catch (MemoryAccessException e) {
+                    handleException(5, rawAddr);
+                }
+                break;
+            }
+            case 0b0100011: { // STORE
+                int imm_s = (((inst >> 25) << 5) | ((inst >> 7) & 0x1F));
+                imm_s = (imm_s << 20) >> 20;
+                int rawAddr = x[rs1] + imm_s;
+                int val2 = x[rs2];
+                try {
+                    switch (func3) {
+                        case 0b000: memory.writeByte(rawAddr, (byte) val2); break;
+                        case 0b001: memory.writeHalfWord(rawAddr, (short) val2); break;
+                        case 0b010: memory.writeWord(rawAddr, val2); break;
+                    }
+                } catch (MemoryAccessException e) {
+                    handleException(7, rawAddr);
+                }
+                break;
+            }
+            case 0b1100011: { // BRANCH
+                int imm_b = (((inst >> 31) << 12) | ((inst >> 7) & 0x1) << 11 | ((inst >> 25) & 0x3F) << 5 | ((inst >> 8) & 0xF) << 1);
+                imm_b = (imm_b << 19) >> 19;
+                int val1 = x[rs1];
+                int val2 = x[rs2];
+                boolean takeBranch = false;
+                switch (func3) {
+                    case 0b000: takeBranch = (val1 == val2); break;
+                    case 0b001: takeBranch = (val1 != val2); break;
+                    case 0b100: takeBranch = (val1 < val2); break;
+                    case 0b101: takeBranch = (val1 >= val2); break;
+                    case 0b110: takeBranch = (Integer.compareUnsigned(val1, val2) < 0); break;
+                    case 0b111: takeBranch = (Integer.compareUnsigned(val1, val2) >= 0); break;
+                }
+                if (takeBranch) {
+                    pc += imm_b - lastInstructionSize;
+                }
+                break;
+            }
+            case 0b0110111: { // LUI
+                x[rd] = inst & 0xFFFFF000;
+                break;
+            }
+            case 0b0010111: { // AUIPC
+                x[rd] = (pc - lastInstructionSize) + (inst & 0xFFFFF000);
+                break;
+            }
+            case 0b1101111: { // JAL
+                int imm_j = (((inst >> 31) << 20) | ((inst >> 12) & 0xFF) << 12 | ((inst >> 20) & 0x1) << 11 | ((inst >> 21) & 0x3FF) << 1);
+                imm_j = (imm_j << 11) >> 11;
+                if (rd != 0) { x[rd] = pc; }
+                pc += imm_j - lastInstructionSize;
+                break;
+            }
+            case 0b1100111: { // JALR
+                int imm_i = inst >> 20;
+                int val1 = x[rs1];
+                int temp = pc;
+                pc = (val1 + imm_i) & ~1;
+                if (rd != 0) { x[rd] = temp; }
+                break;
+            }
+            default: {
+                InstructionDecoded dec = decode(inst);
+                this.lastDecodedInstruction = dec;
+                execute(dec);
+                return;
+            }
+        }
+        x[0] = 0;
     }
 
     private void execute(InstructionDecoded instruction) {
@@ -1177,13 +1392,8 @@ public class RV32Cpu {
      * @return The physical address
      */
     private int mapAddress(int virtualAddr) {
-        // Handle UART addresses - these are passed through unchanged
-        if (checkUARTAddress(virtualAddr)) {
-            // UART access is only allowed in machine mode and supervisor mode
-            if (privilegeMode == PRIVILEGE_USER) {
-                throw new RuntimeException("User mode cannot access UART at address: 0x" +
-                        Integer.toHexString(virtualAddr));
-            }
+        // Handle MMIO addresses (UART & Framebuffer) - pass through unchanged
+        if (checkMMIOAddress(virtualAddr)) {
             return virtualAddr;
         }
 
@@ -1352,12 +1562,13 @@ public class RV32Cpu {
         }
     }
 
+    public boolean checkMMIOAddress(int virtualAddr) {
+        return (virtualAddr >= MemoryManager.UART_BASE && virtualAddr < MemoryManager.UART_BASE + 0x1000) ||
+               (virtualAddr >= FramebufferDevice.FB_BASE && virtualAddr < FramebufferDevice.CTRL_BASE + 0x100);
+    }
+
     public boolean checkUARTAddress(int virtualAddr) {
-        if (virtualAddr >= MemoryManager.UART_BASE &&
-                virtualAddr < MemoryManager.UART_BASE + 0x1000) {
-            return true;
-        }
-        return false;
+        return checkMMIOAddress(virtualAddr);
     }
 
     // Task management is now handled by the kernel, not the CPU

@@ -192,28 +192,34 @@ public class Kernel {
         FileLogger.log(FileLogger.LogLevel.DEBUG, "Kernel starting...");
 
         // 1. Launch Maintenance Thread (Handles Interrupts/Timers)
-        new Thread(this::maintenanceLoop, "Kernel-Maintenance").start();
+        Thread maintenanceThread = new Thread(this::maintenanceLoop, "Kernel-Maintenance");
+        maintenanceThread.setDaemon(true);
+        maintenanceThread.start();
 
         // 2. Launch Bootstrap Processor (BSP) - Core 0
         RV32Cpu bsp = cpus.get(0);
-        new Thread(() -> {
+        Thread bspThread = new Thread(() -> {
             FileLogger.log(FileLogger.LogLevel.DEBUG, "BSP (Core 0) booting...");
             cpuRunLoop(bsp);
-        }, "CPU-Core-0").start();
+        }, "CPU-Core-0");
+        bspThread.setDaemon(true);
+        bspThread.start();
 
         // Note: Application Processors (APs) are NOT started here.
         // They will be started by the BSP calling startOthers().
         // For simulation purposes, we will trigger this automatically after a short
         // delay
         // to mimic the BSP finishing its initialization.
-        new Thread(() -> {
+        Thread apTriggerThread = new Thread(() -> {
             try {
                 Thread.sleep(1000); // Simulate BSP initialization time
                 startOthers();
             } catch (InterruptedException e) {
                 FileLogger.log(e);
             }
-        }).start();
+        });
+        apTriggerThread.setDaemon(true);
+        apTriggerThread.start();
 
         // 4. Start heat decay timer for memory heatmap visualization
         heatDecayExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
@@ -244,7 +250,9 @@ public class Kernel {
         // For now, adhering to the plan: we launch them here, and they check the flag.
         for (int i = 1; i < cpus.size(); i++) {
             RV32Cpu ap = cpus.get(i);
-            new Thread(() -> cpuRunLoop(ap), "CPU-Core-" + ap.getId()).start();
+            Thread apThread = new Thread(() -> cpuRunLoop(ap), "CPU-Core-" + ap.getId());
+            apThread.setDaemon(true);
+            apThread.start();
         }
     }
 
@@ -255,6 +263,7 @@ public class Kernel {
         if (heatDecayExecutor != null)
             heatDecayExecutor.shutdownNow();
         running = false;
+        paused = false;
         for (RV32Cpu cpu : cpus) {
             cpu.turnOff();
         }
@@ -331,7 +340,6 @@ public class Kernel {
                     executeTask(currentTask, cpu);
 
                     // Decide where the task goes next (Ready, Wait, or Terminated)
-                    // MUST be called before releaseCpu to prevent other cores from modifying state
                     dispatchTask(currentTask);
 
                 } catch (Exception e) {
@@ -339,13 +347,14 @@ public class Kernel {
                     currentTask.setState(TaskState.TERMINATED);
                     dispatchTask(currentTask);
                 } finally {
-                    // Release ownership AFTER dispatching to prevent other cores from snatching it
                     currentTask.releaseCpu();
                 }
 
-                // Note: We do NOT clear currentTask here to avoid UI flickering.
-                // It will be updated in the next 'executeTask' call
-                // or cleared in the 'if (currentTask == null)' block above.
+                // STICKY CORE AFFINITY: If currentTask remains READY and no other task is waiting in the ready queue,
+                // keep running on THIS core directly without releasing lock or hopping to other CPU threads!
+                if (currentTask.getState() == TaskState.READY && scheduler.getReadyTaskCount() == 0) {
+                    continue;
+                }
 
             } catch (Exception e) {
                 FileLogger.log("Core " + cpu.getId() + " error: " + e.getMessage());
@@ -387,9 +396,11 @@ public class Kernel {
             return;
         }
 
-        FileLogger.log(FileLogger.LogLevel.DEBUG,
-                "Kernel: Executing task " + task.getId() + " (state=" + task.getState() + ", PC="
-                        + task.getProgramCounter() + ", a0=" + task.getRegisters()[10] + ")");
+        if (FileLogger.isLoggable(FileLogger.LogLevel.DEBUG)) {
+            FileLogger.log(FileLogger.LogLevel.DEBUG,
+                    "Kernel: Executing task " + task.getId() + " (state=" + task.getState() + ", PC="
+                            + task.getProgramCounter() + ", a0=" + task.getRegisters()[10] + ")");
+        }
 
         cpu.setCurrentTask(task); // Notify CPU about the task it is running
 
@@ -419,15 +430,15 @@ public class Kernel {
             task.restoreState(cpu);
 
             int instructionsExecuted = 0;
-            int maxInstructions = scheduler.getTimeSlice();
+            int maxInstructions = scheduler.getAdaptiveTimeSlice();
             boolean stateSavedBySyscall = false; // Flag to track if syscall saved state
 
             // Execute instructions until time slice expires or task yields
             while (instructionsExecuted < maxInstructions && task.getState() == TaskState.RUNNING) {
                 try {
-                    // Execute one instruction
-                    cpu.step();
-                    instructionsExecuted++;
+                    int toRun = Math.min(5000, maxInstructions - instructionsExecuted);
+                    int executed = cpu.runBatch(toRun);
+                    instructionsExecuted += executed;
 
                     // Check if task made a system call
                     if (cpu.isEcall()) {
@@ -438,8 +449,6 @@ public class Kernel {
                         handleSystemCall(task, cpu);
 
                         // 3. Mark that we have already saved/handled the state.
-                        // This prevents the code below the loop from overwriting
-                        // changes made by 'exec' (like the new PC).
                         stateSavedBySyscall = true;
                         break;
                     }

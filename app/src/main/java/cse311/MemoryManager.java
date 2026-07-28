@@ -13,6 +13,7 @@ import cse311.Exception.MemoryAccessException;
 public class MemoryManager {
     private SimpleMemory memory;
     private Uart uart;
+    private FramebufferDevice framebufferDevice;
 
     // UART Memory-Mapped Registers
     public static final int UART_BASE = 0x10000000;
@@ -28,15 +29,21 @@ public class MemoryManager {
     public MemoryManager() {
         this.memory = new SimpleMemory();
         this.uart = new Uart();
+        this.framebufferDevice = new FramebufferDevice();
     }
 
     public Uart getUart() {
         return uart;
     }
 
+    public FramebufferDevice getFramebufferDevice() {
+        return framebufferDevice;
+    }
+
     public MemoryManager(SimpleMemory memory) {
         this.memory = memory;
         this.uart = new Uart();
+        this.framebufferDevice = new FramebufferDevice();
     }
 
     /**
@@ -52,79 +59,122 @@ public class MemoryManager {
     }
 
     // Memory access methods
-    public synchronized byte readByte(int address) throws MemoryAccessException {
+    public byte readByte(int address) throws MemoryAccessException {
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             return (byte) uart.read(address);
         }
-        validateAccess(address);
-        return memory.readByte(address);
+        if (framebufferDevice.isFramebufferAccess(address) || framebufferDevice.isControlAccess(address)) {
+            return framebufferDevice.readByte(address);
+        }
+        return memory.readByteFast(address);
     }
 
     public short readHalfWord(int address) throws MemoryAccessException {
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             return (short) uart.read(address);
         }
-        validateAccess(address);
-        validateAccess(address + 1);
-        return memory.readHalfWord(address);
+        if (framebufferDevice.isFramebufferAccess(address) || framebufferDevice.isControlAccess(address)) {
+            return (short) framebufferDevice.readWord(address);
+        }
+        return memory.readHalfWordFast(address);
     }
 
-    public synchronized int readWord(int address) throws MemoryAccessException {
+    public int readWord(int address) throws MemoryAccessException {
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             return (int) uart.read(address);
         }
-        validateAccess(address);
-        validateAccess(address + 3);
-        return memory.readWord(address);
+        if (framebufferDevice.isFramebufferAccess(address) || framebufferDevice.isControlAccess(address)) {
+            return framebufferDevice.readWord(address);
+        }
+        return memory.readWordFast(address);
     }
 
-    public synchronized void writeByte(int address, byte value) throws MemoryAccessException {
+    public void writeByte(int address, byte value) throws MemoryAccessException {
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             uart.write(address, value);
             return;
         }
-        validateAccess(address);
-        validateWriteAccess(address);
+        if (framebufferDevice.isFramebufferAccess(address) || framebufferDevice.isControlAccess(address)) {
+            framebufferDevice.writeByte(address, value);
+            return;
+        }
 
-        // ATOMIC LOGIC: Invalidate reservation for the Word containing this Byte
-        // Align address to the nearest 4-byte boundary
         int wordAddr = address & 0xFFFFFFFC;
         reservations.remove(wordAddr);
-        memory.writeByte(address, value);
+        memory.writeByteFast(address, value);
     }
 
-    public synchronized void writeHalfWord(int address, short value) throws MemoryAccessException {
+    public void writeHalfWord(int address, short value) throws MemoryAccessException {
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             uart.write(address, value);
             return;
         }
-        validateAccess(address);
-        validateAccess(address + 1);
-        validateWriteAccess(address);
+        if (framebufferDevice.isFramebufferAccess(address) || framebufferDevice.isControlAccess(address)) {
+            framebufferDevice.writeWord(address, value & 0xFFFF);
+            return;
+        }
 
-        // ATOMIC LOGIC: Invalidate reservation for the Word containing this HalfWord
         int wordAddr = address & 0xFFFFFFFC;
         reservations.remove(wordAddr);
-        memory.writeHalfWord(address, value);
+        memory.writeHalfWordFast(address, value);
     }
 
-    public synchronized void writeWord(int address, int value) throws MemoryAccessException {
+    public void writeWord(int address, int value) throws MemoryAccessException {
+        if (address >= FramebufferDevice.FB_BASE && address < FramebufferDevice.CTRL_BASE) {
+            framebufferDevice.writeWordDirect((address - FramebufferDevice.FB_BASE) >>> 2, value);
+            return;
+        }
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             uart.write(address, value);
             return;
         }
-        validateAccess(address);
-        validateAccess(address + 3);
+        if (framebufferDevice.isControlAccess(address)) {
+            framebufferDevice.writeWord(address, value);
+            return;
+        }
 
-        // ATOMIC LOGIC: Invalidate reservation for this exact Word address
         reservations.remove(address);
-        memory.writeWord(address, value);
+        memory.writeWordFast(address, value);
+    }
+
+    // Direct RAM fast accessors
+    public byte readByteFast(int addr) throws MemoryAccessException {
+        return memory.readByteFast(addr);
+    }
+
+    public short readHalfWordFast(int addr) throws MemoryAccessException {
+        return memory.readHalfWordFast(addr);
+    }
+
+    public int readWordFast(int addr) throws MemoryAccessException {
+        return memory.readWordFast(addr);
+    }
+
+    public void writeByteFast(int addr, byte v) throws MemoryAccessException {
+        int wordAddr = addr & 0xFFFFFFFC;
+        reservations.remove(wordAddr);
+        memory.writeByteFast(addr, v);
+    }
+
+    public void writeHalfWordFast(int addr, short v) throws MemoryAccessException {
+        int wordAddr = addr & 0xFFFFFFFC;
+        reservations.remove(wordAddr);
+        memory.writeHalfWordFast(addr, v);
+    }
+
+    public void writeWordFast(int addr, int v) throws MemoryAccessException {
+        reservations.remove(addr);
+        memory.writeWordFast(addr, v);
     }
 
     // New method for ELF loading to virtual addresses
-    public synchronized void writeByteToVirtualAddress(int address, byte value) throws MemoryAccessException {
+    public void writeByteToVirtualAddress(int address, byte value) throws MemoryAccessException {
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             uart.write(address, value);
+            return;
+        }
+        if (framebufferDevice.isFramebufferAccess(address) || framebufferDevice.isControlAccess(address)) {
+            framebufferDevice.writeByte(address, value);
             return;
         }
 
@@ -213,13 +263,6 @@ public class MemoryManager {
      */
     public void validateAccess(int address) throws MemoryAccessException { // Changed to public to fix visibility issues
         validateAccess(address, RV32Cpu.PRIVILEGE_MACHINE);
-    }
-
-    /**
-     * Legacy method for backward compatibility
-     */
-    private void validateWriteAccess(int address) throws MemoryAccessException {
-        validateWriteAccess(address, RV32Cpu.PRIVILEGE_MACHINE);
     }
 
     /**

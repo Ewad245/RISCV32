@@ -248,21 +248,27 @@ public class VirtualMemoryManager {
      * Check if address is in shared memory region
      */
     private boolean isSharedMemoryAddress(int address) {
-        return address >= UART_BASE && address < UART_BASE + UART_SIZE;
+        return (address >= UART_BASE && address < UART_BASE + UART_SIZE) ||
+               (address >= FramebufferDevice.FB_BASE && address < FramebufferDevice.CTRL_BASE + 0x100);
     }
 
     /**
-     * Read from shared memory (UART)
+     * Read from shared memory (UART / Framebuffer)
      */
     private byte readSharedMemory(int address) {
-        return (byte) uart.read(address);
+        if (address >= UART_BASE && address < UART_BASE + UART_SIZE) {
+            return (byte) uart.read(address);
+        }
+        return 0;
     }
 
     /**
      * Write to shared memory (UART)
      */
     private void writeSharedMemory(int address, byte value) {
-        uart.write(address, value);
+        if (address >= UART_BASE && address < UART_BASE + UART_SIZE) {
+            uart.write(address, value);
+        }
     }
 
     /**

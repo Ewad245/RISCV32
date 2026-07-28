@@ -86,7 +86,7 @@ public class FileSystem {
                     empty.minor = bb.getShort();
                     empty.nlink = bb.getShort();
                     empty.size = bb.getInt();
-                    for (int i = 0; i < Inode.NDIRECT + 1; i++) {
+                    for (int i = 0; i < Inode.NDIRECT + 2; i++) {
                         empty.addrs[i] = bb.getInt();
                     }
                 } finally {
@@ -149,7 +149,7 @@ public class FileSystem {
                 bb.putShort(ip.minor);
                 bb.putShort(ip.nlink);
                 bb.putInt(ip.size);
-                for (int i = 0; i < Inode.NDIRECT + 1; i++) {
+                for (int i = 0; i < Inode.NDIRECT + 2; i++) {
                     bb.putInt(ip.addrs[i]);
                 }
                 b.dirty = true;
@@ -213,7 +213,10 @@ public class FileSystem {
         }
         logicalBlock -= Inode.NDIRECT;
 
-        if (logicalBlock < (DiskDevice.BSIZE / 4)) {
+        int nindirect = DiskDevice.BSIZE / 4; // 256
+
+        // 1. Singly Indirect Block (Index NDIRECT = 11)
+        if (logicalBlock < nindirect) {
             int indirectBlock = ip.addrs[Inode.NDIRECT];
             if (allocate && indirectBlock == 0) {
                 indirectBlock = balloc();
@@ -241,7 +244,58 @@ public class FileSystem {
                 throw new RuntimeException("mapBlock: failed to read indirect block", e);
             }
         }
-        throw new RuntimeException("File too large (Doubly indirect not implemented)");
+        logicalBlock -= nindirect;
+
+        // 2. Doubly Indirect Block (Index NDIRECT + 1 = 12)
+        if (logicalBlock < nindirect * nindirect) {
+            int doublyBlock = ip.addrs[Inode.NDIRECT + 1];
+            if (allocate && doublyBlock == 0) {
+                doublyBlock = balloc();
+                ip.addrs[Inode.NDIRECT + 1] = doublyBlock;
+            }
+            if (doublyBlock == 0)
+                return 0; // Hole
+
+            int index1 = logicalBlock / nindirect;
+            int index2 = logicalBlock % nindirect;
+
+            try {
+                Buffer b1 = bcache.bread(doublyBlock);
+                try {
+                    ByteBuffer bb1 = ByteBuffer.wrap(b1.data).order(ByteOrder.LITTLE_ENDIAN);
+                    int singleBlock = bb1.getInt(index1 * 4);
+                    if (allocate && singleBlock == 0) {
+                        singleBlock = balloc();
+                        bb1.putInt(index1 * 4, singleBlock);
+                        b1.dirty = true;
+                        log.write(b1);
+                    }
+                    if (singleBlock == 0)
+                        return 0;
+
+                    Buffer b2 = bcache.bread(singleBlock);
+                    try {
+                        ByteBuffer bb2 = ByteBuffer.wrap(b2.data).order(ByteOrder.LITTLE_ENDIAN);
+                        int physBlock = bb2.getInt(index2 * 4);
+                        if (allocate && physBlock == 0) {
+                            physBlock = balloc();
+                            bb2.putInt(index2 * 4, physBlock);
+                            b2.dirty = true;
+                            log.write(b2);
+                        }
+                        return physBlock;
+                    } finally {
+                        bcache.brelse(b2);
+                    }
+                } finally {
+                    bcache.brelse(b1);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("mapBlock: failed to read doubly indirect block", e);
+            }
+        }
+
+        throw new RuntimeException("File too large (exceeds doubly indirect max size)");
     }
 
     public int readi(Inode ip, byte[] dst, int off, int n) {
@@ -281,9 +335,11 @@ public class FileSystem {
         if (off > ip.size || off < 0)
             return -1;
 
-        // Simplified max size check
-        if (off + n > (Inode.NDIRECT + DiskDevice.BSIZE / 4) * DiskDevice.BSIZE) {
-            n = ((Inode.NDIRECT + DiskDevice.BSIZE / 4) * DiskDevice.BSIZE) - off;
+        // Max size with 11 direct, 1 indirect (256), 1 doubly-indirect (65536) = 65803 blocks = 67.3 MB
+        long maxBlocks = (long) Inode.NDIRECT + (DiskDevice.BSIZE / 4) + (long) (DiskDevice.BSIZE / 4) * (DiskDevice.BSIZE / 4);
+        long maxBytes = maxBlocks * DiskDevice.BSIZE;
+        if (off + n > maxBytes) {
+            n = (int) (maxBytes - off);
         }
 
         int tot = 0;
@@ -469,9 +525,43 @@ public class FileSystem {
                 throw new RuntimeException("truncate: failed to read indirect block", e);
             }
 
-            // Free the indirect block itself
             bfree(ip.addrs[Inode.NDIRECT]);
             ip.addrs[Inode.NDIRECT] = 0;
+        }
+
+        // 3. Free doubly-indirect blocks
+        if (ip.addrs[Inode.NDIRECT + 1] != 0) {
+            try {
+                Buffer b1 = bcache.bread(ip.addrs[Inode.NDIRECT + 1]);
+                try {
+                    ByteBuffer buf1 = ByteBuffer.wrap(b1.data).order(ByteOrder.LITTLE_ENDIAN);
+                    for (int i = 0; i < DiskDevice.BSIZE / 4; i++) {
+                        int singleBlock = buf1.getInt();
+                        if (singleBlock != 0) {
+                            Buffer b2 = bcache.bread(singleBlock);
+                            try {
+                                ByteBuffer buf2 = ByteBuffer.wrap(b2.data).order(ByteOrder.LITTLE_ENDIAN);
+                                for (int j = 0; j < DiskDevice.BSIZE / 4; j++) {
+                                    int phys = buf2.getInt();
+                                    if (phys != 0) {
+                                        bfree(phys);
+                                    }
+                                }
+                            } finally {
+                                bcache.brelse(b2);
+                            }
+                            bfree(singleBlock);
+                        }
+                    }
+                } finally {
+                    bcache.brelse(b1);
+                }
+            } catch (Exception e) {
+                throw new RuntimeException("truncate: failed to read doubly-indirect block", e);
+            }
+
+            bfree(ip.addrs[Inode.NDIRECT + 1]);
+            ip.addrs[Inode.NDIRECT + 1] = 0;
         }
 
         ip.size = 0;

@@ -121,7 +121,7 @@ public class GuiApp extends Application {
 
         // KERNEL CONFIGURATION
         kernel.getConfig().setSchedulerType(KernelConfig.SchedulerType.ROUND_ROBIN);
-        kernel.setTimeSlice(1000);
+        kernel.setTimeSlice(500000);
 
         // MOUNT FILE SYSTEM
         String imgPath;
@@ -194,6 +194,16 @@ public class GuiApp extends Application {
                         "GUI: Failed to load Init task: " + e.getMessage());
             FileLogger.log(e);
         }
+    }
+
+    @Override
+    public void stop() throws Exception {
+        if (currentController != null) {
+            currentController.shutdown();
+        } else if (kernel != null) {
+            kernel.stop();
+        }
+        super.stop();
     }
 
     public static void main(String[] args) {

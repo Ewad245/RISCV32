@@ -89,6 +89,8 @@
 
                 <VBox fx:id="memoryTabContainer" visible="false"/>
 
+                <VBox fx:id="screenContainer" visible="false"/>
+
             </StackPane>
             
             <VBox fx:id="consoleContainer" prefHeight="200"/>

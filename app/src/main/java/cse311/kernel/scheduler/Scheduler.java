@@ -75,4 +75,28 @@ public abstract class Scheduler {
      * This is primarily for visualization/observability.
      */
     public abstract Collection<Task> getReadyTasks();
+
+    private static final int SINGLE_TASK_THRESHOLD = 1;
+    private static final int SINGLE_TASK_TIME_SLICE = 100_000;
+    private static final int MIN_MULTI_TASK_TIME_SLICE = 20_000;
+
+    /**
+     * Get the number of tasks currently waiting in the ready queue.
+     */
+    public int getReadyTaskCount() {
+        Collection<Task> tasks = getReadyTasks();
+        return (tasks != null) ? tasks.size() : 0;
+    }
+
+    /**
+     * Get adaptive time slice based on task load.
+     * Expands time slice up to 100,000 instructions when single process is active.
+     */
+    public int getAdaptiveTimeSlice() {
+        int count = getReadyTaskCount();
+        if (count <= SINGLE_TASK_THRESHOLD) {
+            return SINGLE_TASK_TIME_SLICE;
+        }
+        return Math.max(timeSlice, MIN_MULTI_TASK_TIME_SLICE);
+    }
 }

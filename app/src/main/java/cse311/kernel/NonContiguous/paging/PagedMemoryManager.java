@@ -3,6 +3,7 @@ package cse311.kernel.NonContiguous.paging;
 import cse311.MemoryManager;
 import cse311.Exception.MemoryAccessException;
 
+import java.util.Arrays;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.Map;
@@ -48,12 +49,17 @@ public class PagedMemoryManager extends MemoryManager {
     private Map<Integer, Integer> sharedKeyMap = new HashMap<>(); // Key (user provided) -> Frame Index
     private int[] frameRefCount;
 
-    // Physical UART mapping
+    // Physical MMIO mapping (UART & Framebuffer)
     private static final int UART_BASE = 0x10000000;
     private static final int UART_SIZE = 0x1000;
 
+    public static boolean isMmio(int va) {
+        return (va >= UART_BASE && va < (UART_BASE + UART_SIZE)) ||
+               (va >= cse311.FramebufferDevice.FB_BASE && va < cse311.FramebufferDevice.CTRL_BASE + 0x100);
+    }
+
     public static boolean isUart(int va) {
-        return va >= UART_BASE && va < (UART_BASE + UART_SIZE);
+        return isMmio(va);
     }
 
     public PagedMemoryManager(int totalMemoryBytes) {
@@ -64,6 +70,8 @@ public class PagedMemoryManager extends MemoryManager {
         this.freeFrames.set(0, totalFrames); // all free
         this.frameRefCount = new int[totalFrames];
         this.frameHeat = new int[totalFrames];
+        Arrays.fill(tlbReadVPage, -1);
+        Arrays.fill(tlbWriteVPage, -1);
     }
 
     /**
@@ -141,9 +149,24 @@ public class PagedMemoryManager extends MemoryManager {
                 "PagedMemoryManager: Fully reclaimed memory for PID " + pid);
     }
 
+    private final ThreadLocal<AddressSpace> fastContext = new ThreadLocal<>();
+
+    private static final int TLB_SLOTS = 32;
+    private final int[] tlbReadVPage = new int[TLB_SLOTS];
+    private final int[] tlbReadPhysBase = new int[TLB_SLOTS];
+    private final int[] tlbWriteVPage = new int[TLB_SLOTS];
+    private final int[] tlbWritePhysBase = new int[TLB_SLOTS];
+
+    public void flushTlb() {
+        Arrays.fill(tlbReadVPage, -1);
+        Arrays.fill(tlbWriteVPage, -1);
+    }
+
     public void switchTo(AddressSpace as) {
         // Update the active address space for THIS thread (CPU)
         activeContexts.put(Thread.currentThread().getId(), as);
+        fastContext.set(as);
+        flushTlb();
     }
 
     // ---- Public helpers used by TaskManager/Kernel ----
@@ -164,11 +187,22 @@ public class PagedMemoryManager extends MemoryManager {
             super.writeByte(va, val);
             return;
         }
+        int page = va >>> 12;
+        int slot = (int) (Thread.currentThread().getId() & 31);
+        if (page == tlbWriteVPage[slot]) {
+            super.writeByte(tlbWritePhysBase[slot] | (va & 0xFFF), val);
+            return;
+        }
+
         AddressSpace current = ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.WRITE);
 
-        int pa = (frame << 12) | (va & 0xFFF);
+        int physBase = frame << 12;
+        tlbWriteVPage[slot] = page;
+        tlbWritePhysBase[slot] = physBase;
+
+        int pa = physBase | (va & 0xFFF);
         bumpHeat(pa);
         super.writeByte(pa, val);
     }
@@ -178,11 +212,21 @@ public class PagedMemoryManager extends MemoryManager {
         if (isUart(va)) {
             return super.readByte(va);
         }
+        int page = va >>> 12;
+        int slot = (int) (Thread.currentThread().getId() & 31);
+        if (page == tlbReadVPage[slot]) {
+            return super.readByte(tlbReadPhysBase[slot] | (va & 0xFFF));
+        }
+
         AddressSpace current = ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.READ);
 
-        int pa = (frame << 12) | (va & 0xFFF);
+        int physBase = frame << 12;
+        tlbReadVPage[slot] = page;
+        tlbReadPhysBase[slot] = physBase;
+
+        int pa = physBase | (va & 0xFFF);
         bumpHeat(pa);
         return super.readByte(pa);
     }
@@ -192,11 +236,21 @@ public class PagedMemoryManager extends MemoryManager {
         if (isUart(va)) {
             return super.readHalfWord(va);
         }
+        int page = va >>> 12;
+        int slot = (int) (Thread.currentThread().getId() & 31);
+        if (page == tlbReadVPage[slot]) {
+            return super.readHalfWord(tlbReadPhysBase[slot] | (va & 0xFFF));
+        }
+
         AddressSpace current = ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.READ);
 
-        int pa = (frame << 12) | (va & 0xFFF);
+        int physBase = frame << 12;
+        tlbReadVPage[slot] = page;
+        tlbReadPhysBase[slot] = physBase;
+
+        int pa = physBase | (va & 0xFFF);
         bumpHeat(pa);
         return super.readHalfWord(pa);
     }
@@ -206,11 +260,21 @@ public class PagedMemoryManager extends MemoryManager {
         if (isUart(va)) {
             return super.readWord(va);
         }
+        int page = va >>> 12;
+        int slot = (int) (Thread.currentThread().getId() & 31);
+        if (page == tlbReadVPage[slot]) {
+            return super.readWord(tlbReadPhysBase[slot] | (va & 0xFFF));
+        }
+
         AddressSpace current = ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.READ);
 
-        int pa = (frame << 12) | (va & 0xFFF);
+        int physBase = frame << 12;
+        tlbReadVPage[slot] = page;
+        tlbReadPhysBase[slot] = physBase;
+
+        int pa = physBase | (va & 0xFFF);
         bumpHeat(pa);
         return super.readWord(pa);
     }
@@ -226,11 +290,22 @@ public class PagedMemoryManager extends MemoryManager {
             super.writeHalfWord(va, v);
             return;
         }
+        int page = va >>> 12;
+        int slot = (int) (Thread.currentThread().getId() & 31);
+        if (page == tlbWriteVPage[slot]) {
+            super.writeHalfWord(tlbWritePhysBase[slot] | (va & 0xFFF), v);
+            return;
+        }
+
         AddressSpace current = ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.WRITE);
 
-        int pa = (frame << 12) | (va & 0xFFF);
+        int physBase = frame << 12;
+        tlbWriteVPage[slot] = page;
+        tlbWritePhysBase[slot] = physBase;
+
+        int pa = physBase | (va & 0xFFF);
         bumpHeat(pa);
         super.writeHalfWord(pa, v);
     }
@@ -241,11 +316,22 @@ public class PagedMemoryManager extends MemoryManager {
             super.writeWord(va, v);
             return;
         }
+        int page = va >>> 12;
+        int slot = (int) (Thread.currentThread().getId() & 31);
+        if (page == tlbWriteVPage[slot]) {
+            super.writeWord(tlbWritePhysBase[slot] | (va & 0xFFF), v);
+            return;
+        }
+
         AddressSpace current = ensureCurrent();
         ensurePager();
         int frame = pager.ensureResident(current, va, VmAccess.WRITE);
 
-        int pa = (frame << 12) | (va & 0xFFF);
+        int physBase = frame << 12;
+        tlbWriteVPage[slot] = page;
+        tlbWritePhysBase[slot] = physBase;
+
+        int pa = physBase | (va & 0xFFF);
         bumpHeat(pa);
         super.writeWord(pa, v);
     }
@@ -305,9 +391,13 @@ public class PagedMemoryManager extends MemoryManager {
     // ---- Internals ----
     // ---- Internals ----
     private AddressSpace ensureCurrent() throws MemoryAccessException {
-        AddressSpace current = activeContexts.get(Thread.currentThread().getId());
+        AddressSpace current = fastContext.get();
         if (current == null) {
-            throw new MemoryAccessException("No current address space");
+            current = activeContexts.get(Thread.currentThread().getId());
+            if (current == null) {
+                throw new MemoryAccessException("No current address space");
+            }
+            fastContext.set(current);
         }
         return current;
     }

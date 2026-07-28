@@ -24,4 +24,7 @@
     <Button fx:id="btnMemory" text="Memory" maxWidth="Infinity" 
             onAction="#onMemoryClicked" styleClass="nav-button"/>
 
+    <Button fx:id="btnScreen" text="Screen Display" maxWidth="Infinity" 
+            onAction="#onScreenClicked" styleClass="nav-button"/>
+
 </fx:root>

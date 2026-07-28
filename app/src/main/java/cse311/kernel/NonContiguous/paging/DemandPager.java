@@ -23,6 +23,14 @@ public class DemandPager implements Pager {
 
         int vpn = AddressSpace.getVPN(va);
 
+        // Fast path for resident pages: return PPN immediately
+        AddressSpace.PageTableEntry fastPte = as.getPTEInternal(vpn);
+        if (fastPte != null && fastPte.V) {
+            fastPte.A = true;
+            if (access == VmAccess.WRITE) fastPte.D = true;
+            return fastPte.ppn;
+        }
+
         if (!as.isPagePresent(vpn)) {
 
             // Security check: reject accesses to invalid memory regions

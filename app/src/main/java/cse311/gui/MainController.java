@@ -73,6 +73,8 @@ public class MainController implements Initializable {
     private VBox memoryContainer; // Dashboard memory view
     @FXML
     private VBox memoryTabContainer; // Full memory tab view
+    @FXML
+    private VBox screenContainer; // Screen tab view
 
     // Datapath components
 
@@ -95,9 +97,11 @@ public class MainController implements Initializable {
     private SchedulerView schedulerView;
     private MemoryView memoryView;
     private HexMemoryView hexMemoryView;
+    private cse311.gui.components.ScreenView screenView;
 
     private SidebarView sidebarView;
     private ConsoleView consoleView;
+    private AnimationTimer uiUpdateTimer;
 
     // Placeholders for dynamic AssemblyView switching (Option B)
     private VBox[] dashboardAssemblyContainers;
@@ -532,6 +536,20 @@ public class MainController implements Initializable {
                 hideAllViews();
                 memoryTabContainer.setVisible(true);
                 memoryTabContainer.toFront();
+            } else if ("screen".equals(view)) {
+                hideAllViews();
+                if (screenView == null && screenContainer != null) {
+                    screenView = new cse311.gui.components.ScreenView(kernel.getMemory().getFramebufferDevice());
+                    screenContainer.getChildren().add(screenView);
+                    VBox.setVgrow(screenView, Priority.ALWAYS);
+                }
+                if (screenContainer != null) {
+                    screenContainer.setVisible(true);
+                    screenContainer.toFront();
+                    if (screenView != null) {
+                        screenView.requestFocus();
+                    }
+                }
             }
         });
         sidebarContainer.getChildren().add(sidebarView);
@@ -541,16 +559,19 @@ public class MainController implements Initializable {
         dashboardPane.setVisible(false);
         datapathTabs.setVisible(false);
         memoryTabContainer.setVisible(false);
+        if (screenContainer != null) {
+            screenContainer.setVisible(false);
+        }
     }
 
     private void startUpdateLoop() {
-        AnimationTimer timer = new AnimationTimer() {
+        uiUpdateTimer = new AnimationTimer() {
             @Override
             public void handle(long now) {
                 updateUI();
             }
         };
-        timer.start();
+        uiUpdateTimer.start();
     }
 
     private void updateUI() {
@@ -600,8 +621,17 @@ public class MainController implements Initializable {
     }
 
     public void shutdown() {
+        if (uiUpdateTimer != null) {
+            uiUpdateTimer.stop();
+        }
+        if (screenView != null) {
+            screenView.stop();
+        }
         if (consoleView != null) {
             consoleView.close();
+        }
+        if (kernel != null) {
+            kernel.stop();
         }
     }
 }

@@ -21,9 +21,9 @@ import java.util.Arrays;
 })
 public class Mkfs {
     // Disk Configuration
-    static final int NBLOCKS = 2000; // Total disk size
-    static final int NINODES = 200; // Max number of files
-    static final int NLOG = 30;
+    static final int NBLOCKS = 20000; // Total disk size
+    static final int NINODES = 500; // Max number of files
+    static final int NLOG = 100;
     static final int BSIZE = 1024; // Block size
 
     // Derived Offsets
@@ -42,7 +42,8 @@ public class Mkfs {
 
     public static void main(String[] args) throws Exception {
         // 1. Setup paths
-        String fsPath = "fs.img";
+        String fsPath = "app" + OSConstants.file_seperator + "src" + OSConstants.file_seperator + "main"
+                + OSConstants.file_seperator + "resources" + OSConstants.file_seperator + "fs.img";
         File userDir = new File("app" + OSConstants.file_seperator + "src" + OSConstants.file_seperator + "main"
                 + OSConstants.file_seperator +
                 "resources" + OSConstants.file_seperator + "user_programs");
@@ -206,7 +207,7 @@ public class Mkfs {
      * Allocates if it doesn't exist.
      */
     private static int mapBlock(RandomAccessFile disk, Inode ip, int logicalBlock) throws Exception {
-        // 1. Direct Blocks (0-11)
+        // 1. Direct Blocks (0-10)
         if (logicalBlock < Inode.NDIRECT) {
             if (ip.addrs[logicalBlock] == 0) {
                 ip.addrs[logicalBlock] = allocBlock();
@@ -215,9 +216,10 @@ public class Mkfs {
             return ip.addrs[logicalBlock];
         }
 
-        // 2. Indirect Block (12)
+        // 2. Singly Indirect Block (11)
         logicalBlock -= Inode.NDIRECT;
-        if (logicalBlock < (BSIZE / 4)) {
+        int nindirect = BSIZE / 4; // 256
+        if (logicalBlock < nindirect) {
             // Allocate the indirect block itself if missing
             if (ip.addrs[Inode.NDIRECT] == 0) {
                 ip.addrs[Inode.NDIRECT] = allocBlock();
@@ -239,6 +241,48 @@ public class Mkfs {
                 // Write back indirect block
                 disk.seek((long) indirectBlockPhys * BSIZE);
                 disk.write(buf);
+            }
+            return phys;
+        }
+
+        // 3. Doubly Indirect Block (12)
+        logicalBlock -= nindirect;
+        if (logicalBlock < nindirect * nindirect) {
+            if (ip.addrs[Inode.NDIRECT + 1] == 0) {
+                ip.addrs[Inode.NDIRECT + 1] = allocBlock();
+                writeInode(disk, ip);
+            }
+            int doublyBlockPhys = ip.addrs[Inode.NDIRECT + 1];
+
+            int index1 = logicalBlock / nindirect;
+            int index2 = logicalBlock % nindirect;
+
+            // Read Level-1 Indirect Table
+            byte[] buf1 = new byte[BSIZE];
+            disk.seek((long) doublyBlockPhys * BSIZE);
+            disk.read(buf1);
+            ByteBuffer bb1 = ByteBuffer.wrap(buf1).order(ByteOrder.LITTLE_ENDIAN);
+
+            int singleBlockPhys = bb1.getInt(index1 * 4);
+            if (singleBlockPhys == 0) {
+                singleBlockPhys = allocBlock();
+                bb1.putInt(index1 * 4, singleBlockPhys);
+                disk.seek((long) doublyBlockPhys * BSIZE);
+                disk.write(buf1);
+            }
+
+            // Read Level-2 Indirect Table
+            byte[] buf2 = new byte[BSIZE];
+            disk.seek((long) singleBlockPhys * BSIZE);
+            disk.read(buf2);
+            ByteBuffer bb2 = ByteBuffer.wrap(buf2).order(ByteOrder.LITTLE_ENDIAN);
+
+            int phys = bb2.getInt(index2 * 4);
+            if (phys == 0) {
+                phys = allocBlock();
+                bb2.putInt(index2 * 4, phys);
+                disk.seek((long) singleBlockPhys * BSIZE);
+                disk.write(buf2);
             }
             return phys;
         }
@@ -270,7 +314,7 @@ public class Mkfs {
         ip.minor = bb.getShort();
         ip.nlink = bb.getShort();
         ip.size = bb.getInt();
-        for (int i = 0; i < Inode.NDIRECT + 1; i++)
+        for (int i = 0; i < Inode.NDIRECT + 2; i++)
             ip.addrs[i] = bb.getInt();
 
         return ip;
@@ -286,7 +330,7 @@ public class Mkfs {
         bb.putShort(ip.minor);
         bb.putShort(ip.nlink);
         bb.putInt(ip.size);
-        for (int i = 0; i < Inode.NDIRECT + 1; i++)
+        for (int i = 0; i < Inode.NDIRECT + 2; i++)
             bb.putInt(ip.addrs[i]);
 
         disk.write(bb.array());

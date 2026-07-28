@@ -91,4 +91,9 @@ public class RoundRobinScheduler extends Scheduler {
     public Collection<Task> getReadyTasks() {
         return Collections.unmodifiableCollection(readyQueue);
     }
+
+    @Override
+    public int getReadyTaskCount() {
+        return readyQueue.size();
+    }
 }

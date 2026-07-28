@@ -15,7 +15,7 @@ public class KernelConfig {
 
     // Scheduling configuration
     private SchedulerType schedulerType = SchedulerType.ROUND_ROBIN;
-    private int timeSlice = 3; // Instructions per time slice
+    private int timeSlice = 20000; // Instructions per time slice (adaptive)
 
     // Memory configuration
     private int maxProcesses = 64;
