@@ -542,6 +542,9 @@ public class MainController implements Initializable {
                     screenView = new cse311.gui.components.ScreenView(kernel.getMemory().getFramebufferDevice());
                     screenContainer.getChildren().add(screenView);
                     VBox.setVgrow(screenView, Priority.ALWAYS);
+                    screenContainer.setMinSize(0, 0);
+                    screenContainer.setMaxWidth(Double.MAX_VALUE);
+                    screenContainer.setMaxHeight(Double.MAX_VALUE);
                 }
                 if (screenContainer != null) {
                     screenContainer.setVisible(true);

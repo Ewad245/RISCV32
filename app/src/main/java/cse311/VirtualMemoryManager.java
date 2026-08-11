@@ -248,8 +248,7 @@ public class VirtualMemoryManager {
      * Check if address is in shared memory region
      */
     private boolean isSharedMemoryAddress(int address) {
-        return (address >= UART_BASE && address < UART_BASE + UART_SIZE) ||
-               (address >= FramebufferDevice.FB_BASE && address < FramebufferDevice.CTRL_BASE + 0x100);
+        return MemoryManager.isMmioAddress(address);
     }
 
     /**

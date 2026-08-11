@@ -15,6 +15,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
     "PMD.CompareObjectsWithEquals"
 })
 public class Spinlock {
+    private static final int MAX_SPINS_BEFORE_SLEEP = 100;
+
     private final String name;
     private final AtomicBoolean locked;
 
@@ -38,12 +40,19 @@ public class Spinlock {
             throw new RuntimeException("Spinlock '" + name + "' acquire: already holding");
         }
 
-        // Test-and-Set loop
+        // Test-and-Set loop with spin count back-off to prevent 100% host CPU usage
+        int spins = 0;
         while (!locked.compareAndSet(false, true)) {
-            // Spin...
-            // In Java, we can yield to be polite to the host OS scheduler
-            // though a real spinlock burns CPU.
-            Thread.yield();
+            spins++;
+            if (spins > MAX_SPINS_BEFORE_SLEEP) {
+                try {
+                    Thread.sleep(1);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            } else {
+                Thread.yield();
+            }
         }
 
         // Record info for debugging (and holding() check)

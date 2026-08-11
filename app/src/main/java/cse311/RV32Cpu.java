@@ -1563,8 +1563,7 @@ public class RV32Cpu {
     }
 
     public boolean checkMMIOAddress(int virtualAddr) {
-        return (virtualAddr >= MemoryManager.UART_BASE && virtualAddr < MemoryManager.UART_BASE + 0x1000) ||
-               (virtualAddr >= FramebufferDevice.FB_BASE && virtualAddr < FramebufferDevice.CTRL_BASE + 0x100);
+        return MemoryManager.isMmioAddress(virtualAddr);
     }
 
     public boolean checkUARTAddress(int virtualAddr) {

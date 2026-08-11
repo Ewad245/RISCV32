@@ -66,23 +66,9 @@ public class Mkfs {
             appendDir(disk, rootInum, new DirectoryEntry(rootInum, "."));
             appendDir(disk, rootInum, new DirectoryEntry(rootInum, ".."));
 
-            // 4. Scan for binaries and add them
+            // 4. Scan for binaries/directories and recursively add them
             if (userDir.exists() && userDir.isDirectory()) {
-                for (File file : userDir.listFiles()) {
-                    if (file.isFile() && !file.getName().startsWith(".")) {
-                        System.out.println("Copying file: " + file.getName());
-
-                        // Allocate Inode for the file
-                        int fileInum = ialloc(disk, Inode.T_FILE);
-
-                        // Copy content
-                        writeFileContent(disk, fileInum, file);
-
-                        // Link into Root Directory
-                        DirectoryEntry de = new DirectoryEntry(fileInum, file.getName());
-                        appendDir(disk, rootInum, de);
-                    }
-                }
+                importDirectoryContents(disk, rootInum, userDir);
             } else {
                 System.out.println("Warning: No user_programs directory found at " + userDir.getAbsolutePath());
             }
@@ -102,6 +88,40 @@ public class Mkfs {
     }
 
     // --- Core Operations ---
+
+    private static void importDirectoryContents(RandomAccessFile disk, int parentInum, File dir) throws Exception {
+        File[] files = dir.listFiles();
+        if (files == null) {
+            return;
+        }
+
+        for (File file : files) {
+            if (file.getName().startsWith(".")) {
+                continue;
+            }
+
+            if (file.isDirectory()) {
+                System.out.println("Creating directory: " + file.getName());
+
+                int subDirInum = ialloc(disk, Inode.T_DIR);
+                appendDir(disk, subDirInum, new DirectoryEntry(subDirInum, "."));
+                appendDir(disk, subDirInum, new DirectoryEntry(parentInum, ".."));
+
+                DirectoryEntry de = new DirectoryEntry(subDirInum, file.getName());
+                appendDir(disk, parentInum, de);
+
+                importDirectoryContents(disk, subDirInum, file);
+            } else if (file.isFile()) {
+                System.out.println("Copying file: " + file.getName());
+
+                int fileInum = ialloc(disk, Inode.T_FILE);
+                writeFileContent(disk, fileInum, file);
+
+                DirectoryEntry de = new DirectoryEntry(fileInum, file.getName());
+                appendDir(disk, parentInum, de);
+            }
+        }
+    }
 
     private static void writeSuperBlock(RandomAccessFile disk) throws Exception {
         ByteBuffer bb = ByteBuffer.allocate(BSIZE).order(ByteOrder.LITTLE_ENDIAN);

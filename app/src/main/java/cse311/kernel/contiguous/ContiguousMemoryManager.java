@@ -17,7 +17,8 @@ import cse311.Exception.MemoryAccessException;
  */
 @SuppressWarnings({
     "PMD.AvoidCatchingGenericException",
-    "PMD.AvoidReassigningLoopVariables"
+    "PMD.AvoidReassigningLoopVariables",
+    "PMD.AvoidLiteralsInIfCondition"
 })
 public class ContiguousMemoryManager extends MemoryManager {
 
@@ -31,8 +32,8 @@ public class ContiguousMemoryManager extends MemoryManager {
         int currentPid = -1;
     }
 
-    // Map Thread ID (CPU Core) -> CPU Register Context
-    private final Map<Long, CpuContext> contexts = new ConcurrentHashMap<>();
+    // Thread-local CPU hardware registers (Base/Limit) for zero-lock fast access
+    private final ThreadLocal<CpuContext> fastContext = ThreadLocal.withInitial(CpuContext::new);
 
     // Track free and allocated blocks
     // Synchronized lists for thread safety during allocation/free/compact
@@ -44,7 +45,7 @@ public class ContiguousMemoryManager extends MemoryManager {
     private final Set<Integer> sharedPids = new HashSet<>();
 
     private CpuContext getContext() {
-        return contexts.computeIfAbsent(Thread.currentThread().getId(), k -> new CpuContext());
+        return fastContext.get();
     }
 
     public ContiguousMemoryManager(int totalMemory, AllocationStrategy allocator) {
@@ -62,11 +63,6 @@ public class ContiguousMemoryManager extends MemoryManager {
 
     public int getLimitRegister() {
         return getContext().limitRegister;
-    }
-
-    private boolean isMMIO(int address) {
-        return (address >= UART_BASE && address < (UART_BASE + UART_SIZE)) ||
-               (address >= cse311.FramebufferDevice.FB_BASE && address < cse311.FramebufferDevice.CTRL_BASE + 0x100);
     }
 
     /**
@@ -94,7 +90,7 @@ public class ContiguousMemoryManager extends MemoryManager {
      * Translate Logical Address -> Physical Address
      */
     public int translate(int logicalAddr) throws MemoryAccessException {
-        CpuContext ctx = getContext();
+        CpuContext ctx = fastContext.get();
         // Check Limit Register (Protection)
         if (logicalAddr >= ctx.limitRegister) {
             throw new MemoryAccessException(
@@ -110,19 +106,16 @@ public class ContiguousMemoryManager extends MemoryManager {
 
     @Override
     public byte readByte(int va) throws MemoryAccessException {
-        // Allow direct access to UART without translation/limit check
-        if (isMMIO(va)) {
-            return super.readByte(va); // Pass directly to SimpleMemory (which handles UART)
+        if (va >= 0x10000000) {
+            return super.readByte(va);
         }
-        // 1. Translate
         int pa = translate(va);
-        // 2. Access Physical RAM (via parent)
         return super.readByte(pa);
     }
 
     @Override
     public void writeByte(int va, byte value) throws MemoryAccessException {
-        if (isMMIO(va)) {
+        if (va >= 0x10000000) {
             super.writeByte(va, value);
             return;
         }
@@ -132,17 +125,16 @@ public class ContiguousMemoryManager extends MemoryManager {
 
     @Override
     public int readWord(int va) throws MemoryAccessException {
-        if (isMMIO(va)) {
+        if (va >= 0x10000000) {
             return super.readWord(va);
         }
         int pa = translate(va);
-        // Note: super.readWord will check physical alignment
         return super.readWord(pa);
     }
 
     @Override
     public void writeWord(int va, int value) throws MemoryAccessException {
-        if (isMMIO(va)) {
+        if (va >= 0x10000000) {
             super.writeWord(va, value);
             return;
         }
@@ -152,12 +144,19 @@ public class ContiguousMemoryManager extends MemoryManager {
 
     @Override
     public short readHalfWord(int va) throws MemoryAccessException {
+        if (va >= 0x10000000) {
+            return super.readHalfWord(va);
+        }
         int pa = translate(va);
         return super.readHalfWord(pa);
     }
 
     @Override
     public void writeHalfWord(int va, short value) throws MemoryAccessException {
+        if (va >= 0x10000000) {
+            super.writeHalfWord(va, value);
+            return;
+        }
         int pa = translate(va);
         super.writeHalfWord(pa, value);
     }
@@ -284,12 +283,11 @@ public class ContiguousMemoryManager extends MemoryManager {
                 pb.start = currentPos;
             }
 
-            // Update registers for ALL contexts tracking this process
-            for (CpuContext ctx : contexts.values()) {
-                if (ctx.currentPid == pb.pid) {
-                    ctx.baseRegister = pb.start;
-                    ctx.limitRegister = pb.size;
-                }
+            // Update registers for current context tracking this process
+            CpuContext ctx = fastContext.get();
+            if (ctx.currentPid == pb.pid) {
+                ctx.baseRegister = pb.start;
+                ctx.limitRegister = pb.size;
             }
 
             currentPos += pb.size;

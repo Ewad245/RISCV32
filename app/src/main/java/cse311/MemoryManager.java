@@ -14,6 +14,7 @@ public class MemoryManager {
     private SimpleMemory memory;
     private Uart uart;
     private FramebufferDevice framebufferDevice;
+    private AudioDevice audioDevice;
 
     // UART Memory-Mapped Registers
     public static final int UART_BASE = 0x10000000;
@@ -30,6 +31,7 @@ public class MemoryManager {
         this.memory = new SimpleMemory();
         this.uart = new Uart();
         this.framebufferDevice = new FramebufferDevice();
+        this.audioDevice = new AudioDevice();
     }
 
     public Uart getUart() {
@@ -40,10 +42,25 @@ public class MemoryManager {
         return framebufferDevice;
     }
 
+    public AudioDevice getAudioDevice() {
+        return audioDevice;
+    }
+
     public MemoryManager(SimpleMemory memory) {
         this.memory = memory;
         this.uart = new Uart();
         this.framebufferDevice = new FramebufferDevice();
+        this.audioDevice = new AudioDevice();
+    }
+
+    /**
+     * Checks if a given physical or virtual address falls within any MMIO region
+     * (UART, Framebuffer/Input, Audio).
+     */
+    public static boolean isMmioAddress(int address) {
+        return (address >= UART_BASE && address < UART_BASE + UART_SIZE) ||
+               (address >= FramebufferDevice.FB_BASE && address < FramebufferDevice.CTRL_BASE + 0x100) ||
+               AudioDevice.isAudioAccess(address);
     }
 
     /**
@@ -60,42 +77,70 @@ public class MemoryManager {
 
     // Memory access methods
     public byte readByte(int address) throws MemoryAccessException {
+        if (address < UART_BASE) {
+            return memory.readByteFast(address);
+        }
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             return (byte) uart.read(address);
         }
         if (framebufferDevice.isFramebufferAccess(address) || framebufferDevice.isControlAccess(address)) {
             return framebufferDevice.readByte(address);
         }
+        if (AudioDevice.isAudioAccess(address)) {
+            return audioDevice.readByte(address);
+        }
         return memory.readByteFast(address);
     }
 
     public short readHalfWord(int address) throws MemoryAccessException {
+        if (address < UART_BASE) {
+            return memory.readHalfWordFast(address);
+        }
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             return (short) uart.read(address);
         }
         if (framebufferDevice.isFramebufferAccess(address) || framebufferDevice.isControlAccess(address)) {
             return (short) framebufferDevice.readWord(address);
         }
+        if (AudioDevice.isAudioAccess(address)) {
+            return (short) audioDevice.readWord(address);
+        }
         return memory.readHalfWordFast(address);
     }
 
     public int readWord(int address) throws MemoryAccessException {
+        if (address < UART_BASE) {
+            return memory.readWordFast(address);
+        }
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             return (int) uart.read(address);
         }
         if (framebufferDevice.isFramebufferAccess(address) || framebufferDevice.isControlAccess(address)) {
             return framebufferDevice.readWord(address);
         }
+        if (AudioDevice.isAudioAccess(address)) {
+            return audioDevice.readWord(address);
+        }
         return memory.readWordFast(address);
     }
 
     public void writeByte(int address, byte value) throws MemoryAccessException {
+        if (address < UART_BASE) {
+            int wordAddr = address & 0xFFFFFFFC;
+            reservations.remove(wordAddr);
+            memory.writeByteFast(address, value);
+            return;
+        }
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             uart.write(address, value);
             return;
         }
         if (framebufferDevice.isFramebufferAccess(address) || framebufferDevice.isControlAccess(address)) {
             framebufferDevice.writeByte(address, value);
+            return;
+        }
+        if (AudioDevice.isAudioAccess(address)) {
+            audioDevice.writeByte(address, value);
             return;
         }
 
@@ -105,12 +150,22 @@ public class MemoryManager {
     }
 
     public void writeHalfWord(int address, short value) throws MemoryAccessException {
+        if (address < UART_BASE) {
+            int wordAddr = address & 0xFFFFFFFC;
+            reservations.remove(wordAddr);
+            memory.writeHalfWordFast(address, value);
+            return;
+        }
         if (address >= UART_BASE && address < UART_BASE + 0x1000) {
             uart.write(address, value);
             return;
         }
         if (framebufferDevice.isFramebufferAccess(address) || framebufferDevice.isControlAccess(address)) {
             framebufferDevice.writeWord(address, value & 0xFFFF);
+            return;
+        }
+        if (AudioDevice.isAudioAccess(address)) {
+            audioDevice.writeWord(address, value & 0xFFFF);
             return;
         }
 
@@ -120,6 +175,11 @@ public class MemoryManager {
     }
 
     public void writeWord(int address, int value) throws MemoryAccessException {
+        if (address < UART_BASE) {
+            reservations.remove(address);
+            memory.writeWordFast(address, value);
+            return;
+        }
         if (address >= FramebufferDevice.FB_BASE && address < FramebufferDevice.CTRL_BASE) {
             framebufferDevice.writeWordDirect((address - FramebufferDevice.FB_BASE) >>> 2, value);
             return;
@@ -130,6 +190,10 @@ public class MemoryManager {
         }
         if (framebufferDevice.isControlAccess(address)) {
             framebufferDevice.writeWord(address, value);
+            return;
+        }
+        if (AudioDevice.isAudioAccess(address)) {
+            audioDevice.writeWord(address, value);
             return;
         }
 

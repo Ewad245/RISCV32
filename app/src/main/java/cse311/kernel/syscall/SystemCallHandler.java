@@ -89,6 +89,12 @@ public class SystemCallHandler {
 
     public static final int O_CREATE = 64; // Linux O_CREAT flag
 
+    private static final String STR_NULL = "null";
+
+    private static String formatInum(Inode ip) {
+        return ip != null ? String.valueOf(ip.inum) : STR_NULL;
+    }
+
     public SystemCallHandler(Kernel kernel) {
         this.kernel = kernel;
     }
@@ -861,19 +867,28 @@ public class SystemCallHandler {
 
         // Try loading from mounted file system first
         if (kernel.getFileSystem() != null) {
-            // Build fs.img path (e.g., "/sh" or "/init")
-            String fsPath = "/" + path;
-            Inode inode = kernel.getFileSystem().namei(fsPath);
+            // First try resolving relative to current working directory (or absolute if starts with '/')
+            Inode inode = kernel.getFileSystem().namei(task, path);
+            String resolvedPath = path;
+
+            // If not found and path is relative, fall back to root '/' (like standard PATH lookup for commands in root)
+            if (inode == null && !path.startsWith("/")) {
+                resolvedPath = "/" + path;
+                inode = kernel.getFileSystem().namei(task, resolvedPath);
+            }
 
             if (inode != null && inode.type == Inode.T_FILE) {
                 elfData = new byte[inode.size];
                 int bytesRead = kernel.getFileSystem().readi(inode, elfData, 0, inode.size);
                 if (bytesRead != inode.size) {
-                    FileLogger.log("SYS_EXEC: Partial read from fs.img: " + fsPath);
+                    FileLogger.log("SYS_EXEC: Partial read from fs.img: " + resolvedPath);
                     elfData = null; // Fall back to host filesystem
                 } else {
-                    FileLogger.log("SYS_EXEC: Loaded " + bytesRead + " bytes from fs.img: " + fsPath);
+                    FileLogger.log("SYS_EXEC: Loaded " + bytesRead + " bytes from fs.img: " + resolvedPath);
                 }
+            }
+            if (inode != null) {
+                kernel.getFileSystem().iput(inode);
             }
         }
 
@@ -1242,14 +1257,19 @@ public class SystemCallHandler {
         StringBuilder nameBuilder = new StringBuilder();
         Inode dp = kernel.getFileSystem().nameiparent(task, path, nameBuilder);
         FileLogger
-                .log("SYS_MKDIR: dp=" + (dp != null ? dp.inum : "null") + " name=" + nameBuilder.toString());
+                .log("SYS_MKDIR: dp=" + formatInum(dp) + " name=" + nameBuilder.toString());
         if (dp == null || nameBuilder.length() == 0) {
+            if (dp != null)
+                kernel.getFileSystem().iput(dp);
             FileLogger.log("SYS_MKDIR: nameiparent failed");
             return -1;
         }
 
         String name = nameBuilder.toString();
-        if (kernel.getFileSystem().dirlookup(dp, name) != null) {
+        Inode existing = kernel.getFileSystem().dirlookup(dp, name);
+        if (existing != null) {
+            kernel.getFileSystem().iput(existing);
+            kernel.getFileSystem().iput(dp);
             FileLogger.log("SYS_MKDIR: dir already exists");
             return -1;
         }
@@ -1261,12 +1281,14 @@ public class SystemCallHandler {
         } catch (Exception e) {
             FileLogger.log("SYS_MKDIR: ialloc threw exception: " + e.getMessage());
             kernel.getFileSystem().log.endOp();
+            kernel.getFileSystem().iput(dp);
             return -1;
         }
 
-        FileLogger.log("SYS_MKDIR: allocated inode " + (ip != null ? ip.inum : "null"));
+        FileLogger.log("SYS_MKDIR: allocated inode " + formatInum(ip));
         if (ip == null) {
             kernel.getFileSystem().log.endOp();
+            kernel.getFileSystem().iput(dp);
             return -1;
         }
 
@@ -1303,8 +1325,11 @@ public class SystemCallHandler {
         if (path == null)
             return -1;
 
-        if (kernel.getFileSystem().namei(task, path) != null)
+        Inode existing = kernel.getFileSystem().namei(task, path);
+        if (existing != null) {
+            kernel.getFileSystem().iput(existing);
             return -1;
+        }
 
         StringBuilder name = new StringBuilder();
         Inode dp = kernel.getFileSystem().nameiparent(task, path, name);
@@ -1314,6 +1339,10 @@ public class SystemCallHandler {
         kernel.getFileSystem().log.beginOp();
         try {
             Inode ip = kernel.getFileSystem().ialloc(Inode.T_DEV);
+            if (ip == null) {
+                kernel.getFileSystem().iput(dp);
+                return -1;
+            }
             ip.major = (short) major;
             ip.minor = (short) minor;
             ip.nlink = 1;
@@ -1340,12 +1369,17 @@ public class SystemCallHandler {
             return -1;
 
         Inode ip = kernel.getFileSystem().namei(task, oldPath);
-        if (ip == null || ip.type == Inode.T_DIR)
+        if (ip == null || ip.type == Inode.T_DIR) {
+            if (ip != null)
+                kernel.getFileSystem().iput(ip);
             return -1;
+        }
 
         StringBuilder nameBuilder = new StringBuilder();
         Inode dp = kernel.getFileSystem().nameiparent(task, newPath, nameBuilder);
         if (dp == null || nameBuilder.length() == 0) {
+            if (dp != null)
+                kernel.getFileSystem().iput(dp);
             kernel.getFileSystem().iput(ip);
             return -1;
         }
@@ -1377,16 +1411,23 @@ public class SystemCallHandler {
 
         StringBuilder nameBuilder = new StringBuilder();
         Inode dp = kernel.getFileSystem().nameiparent(task, path, nameBuilder);
-        if (dp == null || nameBuilder.length() == 0)
+        if (dp == null || nameBuilder.length() == 0) {
+            if (dp != null)
+                kernel.getFileSystem().iput(dp);
             return -1;
+        }
 
         String name = nameBuilder.toString();
-        if (name.equals(".") || name.equals(".."))
+        if (name.equals(".") || name.equals("..")) {
+            kernel.getFileSystem().iput(dp);
             return -1;
+        }
 
         Inode ip = kernel.getFileSystem().dirlookup(dp, name);
-        if (ip == null)
+        if (ip == null) {
+            kernel.getFileSystem().iput(dp);
             return -1;
+        }
 
         kernel.getFileSystem().log.beginOp();
         try {
@@ -1419,29 +1460,45 @@ public class SystemCallHandler {
 
     private int handleOpen(Task task, int pathAddr, int mode) {
         String path = readStringFromTask(task, pathAddr);
+        FileLogger.log("SYS_OPEN: path=" + path + " mode=0x" + Integer.toHexString(mode));
         if (path == null)
             return -1;
 
         if (kernel.getFileSystem() == null)
             return -1;
+
+        boolean isCreate = (mode & O_CREATE) != 0 || (mode & 0x200) != 0;
+        boolean isTruncate = (mode & 0x200) != 0 || (mode & 0x400) != 0;
+        boolean isAppend = (mode & 0x400) != 0 || (mode & 0x008) != 0;
+
         Inode ip = kernel.getFileSystem().namei(task, path);
+        FileLogger.log("SYS_OPEN: namei ip=" + formatInum(ip) + " isCreate=" + isCreate);
         if (ip == null) {
-            if ((mode & O_CREATE) != 0) {
+            if (isCreate) {
                 kernel.getFileSystem().log.beginOp();
                 try {
                     StringBuilder nameBuilder = new StringBuilder();
                     Inode dp = kernel.getFileSystem().nameiparent(task, path, nameBuilder);
-                    if (dp == null || nameBuilder.length() == 0)
+                    FileLogger.log("SYS_OPEN O_CREATE: dp=" + formatInum(dp) + " name=" + nameBuilder.toString());
+                    if (dp == null || nameBuilder.length() == 0) {
+                        if (dp != null)
+                            kernel.getFileSystem().iput(dp);
+                        FileLogger.log("SYS_OPEN O_CREATE failed: dp null or name empty");
                         return -1;
+                    }
 
                     ip = kernel.getFileSystem().ialloc(Inode.T_FILE);
-                    if (ip == null)
+                    FileLogger.log("SYS_OPEN O_CREATE: ialloc ip=" + formatInum(ip));
+                    if (ip == null) {
+                        kernel.getFileSystem().iput(dp);
                         return -1;
+                    }
 
                     ip.nlink = 1;
                     kernel.getFileSystem().updateInode(ip);
 
                     if (kernel.getFileSystem().dirlink(dp, nameBuilder.toString(), ip.inum) < 0) {
+                        FileLogger.log("SYS_OPEN O_CREATE: dirlink failed");
                         kernel.getFileSystem().iput(ip);
                         kernel.getFileSystem().iput(dp);
                         return -1;
@@ -1451,12 +1508,10 @@ public class SystemCallHandler {
                     kernel.getFileSystem().log.endOp();
                 }
             } else {
+                FileLogger.log("SYS_OPEN failed: ip is null and O_CREATE not set");
                 return -1;
             }
         }
-
-        boolean isTruncate = (mode & 0x200) != 0;
-        boolean isAppend = (mode & 0x400) != 0;
 
         if (isTruncate && ip.type == Inode.T_FILE) {
             kernel.getFileSystem().log.beginOp();
@@ -1467,7 +1522,8 @@ public class SystemCallHandler {
             }
         }
 
-        FileDescriptor fd = new FileDescriptor(ip, true, (mode & 1) != 0 || (mode & 2) != 0);
+        boolean isWritable = (mode & 1) != 0 || (mode & 2) != 0 || isCreate;
+        FileDescriptor fd = new FileDescriptor(ip, true, isWritable);
         fd.append = isAppend;
 
         if (ip.type == Inode.T_DEV) {
@@ -1477,9 +1533,11 @@ public class SystemCallHandler {
 
         int fdIdx = task.allocFd(fd);
         if (fdIdx < 0) {
+            kernel.getFileSystem().iput(ip);
             return -1;
         }
 
+        FileLogger.log("SYS_OPEN success: fd=" + fdIdx + " for path=" + path);
         return fdIdx;
     }
 

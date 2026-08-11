@@ -85,11 +85,11 @@
                         </VBox>
                 </SplitPane>
 
-                <TabPane fx:id="datapathTabs" visible="false"/>
+                <TabPane fx:id="datapathTabs" visible="false" minHeight="0" minWidth="0" maxHeight="Infinity" maxWidth="Infinity"/>
 
-                <VBox fx:id="memoryTabContainer" visible="false"/>
+                <VBox fx:id="memoryTabContainer" visible="false" minHeight="0" minWidth="0" maxHeight="Infinity" maxWidth="Infinity"/>
 
-                <VBox fx:id="screenContainer" visible="false"/>
+                <VBox fx:id="screenContainer" visible="false" alignment="CENTER" minHeight="0" minWidth="0" maxHeight="Infinity" maxWidth="Infinity"/>
 
             </StackPane>
             

@@ -49,13 +49,8 @@ public class PagedMemoryManager extends MemoryManager {
     private Map<Integer, Integer> sharedKeyMap = new HashMap<>(); // Key (user provided) -> Frame Index
     private int[] frameRefCount;
 
-    // Physical MMIO mapping (UART & Framebuffer)
-    private static final int UART_BASE = 0x10000000;
-    private static final int UART_SIZE = 0x1000;
-
     public static boolean isMmio(int va) {
-        return (va >= UART_BASE && va < (UART_BASE + UART_SIZE)) ||
-               (va >= cse311.FramebufferDevice.FB_BASE && va < cse311.FramebufferDevice.CTRL_BASE + 0x100);
+        return cse311.MemoryManager.isMmioAddress(va);
     }
 
     public static boolean isUart(int va) {
@@ -151,7 +146,8 @@ public class PagedMemoryManager extends MemoryManager {
 
     private final ThreadLocal<AddressSpace> fastContext = new ThreadLocal<>();
 
-    private static final int TLB_SLOTS = 32;
+    private static final int TLB_SLOTS = 1024;
+    private static final int TLB_MASK = TLB_SLOTS - 1;
     private final int[] tlbReadVPage = new int[TLB_SLOTS];
     private final int[] tlbReadPhysBase = new int[TLB_SLOTS];
     private final int[] tlbWriteVPage = new int[TLB_SLOTS];
@@ -188,7 +184,7 @@ public class PagedMemoryManager extends MemoryManager {
             return;
         }
         int page = va >>> 12;
-        int slot = (int) (Thread.currentThread().getId() & 31);
+        int slot = page & TLB_MASK;
         if (page == tlbWriteVPage[slot]) {
             super.writeByte(tlbWritePhysBase[slot] | (va & 0xFFF), val);
             return;
@@ -213,7 +209,7 @@ public class PagedMemoryManager extends MemoryManager {
             return super.readByte(va);
         }
         int page = va >>> 12;
-        int slot = (int) (Thread.currentThread().getId() & 31);
+        int slot = page & TLB_MASK;
         if (page == tlbReadVPage[slot]) {
             return super.readByte(tlbReadPhysBase[slot] | (va & 0xFFF));
         }
@@ -237,7 +233,7 @@ public class PagedMemoryManager extends MemoryManager {
             return super.readHalfWord(va);
         }
         int page = va >>> 12;
-        int slot = (int) (Thread.currentThread().getId() & 31);
+        int slot = page & TLB_MASK;
         if (page == tlbReadVPage[slot]) {
             return super.readHalfWord(tlbReadPhysBase[slot] | (va & 0xFFF));
         }
@@ -261,7 +257,7 @@ public class PagedMemoryManager extends MemoryManager {
             return super.readWord(va);
         }
         int page = va >>> 12;
-        int slot = (int) (Thread.currentThread().getId() & 31);
+        int slot = page & TLB_MASK;
         if (page == tlbReadVPage[slot]) {
             return super.readWord(tlbReadPhysBase[slot] | (va & 0xFFF));
         }
@@ -291,7 +287,7 @@ public class PagedMemoryManager extends MemoryManager {
             return;
         }
         int page = va >>> 12;
-        int slot = (int) (Thread.currentThread().getId() & 31);
+        int slot = page & TLB_MASK;
         if (page == tlbWriteVPage[slot]) {
             super.writeHalfWord(tlbWritePhysBase[slot] | (va & 0xFFF), v);
             return;
@@ -317,7 +313,7 @@ public class PagedMemoryManager extends MemoryManager {
             return;
         }
         int page = va >>> 12;
-        int slot = (int) (Thread.currentThread().getId() & 31);
+        int slot = page & TLB_MASK;
         if (page == tlbWriteVPage[slot]) {
             super.writeWord(tlbWritePhysBase[slot] | (va & 0xFFF), v);
             return;

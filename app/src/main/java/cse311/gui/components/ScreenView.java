@@ -26,6 +26,7 @@ public class ScreenView extends StackPane {
     private static final double NANOS_PER_SECOND = 1_000_000_000.0;
 
     private final FramebufferDevice framebufferDevice;
+    private final DoomInputMapper inputMapper;
     private final PixelBuffer<IntBuffer> pixelBuffer;
     private final ImageView imageView;
     private final Label fpsLabel;
@@ -36,7 +37,12 @@ public class ScreenView extends StackPane {
     private boolean showFps = true;
 
     public ScreenView(FramebufferDevice framebufferDevice) {
+        this(framebufferDevice, new DoomInputMapper());
+    }
+
+    public ScreenView(FramebufferDevice framebufferDevice, DoomInputMapper inputMapper) {
         this.framebufferDevice = framebufferDevice;
+        this.inputMapper = inputMapper;
 
         // 1. Wrap off-heap IntBuffer directly in JavaFX PixelBuffer
         IntBuffer intBuffer = framebufferDevice.getDirectIntBuffer();
@@ -52,7 +58,7 @@ public class ScreenView extends StackPane {
         WritableImage writableImage = new WritableImage(pixelBuffer);
         this.imageView = new ImageView(writableImage);
         this.imageView.setSmooth(false); // Sharp retro pixels (no bilinear blurring)
-        this.imageView.setPreserveRatio(true);
+        this.imageView.setPreserveRatio(true); // Preserve retro DOOM aspect ratio
 
         // 3. Bind ImageView scaling to container size
         this.imageView.fitWidthProperty().bind(widthProperty());
@@ -78,6 +84,8 @@ public class ScreenView extends StackPane {
         getChildren().addAll(imageView, fpsLabel);
 
         // Styling for dark gaming frame
+        setMinSize(0, 0);
+        setMaxSize(Double.MAX_VALUE, Double.MAX_VALUE);
         setStyle("-fx-background-color: #0d0d0d; -fx-alignment: center;");
         setFocusTraversable(true); // Allow focus to capture keyboard inputs
 
@@ -96,43 +104,18 @@ public class ScreenView extends StackPane {
     }
 
     private void handleKeyEvent(KeyEvent event, boolean pressed) {
-        if (pressed && event.getCode() == KeyCode.F3) {
+        if (pressed && event.getCode() == KeyCode.F3 && event.isControlDown()) {
+            // Ctrl+F3 toggles FPS HUD overlay (allowing plain F3 to pass to DOOM for Load Menu)
             showFps = !showFps;
             fpsLabel.setVisible(showFps);
             event.consume();
             return;
         }
 
-        int doomKey = mapKeyToDoom(event.getCode());
+        int doomKey = inputMapper.mapEventToDoomKey(event);
         if (doomKey != 0) {
             framebufferDevice.pushKeyEvent(doomKey, pressed);
             event.consume();
-        }
-    }
-
-    /**
-     * Map JavaFX KeyCode to DOOM / doomgeneric key constants
-     */
-    private int mapKeyToDoom(KeyCode code) {
-        switch (code) {
-            case ENTER: return 13;      // KEY_ENTER
-            case ESCAPE: return 27;     // KEY_ESCAPE
-            case TAB: return 9;         // KEY_TAB
-            case LEFT: return 0xac;     // KEY_LEFTARROW
-            case RIGHT: return 0xae;    // KEY_RIGHTARROW
-            case UP: return 0xad;       // KEY_UPARROW
-            case DOWN: return 0xaf;     // KEY_DOWNARROW
-            case CONTROL: return 0x80 + 0x1d; // KEY_FIRE / CTRL
-            case SPACE: return ' ';     // KEY_USE
-            case SHIFT: return 0x80 + 0x36; // KEY_RSHIFT / SPEED
-            case ALT: return 0x80 + 0x38;   // KEY_ALT
-            default:
-                String text = code.getChar();
-                if (text != null && !text.isEmpty()) {
-                    char c = text.charAt(0);
-                    return (int) Character.toLowerCase(c);
-                }
-                return 0;
         }
     }
 
@@ -170,4 +153,3 @@ public class ScreenView extends StackPane {
         }
     }
 }
-

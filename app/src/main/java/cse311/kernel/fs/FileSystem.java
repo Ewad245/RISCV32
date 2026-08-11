@@ -39,6 +39,43 @@ public class FileSystem {
         this.log = new Log(kernel, this.bcache, sb.logstart, sb.nlog);
     }
 
+    /**
+     * Post-construction initialization for system directories (e.g. /tmp).
+     */
+    public void initializeSystemDirectories() {
+        createDirectoryIfMissing("/tmp");
+    }
+
+    public final void createDirectoryIfMissing(String path) {
+        StringBuilder nameBuf = new StringBuilder();
+        Inode dp = nameiparent(null, path, nameBuf);
+        if (dp != null && nameBuf.length() > 0) {
+            String name = nameBuf.toString();
+            Inode existing = dirlookup(dp, name);
+            if (existing == null) {
+                log.beginOp();
+                try {
+                    Inode ip = ialloc(Inode.T_DIR);
+                    if (ip != null) {
+                        ip.nlink = 2;
+                        updateInode(ip);
+                        dirlink(ip, ".", ip.inum);
+                        dirlink(ip, "..", dp.inum);
+                        dp.nlink++;
+                        updateInode(dp);
+                        dirlink(dp, name, ip.inum);
+                        iput(ip);
+                    }
+                } finally {
+                    log.endOp();
+                }
+            } else {
+                iput(existing);
+            }
+            iput(dp);
+        }
+    }
+
     public DiskDevice getDiskDevice() {
         return disk;
     }
@@ -429,12 +466,30 @@ public class FileSystem {
     }
 
     /**
+     * Splits and normalizes path components, stripping empty components and handling '.' and '..'.
+     */
+    private java.util.List<String> parsePathComponents(String path) {
+        if (path == null)
+            return java.util.Collections.emptyList();
+        String[] rawParts = path.split("/+");
+        java.util.List<String> parts = new java.util.ArrayList<>();
+        for (String part : rawParts) {
+            if (part.isEmpty() || part.equals("."))
+                continue;
+            parts.add(part);
+        }
+        return parts;
+    }
+
+    /**
      * Resolve a path (e.g., "/home/test") to an Inode.
      * Starts from root if path is absolute, otherwise from task's cwd.
      */
-    public Inode namei(Task task, String path) {
+    public final Inode namei(Task task, String path) {
         if (path == null || path.isEmpty())
             return null;
+
+        java.util.List<String> parts = parsePathComponents(path);
         Inode ip;
         if (path.startsWith("/")) {
             ip = iget(1); // Root
@@ -442,10 +497,11 @@ public class FileSystem {
             ip = (task != null && task.cwd != null) ? idup(task.cwd) : iget(1);
         }
 
-        String[] parts = path.split("/");
+        if (parts.isEmpty()) {
+            return ip; // Root or cwd
+        }
+
         for (String part : parts) {
-            if (part.isEmpty() || part.equals("."))
-                continue;
             Inode next = dirlookup(ip, part);
             iput(ip); // Release the parent before moving down
 
@@ -456,7 +512,7 @@ public class FileSystem {
         return ip;
     }
 
-    public Inode namei(String path) {
+    public final Inode namei(String path) {
         return namei(null, path);
     }
 
@@ -464,9 +520,14 @@ public class FileSystem {
      * Resolves the parent directory of a path, and returns the final path component
      * in the provided StringBuilder.
      */
-    public Inode nameiparent(Task task, String path, StringBuilder name) {
+    public final Inode nameiparent(Task task, String path, StringBuilder name) {
         if (path == null || path.isEmpty())
             return null;
+
+        java.util.List<String> parts = parsePathComponents(path);
+        if (parts.isEmpty())
+            return null;
+
         Inode ip;
         if (path.startsWith("/")) {
             ip = iget(1); // Root
@@ -474,11 +535,8 @@ public class FileSystem {
             ip = (task != null && task.cwd != null) ? idup(task.cwd) : iget(1);
         }
 
-        String[] parts = path.split("/");
-        for (int i = 0; i < parts.length - 1; i++) {
-            String part = parts[i];
-            if (part.isEmpty() || part.equals("."))
-                continue;
+        for (int i = 0; i < parts.size() - 1; i++) {
+            String part = parts.get(i);
             Inode next = dirlookup(ip, part);
             iput(ip); // Release the parent before moving down
             if (next == null)
@@ -486,9 +544,7 @@ public class FileSystem {
             ip = next;
         }
 
-        if (parts.length > 0) {
-            name.append(parts[parts.length - 1]);
-        }
+        name.append(parts.get(parts.size() - 1));
         return ip;
     }
 

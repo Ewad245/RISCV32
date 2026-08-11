@@ -153,6 +153,7 @@ public class Kernel {
     public void mountFileSystem(String diskImagePath) {
         try {
             this.fileSystem = new FileSystem(diskImagePath, this);
+            this.fileSystem.initializeSystemDirectories();
             this.bufferCache = fileSystem.getBufferCache();
             FileLogger.log("FileSystem mounted: " + diskImagePath);
             FileLogger.log("BufferCache initialized with " + BufferCache.NBUF + " buffers");
@@ -281,10 +282,14 @@ public class Kernel {
             cpu.turnOn();
         }
 
-        // Boot Coordination: APs spin-wait until BSP says 'started'
+        // Boot Coordination: APs wait until BSP says 'started'
         if (cpu.getId() != 0) {
             while (!started) {
-                Thread.yield(); // Spin
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
         }
 
@@ -379,9 +384,9 @@ public class Kernel {
     }
 
     private void idle() {
-        // Simple idle loop: sleep briefly to save host CPU
+        // Ultra-responsive idle loop: sleep 2ms to save host CPU while dispatching tasks rapidly
         try {
-            Thread.sleep(1);
+            Thread.sleep(2);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return;

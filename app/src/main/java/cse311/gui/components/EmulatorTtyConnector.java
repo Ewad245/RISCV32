@@ -50,13 +50,22 @@ public class EmulatorTtyConnector implements TtyConnector {
 
     @Override
     public void write(byte[] bytes) throws IOException {
-        String str = new String(bytes, StandardCharsets.UTF_8);
-        memory.getInput(str);
+        if (bytes == null || bytes.length == 0)
+            return;
+        String str = new String(bytes, StandardCharsets.UTF_8).replace("\t", "");
+        if (!str.isEmpty()) {
+            memory.getInput(str);
+        }
     }
 
     @Override
     public void write(String string) throws IOException {
-        memory.getInput(string);
+        if (string == null || string.isEmpty())
+            return;
+        String filtered = string.replace("\t", "");
+        if (!filtered.isEmpty()) {
+            memory.getInput(filtered);
+        }
     }
 
     @Override
