@@ -68,6 +68,7 @@ public class Kernel {
 
     // Boot coordination
     private volatile boolean started = false;
+    private final long bootTime = System.currentTimeMillis();
 
     // Execution Control
     private volatile boolean paused = false;
@@ -352,6 +353,7 @@ public class Kernel {
                     currentTask.setState(TaskState.TERMINATED);
                     dispatchTask(currentTask);
                 } finally {
+
                     currentTask.releaseCpu();
                 }
 
@@ -919,6 +921,10 @@ public class Kernel {
 
     public KernelConfig getConfig() {
         return config;
+    }
+
+    public long getBootTime() {
+        return bootTime;
     }
 
     /**

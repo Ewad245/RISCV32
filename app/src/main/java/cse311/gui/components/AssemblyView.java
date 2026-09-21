@@ -108,7 +108,13 @@ public class AssemblyView extends VBox {
                     String hexCode = (item.code <= 0xFFFF && item.code >= 0)
                             ? String.format("%04x", item.code)
                             : String.format("%08x", item.code);
-                    setText(String.format("    %x:        %s        %s", item.address, hexCode, item.assembly));
+                    
+                    long hitCount = cpu.getHitCount(item.address);
+                    if (hitCount > 0) {
+                        setText(String.format("    %08x:    %s    %-32s [ x %,d ]", item.address, hexCode, item.assembly, hitCount));
+                    } else {
+                        setText(String.format("    %08x:    %s    %s", item.address, hexCode, item.assembly));
+                    }
 
                     // Check if this is an atomic instruction (amoswap, amoadd, etc.)
                     boolean isAtomic = item.assembly.trim().startsWith("amo") ||
@@ -127,6 +133,10 @@ public class AssemblyView extends VBox {
                         } else {
                             setStyle("-fx-background-color: #f0f4c3; -fx-text-fill: black;");
                         }
+                    } else if (hitCount > 1000) {
+                        setStyle("-fx-background-color: #ffe0b2; -fx-text-fill: #e65100; -fx-font-weight: bold;");
+                    } else if (hitCount > 0) {
+                        setStyle("-fx-background-color: #fff3e0; -fx-text-fill: black;");
                     } else {
                         if (isAtomic) {
                             setStyle("-fx-background-color: #e1bee7; -fx-text-fill: #4a148c; -fx-font-weight: bold;");
@@ -139,55 +149,61 @@ public class AssemblyView extends VBox {
         }
     }
 
+    private int lastUpdatedPc = -1;
+
     public void update() {
+        int pc = cpu.getLastPC();
+        if (pc == -1) {
+            pc = cpu.getProgramCounter();
+        }
+        Task task = cpu.getCurrentTask();
+        int tid = (task != null) ? task.getId() : 0;
+
+        // Skip redundant JavaFX UI queueing if PC & Task haven't changed
+        if (pc == lastUpdatedPc && tid == cachedInstructionsPid) {
+            return;
+        }
+        lastUpdatedPc = pc;
+
+        final int targetPc = pc;
+        final Task targetTask = task;
+        final int targetTid = tid;
+
         // Run on JavaFX thread
         Platform.runLater(() -> {
-            int pc = cpu.getLastPC();
-            // If execution hasn't started (lastPC = -1), fallback to next PC to show entry
-            // point
-            if (pc == -1) {
-                pc = cpu.getProgramCounter();
-            }
-
             // Update History logic
-            if (pc != currentPc) {
+            if (targetPc != currentPc) {
                 animationPreviousPc = currentPc;
             }
-            currentPc = pc;
+            currentPc = targetPc;
 
             // Update Task Info
-            Task task = cpu.getCurrentTask();
-
-            if (task == null) {
-                taskLabel.setText("Task: Idle");
-                // If idle, we switch to a special "Idle" state display
+            if (targetTask == null) {
                 if (cachedInstructionsPid != 0) {
-                    instructions.clear();
-                    addressToIndexMap.clear();
-                    instructions.add(new InstructionItem(0, 0, "CPU is not running", false));
-                    cachedInstructionsPid = 0;
+                    taskLabel.setText(String.format("Task: Idle (PID %d cached)", cachedInstructionsPid));
+                } else {
+                    taskLabel.setText("Task: Idle");
                 }
             } else {
-                int tid = task.getId();
-                String taskName = task.getName();
-                taskLabel.setText(String.format("Task: [%d] %s", tid, taskName));
+                String taskName = targetTask.getName();
+                taskLabel.setText(String.format("Task: [%d] %s", targetTid, taskName));
 
                 // Rebuild list only if Task ID changed
-                if (cachedInstructionsPid != tid) {
-                    rebuildFullList(task);
-                    cachedInstructionsPid = tid;
+                if (cachedInstructionsPid != targetTid) {
+                    rebuildFullList(targetTask);
+                    cachedInstructionsPid = targetTid;
                 }
             }
 
             listView.refresh(); // Refresh to update colors (Current vs Previous vs Breakpoints)
 
-            if (task != null && chkFollowPc.isSelected()) {
+            if (chkFollowPc != null && chkFollowPc.isSelected()) {
                 // Select and Scroll
-                Integer index = addressToIndexMap.get(pc); // O(1) Lookup
+                Integer index = addressToIndexMap.get(targetPc); // O(1) Lookup
 
                 if (index != null) {
-                    listView.getSelectionModel().select(index);
-                    listView.scrollTo(index - 5); // Center comfortably
+                    listView.getSelectionModel().select(index.intValue());
+                    listView.scrollTo(Math.max(0, index.intValue() - 5)); // Center comfortably
                 } else {
                     listView.getSelectionModel().clearSelection();
                 }

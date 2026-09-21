@@ -8,6 +8,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 import cse311.kernel.process.Task;
+import cse311.pipeline.PipelineRegisters;
+import cse311.pipeline.HazardUnit;
 
 @SuppressWarnings({
         "PMD.UnusedPrivateField",
@@ -22,6 +24,12 @@ import cse311.kernel.process.Task;
         "PMD.SystemPrintln"
 })
 public class RV32Cpu {
+
+    public enum ExecutionMode {
+        SINGLE_CYCLE,
+        FIVE_STAGE_PIPELINE
+    }
+
 
     private int cpuId;
     private int[] x = new int[32];
@@ -41,6 +49,120 @@ public class RV32Cpu {
     // private int[] instruction;
     private static final int INSTRUCTION_SIZE = 4; // 32-bit instructions
     private int lastInstructionSize = 4; // Tracks size of current instruction (2 for RVC, 4 for standard)
+
+    // --- Execution Mode & 5-Stage Pipeline Latches ---
+    private ExecutionMode executionMode = ExecutionMode.SINGLE_CYCLE;
+    private boolean forwardingEnabled = true;
+
+    private final cse311.pipeline.ExecutionTraceBuffer traceBuffer = new cse311.pipeline.ExecutionTraceBuffer();
+    private final Map<Integer, java.util.concurrent.atomic.AtomicLong> hitCountMap = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile boolean tracingEnabled = false;
+
+    // --- L1 Cache Simulation ---
+    private final cse311.pipeline.L1Cache iCache = new cse311.pipeline.L1Cache(64, 4, 64, 10);
+    private final cse311.pipeline.L1Cache dCache = new cse311.pipeline.L1Cache(64, 4, 64, 10);
+    private volatile boolean cacheSimulationEnabled = false;
+    private int iCacheStallRemaining = 0;
+    private int dCacheStallRemaining = 0;
+
+    public cse311.pipeline.L1Cache getICache() { return iCache; }
+    public cse311.pipeline.L1Cache getDCache() { return dCache; }
+    public boolean isCacheSimulationEnabled() { return cacheSimulationEnabled; }
+    public void setCacheSimulationEnabled(boolean enabled) {
+        this.cacheSimulationEnabled = enabled;
+        if (!enabled) {
+            this.iCacheStallRemaining = 0;
+            this.dCacheStallRemaining = 0;
+        }
+    }
+    public boolean isICacheStalling() { return iCacheStallRemaining > 0; }
+    public boolean isDCacheStalling() { return dCacheStallRemaining > 0; }
+
+    public void setTracingEnabled(boolean enabled) {
+        this.tracingEnabled = enabled;
+    }
+
+    public boolean isTracingEnabled() {
+        return tracingEnabled;
+    }
+
+    private void recordHitCount(int targetPc) {
+        java.util.concurrent.atomic.AtomicLong count = hitCountMap.get(targetPc);
+        if (count == null) {
+            count = hitCountMap.computeIfAbsent(targetPc, k -> new java.util.concurrent.atomic.AtomicLong(0));
+        }
+        count.incrementAndGet();
+    }
+
+    public final PipelineRegisters.IF_ID ifId = new PipelineRegisters.IF_ID();
+    public final PipelineRegisters.ID_EX idEx = new PipelineRegisters.ID_EX();
+    public final PipelineRegisters.EX_MEM exMem = new PipelineRegisters.EX_MEM();
+    public final PipelineRegisters.MEM_WB memWb = new PipelineRegisters.MEM_WB();
+
+    public cse311.pipeline.ExecutionTraceBuffer getTraceBuffer() {
+        return traceBuffer;
+    }
+
+    public long getHitCount(int targetPc) {
+        java.util.concurrent.atomic.AtomicLong count = hitCountMap.get(targetPc);
+        return count != null ? count.get() : 0L;
+    }
+
+    public void clearHitCounts() {
+        hitCountMap.clear();
+    }
+
+    // Pipeline Statistics
+    private long pipelineClockCycles = 0;
+    private long pipelineCommittedInstructions = 0;
+    private long pipelineStalls = 0;
+    private long pipelineFlushes = 0;
+    private int lastCommittedPc = 0;
+
+    public ExecutionMode getExecutionMode() { return executionMode; }
+    public synchronized void setExecutionMode(ExecutionMode mode) {
+        if (this.executionMode == mode) {
+            return;
+        }
+        if (this.executionMode == ExecutionMode.FIVE_STAGE_PIPELINE) {
+            try {
+                drainPipeline();
+            } catch (Exception ignored) {
+                // Ignore exception during mode switch drain
+            }
+            if (this.lastCommittedPc != 0) {
+                this.pc = this.lastCommittedPc;
+            }
+        } else {
+            this.lastCommittedPc = this.pc;
+        }
+        this.executionMode = mode;
+        flushPipeline();
+    }
+
+    public boolean isForwardingEnabled() { return forwardingEnabled; }
+
+    public synchronized void flushPipeline() {
+        iCacheStallRemaining = 0;
+        dCacheStallRemaining = 0;
+        if (ifId != null) ifId.flush();
+        if (idEx != null) idEx.flush();
+        if (exMem != null) exMem.flush();
+        if (memWb != null) memWb.flush();
+    }
+
+
+
+
+    public void setForwardingEnabled(boolean enabled) { this.forwardingEnabled = enabled; }
+    public long getPipelineClockCycles() { return pipelineClockCycles; }
+    public long getPipelineCommittedInstructions() { return pipelineCommittedInstructions; }
+    public long getPipelineStalls() { return pipelineStalls; }
+    public long getPipelineFlushes() { return pipelineFlushes; }
+    public double getIpc() {
+        return pipelineClockCycles == 0 ? 0.0 : (double) pipelineCommittedInstructions / pipelineClockCycles;
+    }
+
 
     // Privilege levels
     public static final int PRIVILEGE_USER = 0; // U-mode
@@ -252,7 +374,12 @@ public class RV32Cpu {
 
     public void setProgramCounterEntryPoint(int entryPoint) {
         this.pc = entryPoint;
+        if (executionMode == ExecutionMode.FIVE_STAGE_PIPELINE) {
+            this.lastCommittedPc = entryPoint;
+            flushPipeline();
+        }
     }
+
 
     public int getLastPC() {
         return lastPC;
@@ -268,7 +395,475 @@ public class RV32Cpu {
 
     // Methods needed by the kernel
     public void step() throws Exception {
-        fetchExecuteCycle();
+        if (executionMode == ExecutionMode.FIVE_STAGE_PIPELINE) {
+            // In pipeline mode, step() advances cycles until 1 instruction commits or max 10 cycles
+            long initialCommitted = pipelineCommittedInstructions;
+            int limit = 10;
+            while (pipelineCommittedInstructions == initialCommitted && limit > 0) {
+                clockTick();
+                limit--;
+            }
+        } else {
+            fetchExecuteCycle();
+        }
+    }
+
+    public void stepCycle() throws Exception {
+        if (executionMode == ExecutionMode.FIVE_STAGE_PIPELINE) {
+            clockTick();
+        } else {
+            fetchExecuteCycle();
+        }
+    }
+
+    /**
+     * Executes one clock cycle of the 5-Stage RISC-V Pipeline.
+     * Evaluates stages in reverse order: WB -> MEM -> EX -> ID -> IF,
+     * with load-use hazard stall and branch flush handling.
+     */
+    public void clockTick() {
+        clockTickInternal(false);
+    }
+
+    public void clockTickInternal(boolean isDrain) {
+        pipelineClockCycles++;
+
+        boolean branchTakenInEx = false;
+        int branchTargetPc = 0;
+
+        // Save initial ID and EX state before cycle execution to detect Load-Use hazards accurately
+        boolean prevIdExMemRead = idEx.valid && idEx.memRead;
+        int prevIdExRd = idEx.rd;
+
+        int wbRd = 0;
+        int wbVal = 0;
+
+        // --- STAGE 5: WRITE-BACK (WB) ---
+        if (memWb.valid) {
+            if (memWb.regWrite && memWb.rd != 0) {
+                wbRd = memWb.rd;
+wbVal = memWb.memToReg ? memWb.memReadData : memWb.aluResult;
+                x[wbRd] = wbVal;
+                lastAluResult = wbVal;
+                regWrite = true;
+            }
+            int instSize = memWb.instructionSize > 0 ? memWb.instructionSize : 4;
+            lastCommittedPc = memWb.branchTaken ? memWb.targetPc : (memWb.pc + instSize);
+            if (memWb.isEcall) {
+                lastInstructionWasEcall = true;
+                pc = lastCommittedPc;
+                ifId.flush();
+                idEx.flush();
+                exMem.flush();
+            }
+
+            pipelineCommittedInstructions++;
+            if (tracingEnabled) {
+                traceBuffer.record(memWb.pc, memWb.instruction, memWb.aluResult, memWb.rd, memWb.regWrite, false, false, pipelineClockCycles);
+                recordHitCount(memWb.pc);
+            }
+            memWb.valid = false;
+        }
+
+        // --- STAGE 4: MEMORY ACCESS (MEM) ---
+        boolean dCacheStall = false;
+        if (dCacheStallRemaining > 0) {
+            dCacheStallRemaining--;
+            dCacheStall = true;
+            pipelineStalls++;
+            memWb.valid = false;
+        } else if (exMem.valid) {
+            boolean isMemAccess = exMem.memRead || exMem.memWrite;
+            int penalty = 0;
+            if (cacheSimulationEnabled && isMemAccess && !isDrain) {
+                penalty = dCache.access(exMem.aluResult, exMem.memWrite, pipelineClockCycles);
+            }
+            if (penalty > 0) {
+                dCacheStallRemaining = penalty - 1;
+                dCacheStall = true;
+                pipelineStalls++;
+                memWb.valid = false;
+            } else {
+                memWb.pc = exMem.pc;
+                memWb.instruction = exMem.instruction;
+                memWb.instructionSize = exMem.instructionSize;
+                memWb.aluResult = exMem.aluResult;
+                memWb.rd = exMem.rd;
+                memWb.regWrite = exMem.regWrite;
+                memWb.memToReg = exMem.memToReg;
+                memWb.isEcall = exMem.isEcall;
+                memWb.branchTaken = exMem.branchTaken;
+                memWb.targetPc = exMem.targetPc;
+                memWb.valid = true;
+
+
+                if (exMem.memRead) {
+                    try {
+                        int addr = mapAddress(exMem.aluResult);
+                        switch (exMem.func3) {
+                            case 0b000: memWb.memReadData = memory.readByte(addr); break;
+                            case 0b001: memWb.memReadData = memory.readHalfWord(addr); break;
+                            case 0b010: memWb.memReadData = memory.readWord(addr); break;
+                            case 0b100: memWb.memReadData = memory.readByte(addr) & 0xFF; break;
+                            case 0b101: memWb.memReadData = memory.readHalfWord(addr) & 0xFFFF; break;
+                            default: memWb.memReadData = memory.readWord(addr); break;
+                        }
+                        lastMemReadVal = memWb.memReadData;
+                    } catch (Exception e) {
+                        handleException(5, exMem.aluResult);
+                    }
+                } else if (exMem.memWrite) {
+                    try {
+                        int addr = mapAddressForWrite(exMem.aluResult);
+                        switch (exMem.func3) {
+                            case 0b000: memory.writeByte(addr, (byte) exMem.writeVal); break;
+                            case 0b001: memory.writeHalfWord(addr, (short) exMem.writeVal); break;
+                            case 0b010: memory.writeWord(addr, exMem.writeVal); break;
+                            default: memory.writeWord(addr, exMem.writeVal); break;
+                        }
+                        lastMemWriteVal = exMem.writeVal;
+                        memWrite = true;
+                    } catch (Exception e) {
+                        handleException(7, exMem.aluResult);
+                    }
+                }
+
+
+                exMem.valid = false;
+            }
+        } else {
+            memWb.valid = false;
+        }
+
+        if (!dCacheStall) {
+            // --- STAGE 3: EXECUTE (EX) ---
+            if (idEx.valid) {
+                // Operand A Forwarding: check Stage 4 (currently in memWb) then Stage 5 (wbRd/wbVal)
+                int opA = idEx.val1;
+                if (forwardingEnabled && idEx.rs1 != 0) {
+                    if (memWb.valid && memWb.regWrite && memWb.rd == idEx.rs1) {
+                        opA = memWb.memToReg ? memWb.memReadData : memWb.aluResult;
+                    } else if (wbRd != 0 && wbRd == idEx.rs1) {
+                        opA = wbVal;
+                    }
+                }
+
+                // Operand B Forwarding: check Stage 4 (currently in memWb) then Stage 5 (wbRd/wbVal)
+                int opB = idEx.val2;
+                if (forwardingEnabled && idEx.rs2 != 0) {
+                    if (memWb.valid && memWb.regWrite && memWb.rd == idEx.rs2) {
+                        opB = memWb.memToReg ? memWb.memReadData : memWb.aluResult;
+                    } else if (wbRd != 0 && wbRd == idEx.rs2) {
+                        opB = wbVal;
+                    }
+                }
+
+                int aluB = idEx.aluSrcB ? idEx.imm : opB;
+                int aluRes = 0;
+
+
+                switch (idEx.opcode) {
+                    case 0b0110011: // R-type (RV32I + RV32M)
+                        switch (idEx.func3) {
+                            case 0b000:
+                                if (idEx.func7 == 0b0100000) { aluRes = opA - opB; }
+                                else if (idEx.func7 == 0b0000001) { aluRes = opA * opB; } // MUL
+                                else { aluRes = opA + opB; }
+                                break;
+                            case 0b001:
+                                if (idEx.func7 == 0b0000001) { // MULH
+                                    long a = opA; long b = opB;
+                                    if ((a & 0x80000000L) != 0) a |= 0xFFFFFFFF00000000L;
+                                    if ((b & 0x80000000L) != 0) b |= 0xFFFFFFFF00000000L;
+                                    aluRes = (int) ((a * b) >> 32);
+                                } else {
+                                    aluRes = opA << (opB & 0x1F);
+                                }
+                                break;
+                            case 0b010:
+                                if (idEx.func7 == 0b0000001) { // MULHSU
+                                    long a = opA; long b = Integer.toUnsignedLong(opB);
+                                    if ((a & 0x80000000L) != 0) a |= 0xFFFFFFFF00000000L;
+                                    aluRes = (int) ((a * b) >> 32);
+                                } else {
+                                    aluRes = (opA < opB) ? 1 : 0;
+                                }
+                                break;
+                            case 0b011:
+                                if (idEx.func7 == 0b0000001) { // MULHU
+                                    long a = Integer.toUnsignedLong(opA); long b = Integer.toUnsignedLong(opB);
+                                    aluRes = (int) ((a * b) >> 32);
+                                } else {
+                                    aluRes = (Integer.compareUnsigned(opA, opB) < 0) ? 1 : 0;
+                                }
+                                break;
+                            case 0b100:
+                                if (idEx.func7 == 0b0000001) { // DIV
+                                    if (opB == 0) { aluRes = -1; }
+                                    else if (opA == Integer.MIN_VALUE && opB == -1) { aluRes = Integer.MIN_VALUE; }
+                                    else { aluRes = opA / opB; }
+                                } else {
+                                    aluRes = opA ^ opB;
+                                }
+                                break;
+                            case 0b101:
+                                if (idEx.func7 == 0b0100000) { aluRes = opA >> (opB & 0x1F); }
+                                else if (idEx.func7 == 0b0000001) { // DIVU
+                                    if (opB == 0) { aluRes = -1; }
+                                    else { aluRes = Integer.divideUnsigned(opA, opB); }
+                                } else { aluRes = opA >>> (opB & 0x1F); }
+                                break;
+                            case 0b110:
+                                if (idEx.func7 == 0b0000001) { // REM
+                                    if (opB == 0) { aluRes = opA; }
+                                    else if (opA == Integer.MIN_VALUE && opB == -1) { aluRes = 0; }
+                                    else { aluRes = opA % opB; }
+                                } else {
+                                    aluRes = opA | opB;
+                                }
+                                break;
+                            case 0b111:
+                                if (idEx.func7 == 0b0000001) { // REMU
+                                    if (opB == 0) { aluRes = opA; }
+                                    else { aluRes = Integer.remainderUnsigned(opA, opB); }
+                                } else {
+                                    aluRes = opA & opB;
+                                }
+                                break;
+                        }
+                        break;
+
+                    case 0b0010011: // I-type ALU
+                        switch (idEx.func3) {
+                            case 0b000: aluRes = opA + aluB; break;
+                            case 0b001: aluRes = opA << (aluB & 0x1F); break;
+                            case 0b010: aluRes = (opA < aluB) ? 1 : 0; break;
+                            case 0b011: aluRes = (Integer.compareUnsigned(opA, aluB) < 0) ? 1 : 0; break;
+                            case 0b100: aluRes = opA ^ aluB; break;
+                            case 0b101: aluRes = ((idEx.imm & 0xFE0) == 0x400) ? (opA >> (aluB & 0x1F)) : (opA >>> (aluB & 0x1F)); break;
+                            case 0b110: aluRes = opA | aluB; break;
+                            case 0b111: aluRes = opA & aluB; break;
+                        }
+                        break;
+
+                    case 0b0000011: // LOAD
+                    case 0b0100011: // STORE
+                        aluRes = opA + idEx.imm;
+                        break;
+                    case 0b0110111: // LUI
+                        aluRes = idEx.imm;
+                        break;
+                    case 0b0010111: // AUIPC
+                        aluRes = idEx.pc + idEx.imm;
+                        break;
+                    case 0b1101111: // JAL
+                        aluRes = idEx.pc + idEx.instructionSize;
+                        branchTargetPc = idEx.pc + idEx.imm;
+                        branchTakenInEx = true;
+                        break;
+                    case 0b1100111: // JALR
+                        aluRes = idEx.pc + idEx.instructionSize;
+                        branchTargetPc = (opA + idEx.imm) & ~1;
+                        branchTakenInEx = true;
+                        break;
+                    case 0b1100011: // BRANCH
+                        boolean cond = false;
+                        switch (idEx.func3) {
+                            case 0b000: cond = (opA == opB); break; // BEQ
+                            case 0b001: cond = (opA != opB); break; // BNE
+                            case 0b100: cond = (opA < opB); break;  // BLT
+                            case 0b101: cond = (opA >= opB); break; // BGE
+                            case 0b110: cond = (Integer.compareUnsigned(opA, opB) < 0); break; // BLTU
+                            case 0b111: cond = (Integer.compareUnsigned(opA, opB) >= 0); break; // BGEU
+                        }
+                        if (cond) {
+                            branchTargetPc = idEx.pc + idEx.imm;
+                            branchTakenInEx = true;
+                        }
+                        break;
+                    case 0b1110011: // SYSTEM / CSR
+                        if (idEx.func3 != 0) {
+                            int csrAddr = idEx.imm & 0xFFF;
+                            int oldCsrValue = readCSR(csrAddr);
+                            int newValue;
+
+                            switch (idEx.func3) {
+                                case 0b001: newValue = opA; break; // CSRRW
+                                case 0b010: newValue = oldCsrValue | opA; break; // CSRRS
+                                case 0b011: newValue = oldCsrValue & ~opA; break; // CSRRC
+                                case 0b101: newValue = idEx.rs1; break; // CSRRWI
+                                case 0b110: newValue = oldCsrValue | idEx.rs1; break; // CSRRSI
+                                case 0b111: newValue = oldCsrValue & ~idEx.rs1; break; // CSRRCI
+                                default: newValue = oldCsrValue; break;
+                            }
+
+                            csrRegisters.put(csrAddr, newValue);
+                            if (csrAddr == MSTATUS || csrAddr == SSTATUS) {
+                                handleCSRSideEffects(csrAddr, newValue, oldCsrValue);
+                            }
+                            aluRes = oldCsrValue;
+                        }
+                        break;
+                    case 0x2F: // RV32A Atomic Instructions
+                        InstructionDecoded atomicDec = decode(idEx.instruction);
+                        executeAtomic(atomicDec);
+                        aluRes = x[idEx.rd];
+                        break;
+                }
+
+                exMem.pc = idEx.pc;
+                exMem.instruction = idEx.instruction;
+                exMem.instructionSize = idEx.instructionSize;
+                exMem.aluResult = aluRes;
+                exMem.writeVal = opB;
+                exMem.rd = idEx.rd;
+                exMem.func3 = idEx.func3;
+                exMem.regWrite = idEx.regWrite;
+                exMem.memRead = idEx.memRead;
+                exMem.memWrite = idEx.memWrite;
+                exMem.memToReg = idEx.memToReg;
+                exMem.isEcall = idEx.isEcall;
+                exMem.branchTaken = branchTakenInEx;
+                exMem.targetPc = branchTargetPc;
+                exMem.valid = true;
+                idEx.valid = false;
+
+            } else {
+                exMem.valid = false;
+            }
+
+            // Check for Load-Use Stall condition between instruction currently in IF/ID and the LOAD in EX
+            boolean isLoadUseStall = false;
+            if (prevIdExMemRead && prevIdExRd != 0 && ifId.valid) {
+                int rs1 = (ifId.instruction >> 15) & 0x1F;
+                int rs2 = (ifId.instruction >> 20) & 0x1F;
+                if (prevIdExRd == rs1 || prevIdExRd == rs2) {
+                    isLoadUseStall = true;
+                }
+            }
+
+            if (isLoadUseStall) {
+                // Insert 1-cycle bubble into ID/EX, freeze IF/ID and PC
+                idEx.flush();
+                pipelineStalls++;
+            } else {
+                // --- STAGE 2: INSTRUCTION DECODE (ID) ---
+                if (ifId.valid) {
+                    int inst = ifId.instruction;
+                    int opcode = inst & 0x7F;
+                    int rd = (inst >> 7) & 0x1F;
+                    int func3 = (inst >> 12) & 0x7;
+                    int rs1 = (inst >> 15) & 0x1F;
+                    int rs2 = (inst >> 20) & 0x1F;
+                    int func7 = (inst >> 25) & 0x7F;
+
+                    int imm_i = (inst >> 20);
+                    int imm_s = (((inst >> 25) << 5) | ((inst >> 7) & 0x1F));
+                    imm_s = (imm_s << 20) >> 20;
+                    int imm_b = (((inst >> 31) << 12) | ((inst >> 7) & 0x1) << 11 | ((inst >> 25) & 0x3F) << 5 | ((inst >> 8) & 0xF) << 1);
+                    imm_b = (imm_b << 19) >> 19;
+                    int imm_u = inst & 0xFFFFF000;
+                    int imm_j = (((inst >> 31) << 20) | ((inst >> 12) & 0xFF) << 12 | ((inst >> 20) & 0x1) << 11 | ((inst >> 21) & 0x3FF) << 1);
+                    imm_j = (imm_j << 11) >> 11;
+
+                    idEx.pc = ifId.pc;
+                    idEx.instruction = inst;
+                    idEx.instructionSize = ifId.instructionSize;
+                    idEx.rs1 = rs1;
+                    idEx.rs2 = rs2;
+                    idEx.rd = rd;
+                    idEx.val1 = (wbRd != 0 && wbRd == rs1) ? wbVal : x[rs1];
+                    idEx.val2 = (wbRd != 0 && wbRd == rs2) ? wbVal : x[rs2];
+                    idEx.func3 = func3;
+                    idEx.func7 = func7;
+                    idEx.opcode = opcode;
+                    idEx.valid = true;
+
+                    // Reset control flags
+                    idEx.regWrite = false; idEx.memRead = false; idEx.memWrite = false;
+                    idEx.memToReg = false; idEx.aluSrcB = false; idEx.branch = false;
+                    idEx.jump = false; idEx.isEcall = false;
+
+                    switch (opcode) {
+                        case 0b0110011: idEx.regWrite = true; idEx.imm = 0; break;
+                        case 0b0010011: idEx.regWrite = true; idEx.aluSrcB = true; idEx.imm = imm_i; break;
+                        case 0b0000011: idEx.regWrite = true; idEx.memRead = true; idEx.memToReg = true; idEx.aluSrcB = true; idEx.imm = imm_i; break;
+                        case 0b0100011: idEx.memWrite = true; idEx.aluSrcB = true; idEx.imm = imm_s; break;
+                        case 0b1100011: idEx.branch = true; idEx.imm = imm_b; break;
+                        case 0b0110111: idEx.regWrite = true; idEx.aluSrcB = true; idEx.imm = imm_u; break;
+                        case 0b0010111: idEx.regWrite = true; idEx.aluSrcB = true; idEx.imm = imm_u; break;
+                        case 0b1101111: idEx.regWrite = true; idEx.jump = true; idEx.imm = imm_j; break;
+                        case 0b1100111: idEx.regWrite = true; idEx.jump = true; idEx.aluSrcB = true; idEx.imm = imm_i; break;
+                        case 0b1110011:
+                            if (func3 == 0) {
+                                idEx.isEcall = true;
+                            } else {
+                                idEx.regWrite = true;
+                                idEx.imm = imm_i;
+                            }
+                            break;
+                        case 0x2F:
+                            idEx.regWrite = true;
+                            idEx.imm = 0;
+                            break;
+                    }
+                    ifId.valid = false;
+                } else {
+                    idEx.valid = false;
+                }
+
+                // --- STAGE 1: INSTRUCTION FETCH (IF) ---
+                if (!isDrain && !lastInstructionWasEcall && !branchTakenInEx && !isLoadUseStall) {
+                    if (iCacheStallRemaining > 0) {
+                        iCacheStallRemaining--;
+                        pipelineStalls++;
+                        ifId.valid = false;
+                    } else {
+                        int currentFetchPc = pc;
+                        int penalty = 0;
+                        if (cacheSimulationEnabled) {
+                            penalty = iCache.access(currentFetchPc, false, pipelineClockCycles);
+                        }
+                        if (penalty > 0) {
+                            iCacheStallRemaining = penalty - 1;
+                            pipelineStalls++;
+                            ifId.valid = false;
+                        } else {
+                            try {
+                                int inst = fetch();
+                                ifId.pc = currentFetchPc;
+                                ifId.instruction = inst;
+                                ifId.instructionSize = lastInstructionSize;
+                                ifId.valid = true;
+                            } catch (Exception e) {
+                                ifId.valid = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Branch Flush Handling
+        if (branchTakenInEx) {
+            pc = branchTargetPc;
+            ifId.flush();
+            idEx.flush();
+            pipelineFlushes++;
+        }
+    }
+
+    public synchronized void drainPipeline() {
+        if (executionMode == ExecutionMode.FIVE_STAGE_PIPELINE) {
+            int maxDrainTicks = 10;
+            while ((ifId.valid || idEx.valid || exMem.valid || memWb.valid) && maxDrainTicks > 0) {
+                clockTickInternal(true);
+                maxDrainTicks--;
+                if (lastInstructionWasEcall || exceptionOccurred) {
+                    break;
+                }
+            }
+        }
     }
 
     public boolean isEcall() {
@@ -301,15 +896,28 @@ public class RV32Cpu {
         if (registers.length == 32) {
             System.arraycopy(registers, 0, this.x, 0, 32);
         }
+        if (executionMode == ExecutionMode.FIVE_STAGE_PIPELINE) {
+            flushPipeline();
+        }
     }
 
     public int getProgramCounter() {
+        if (executionMode == ExecutionMode.FIVE_STAGE_PIPELINE && lastCommittedPc != 0) {
+            return lastCommittedPc;
+        }
         return pc;
     }
 
+
     public void setProgramCounter(int pc) {
         this.pc = pc;
+        if (executionMode == ExecutionMode.FIVE_STAGE_PIPELINE) {
+            this.lastCommittedPc = pc;
+            flushPipeline();
+        }
     }
+
+
 
     public InstructionDecoded getLastDecodedInstruction() {
         if (lastDecodedInstruction == null && lastPC != -1 && memory != null) {
@@ -372,6 +980,10 @@ public class RV32Cpu {
         try {
             int instructionFetched = fetch();
             executeFast(instructionFetched);
+            if (tracingEnabled) {
+                traceBuffer.record(lastPC, instructionFetched, lastAluResult, 0, regWrite, false, memWrite, cycleCount);
+                recordHitCount(lastPC);
+            }
         } catch (MemoryAccessException e) {
             handleException(7, pc - lastInstructionSize);
         } catch (Exception e) {
@@ -380,17 +992,36 @@ public class RV32Cpu {
         }
     }
 
-    public int runBatch(int maxInstructions) throws Exception {
+
+
+    public synchronized int runBatch(int maxInstructions) throws Exception {
         int executed = 0;
-        while (executed < maxInstructions) {
-            fetchExecuteCycle();
-            executed++;
-            if (lastInstructionWasEcall || exceptionOccurred) {
-                break;
+        if (executionMode == ExecutionMode.SINGLE_CYCLE) {
+            while (executed < maxInstructions) {
+                fetchExecuteCycle();
+                executed++;
+                if (lastInstructionWasEcall || exceptionOccurred) {
+                    break;
+                }
+            }
+        } else {
+            while (executed < maxInstructions) {
+                step();
+                executed++;
+                if (lastInstructionWasEcall || exceptionOccurred) {
+                    break;
+                }
+            }
+            if (!lastInstructionWasEcall && !exceptionOccurred) {
+                drainPipeline();
             }
         }
         return executed;
     }
+
+
+
+
 
     /**
      * Expose the handleException method for testing

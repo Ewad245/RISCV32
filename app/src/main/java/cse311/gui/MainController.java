@@ -7,12 +7,15 @@ import java.util.ResourceBundle;
 
 import cse311.kernel.Kernel;
 import cse311.RV32Computer;
+import cse311.RV32Cpu;
 import cse311.Constants.MemoryMode;
+
 import cse311.gui.components.AssemblyView;
 import cse311.gui.components.ConsoleView;
 import cse311.gui.components.CpuView;
-import cse311.gui.components.DatapathView;
+import cse311.gui.components.PipelineView;
 import cse311.gui.components.HexMemoryView;
+
 import cse311.gui.components.MemoryView;
 import cse311.gui.components.SchedulerView;
 import cse311.gui.components.SidebarView;
@@ -362,27 +365,39 @@ public class MainController implements Initializable {
     @FXML
     private TabPane datapathTabs;
 
-    private DatapathView[] datapathViews;
-    // We'll reuse the dashboard assemblyViews instead of creating separate
-    // instances
-    // This allows dynamic switching via Option B
+    private PipelineView[] pipelineViews;
 
     private void initializeDatapath() {
         int coreCount = kernel.getConfig().getCoreCount();
-        datapathViews = new DatapathView[coreCount];
+        pipelineViews = new PipelineView[coreCount];
         datapathAssemblyContainers = new VBox[coreCount];
 
         for (int i = 0; i < coreCount; i++) {
             var cpu = kernel.getCpu(i);
-            datapathViews[i] = new DatapathView(cpu);
+            pipelineViews[i] = new PipelineView(cpu);
+            pipelineViews[i].setOnModeToggle(() -> {
+                RV32Cpu.ExecutionMode newMode = (cpu.getExecutionMode() == RV32Cpu.ExecutionMode.SINGLE_CYCLE)
+                        ? RV32Cpu.ExecutionMode.FIVE_STAGE_PIPELINE
+                        : RV32Cpu.ExecutionMode.SINGLE_CYCLE;
+                for (int j = 0; j < coreCount; j++) {
+                    kernel.getCpu(j).setExecutionMode(newMode);
+                }
+                for (PipelineView pv : pipelineViews) {
+                    if (pv != null) {
+                        pv.update();
+                    }
+                }
+            });
+
+
 
             // Create placeholder container for this core's AssemblyView in Datapath
             datapathAssemblyContainers[i] = new VBox();
             VBox.setVgrow(datapathAssemblyContainers[i], Priority.ALWAYS);
 
-            // 1. Wrap the large Datapath diagram in a ScrollPane
-            ScrollPane datapathScroll = new ScrollPane(datapathViews[i]);
-            datapathScroll.setPannable(true); // Lets you click and drag to pan around the diagram
+            // 1. Wrap the PipelineView in a ScrollPane
+            ScrollPane datapathScroll = new ScrollPane(pipelineViews[i]);
+            datapathScroll.setPannable(true);
             datapathScroll.setFitToHeight(true);
             datapathScroll.setFitToWidth(true);
 
@@ -390,10 +405,10 @@ public class MainController implements Initializable {
             SplitPane datapathSplit = new SplitPane();
             datapathSplit.setOrientation(javafx.geometry.Orientation.HORIZONTAL);
 
-            // 3. Add the scrollable diagram and assembly placeholder
+            // 3. Add the scrollable pipeline view and assembly placeholder
             datapathSplit.getItems().addAll(datapathScroll, datapathAssemblyContainers[i]);
 
-            // 4. Give the diagram 70% of the space and the assembly view 30%
+            // 4. Give the pipeline view 70% of the space and the assembly view 30%
             datapathSplit.setDividerPositions(0.7);
 
             Tab tab = new Tab("Hart " + i, datapathSplit);
@@ -402,6 +417,7 @@ public class MainController implements Initializable {
             datapathTabs.getTabs().add(tab);
         }
     }
+
 
     @SuppressWarnings("PMD.CloseResource")
     private void initializeConsole() {
@@ -567,10 +583,20 @@ public class MainController implements Initializable {
         }
     }
 
+    private long lastUiUpdateNano = 0;
+
     private void startUpdateLoop() {
         uiUpdateTimer = new AnimationTimer() {
             @Override
             public void handle(long now) {
+                // When kernel is running at full speed, throttle UI refreshes to ~15 FPS (66ms)
+                // to prevent flooding JavaFX application thread and causing lag
+                if (!kernel.isPaused()) {
+                    if (now - lastUiUpdateNano < 66_000_000L) { // 66 ms
+                        return;
+                    }
+                }
+                lastUiUpdateNano = now;
                 updateUI();
             }
         };
@@ -607,9 +633,15 @@ public class MainController implements Initializable {
             memoryView.update();
         }
 
+        // Enable CPU tracing only when Pipeline View tab is visible, paused, or running in slow-motion
+        boolean shouldTrace = datapathTabs.isVisible() || kernel.isPaused() || (speedSlider != null && speedSlider.getValue() > 0);
+        for (int i = 0; i < kernel.getConfig().getCoreCount(); i++) {
+            kernel.getCpu(i).setTracingEnabled(shouldTrace);
+        }
+
         if (datapathTabs.isVisible()) {
-            for (int i = 0; i < datapathViews.length; i++) {
-                datapathViews[i].update();
+            for (int i = 0; i < pipelineViews.length; i++) {
+                pipelineViews[i].update();
                 // Update AssemblyView if it's in the datapath container
                 if (datapathAssemblyContainers[i] != null &&
                         !datapathAssemblyContainers[i].getChildren().isEmpty()) {
@@ -617,6 +649,7 @@ public class MainController implements Initializable {
                 }
             }
         }
+
 
         if (memoryTabContainer.isVisible()) {
             hexMemoryView.update();

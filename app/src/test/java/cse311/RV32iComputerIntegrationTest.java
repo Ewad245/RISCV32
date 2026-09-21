@@ -1,35 +1,25 @@
 package cse311;
 
-import cse311.kernel.Kernel;
-
 import cse311.kernel.process.Task;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@SuppressWarnings({
-        "PMD.UnitTestContainsTooManyAsserts",
-        "PMD.UnitTestAssertionsShouldIncludeMessage",
-        "PMD.UnusedPrivateField"
-})
 class RV32iComputerIntegrationTest {
 
     private RV32Computer computer;
-    private Kernel kernel;
 
     @BeforeEach
     void setUp() {
-        // We use the constructor that matches our memory mode manually
-        // or recreate the computer wrapper if needed.
         computer = new RV32Computer(8 * 1024 * 1024, 16, cse311.Constants.MemoryMode.CONTIGUOUS);
-        kernel = computer.getKernel(); // Refreshed kernel from new computer
     }
 
     private byte[] getMinimalElf() {
         return new byte[] {
-                // ELF Header
                 0x7F, 0x45, 0x4C, 0x46, 0x01, 0x01, 0x01, 0x00,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x02, 0x00, (byte) 0xF3, 0x00, 0x01, 0x00, 0x00, 0x00,
@@ -37,55 +27,58 @@ class RV32iComputerIntegrationTest {
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 0x34, 0x00, 0x20, 0x00, 0x01, 0x00, 0x28, 0x00,
                 0x00, 0x00, 0x00, 0x00,
-                // Program Header
                 0x01, 0x00, 0x00, 0x00, 0x54, 0x00, 0x00, 0x00,
                 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x00,
                 0x04, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00,
                 0x05, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00,
-                // Code (nop)
                 0x13, 0x00, 0x00, 0x00
         };
     }
 
     @Test
     void testComputerInitialization() {
-        assertNotNull(computer);
-        // assertNotNull(computer.getCpu()); // CPU managed by Kernel
-        assertNotNull(computer.getMemoryManager());
-        assertNotNull(computer.getKernel());
+        assertAll("computerComponents",
+            () -> assertNotNull(computer, "Computer should not be null"),
+            () -> assertNotNull(computer.getMemoryManager(), "Memory manager should not be null"),
+            () -> assertNotNull(computer.getKernel(), "Kernel should not be null")
+        );
     }
-
-    /*
-     * This test is disabled because RV32iComputer.createTask(int) generates
-     * raw machine code (createSimpleProgram), but the Kernel now enforces
-     * ELF format validation.
-     */
-    /*
-     * @Test
-     * void testTaskCreationWithEntryPoint() {
-     * Task task = computer.createTask(0x1000);
-     * assertNotNull(task);
-     * assertEquals(0x1000, task.getProgramCounter());
-     * }
-     */
 
     @Test
     void testTaskCreationWithElfData() {
         Task task = computer.createTask(getMinimalElf(), "elf_task");
-        assertNotNull(task);
-        assertEquals(0x10000, task.getProgramCounter());
+
+        assertAll("taskProperties",
+            () -> assertNotNull(task, "Task should not be null"),
+            () -> assertEquals(0x10000, task.getProgramCounter(), "Entry point should be 0x10000")
+        );
     }
 
     @Test
     void testKernelIntegration() {
-        // Use byte[] version instead of int version
         Task task = computer.createTask(getMinimalElf(), "kernel_task");
-        assertNotNull(task);
-        assertTrue(computer.getKernel().getAllTasks().contains(task));
+
+        assertAll("kernelTaskIntegration",
+            () -> assertNotNull(task, "Task should not be null"),
+            () -> assertTrue(computer.getKernel().getAllTasks().contains(task), "Task should be in kernel task list")
+        );
     }
 
     @Test
-    void testComputerToString() {
-        assertNotNull(computer.toString());
+    void testComputerExecutionLifecycle() {
+        Task task = computer.createTask(getMinimalElf(), "lifecycle_task");
+        int taskCount = computer.getKernel().getAllTasks().size();
+
+        computer.start();
+        Object startStats = computer.getKernel().getStats();
+        computer.stop();
+        Object stopStats = computer.getKernel().getStats();
+
+        assertAll("executionLifecycle",
+            () -> assertNotNull(task, "Task should not be null"),
+            () -> assertEquals(1, taskCount, "Task count should be 1"),
+            () -> assertNotNull(startStats, "Stats should not be null after start"),
+            () -> assertNotNull(stopStats, "Stats should not be null after stop")
+        );
     }
 }

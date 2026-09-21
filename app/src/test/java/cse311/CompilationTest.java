@@ -1,39 +1,28 @@
 package cse311;
 
 import org.junit.jupiter.api.Test;
-
 import cse311.Constants.MemoryMode;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * Simple test to verify compilation works
- */
-@SuppressWarnings({
-    "PMD.JUnit5TestShouldBePackagePrivate",
-    "PMD.UnitTestContainsTooManyAsserts",
-    "PMD.UnitTestAssertionsShouldIncludeMessage",
-    "PMD.SystemPrintln"
-})
-public class CompilationTest {
+class CompilationTest {
 
     @Test
     void testBasicCompilation() {
-        // Test that all classes can be instantiated
         RV32Computer computer = new RV32Computer(64 * 1024 * 1024, 4, MemoryMode.PAGING);
-        assertNotNull(computer);
-        // assertNotNull(computer.getCpu()); // CPU is now managed by Kernel
-        assertNotNull(computer.getMemoryManager());
-        assertNotNull(computer.getKernel());
 
-        // Test constants are accessible
-        assertTrue(VirtualMemoryManager.TEXT_START > 0);
-        assertTrue(VirtualMemoryManager.DATA_START > 0);
-        assertTrue(VirtualMemoryManager.HEAP_START > 0);
-        assertTrue(VirtualMemoryManager.STACK_SIZE > 0);
-        assertTrue(VirtualMemoryManager.UART_BASE > 0);
-        assertTrue(VirtualMemoryManager.UART_SIZE > 0);
-
-        System.out.println("All classes compile and instantiate correctly");
+        assertAll("compilationAndConstants",
+            () -> assertNotNull(computer, "Computer should be instantiated"),
+            () -> assertNotNull(computer.getMemoryManager(), "Memory manager should be instantiated"),
+            () -> assertNotNull(computer.getKernel(), "Kernel should be instantiated"),
+            () -> assertTrue(VirtualMemoryManager.TEXT_START > 0, "TEXT_START should be positive"),
+            () -> assertTrue(VirtualMemoryManager.DATA_START > 0, "DATA_START should be positive"),
+            () -> assertTrue(VirtualMemoryManager.HEAP_START > 0, "HEAP_START should be positive"),
+            () -> assertTrue(VirtualMemoryManager.STACK_SIZE > 0, "STACK_SIZE should be positive"),
+            () -> assertTrue(VirtualMemoryManager.UART_BASE > 0, "UART_BASE should be positive"),
+            () -> assertTrue(VirtualMemoryManager.UART_SIZE > 0, "UART_SIZE should be positive")
+        );
     }
 }

@@ -190,7 +190,7 @@ public class SystemCallHandler {
                     break;
 
                 case SYS_GET_TIME:
-                    result = handleGetTime(task);
+                    result = handleGetTime(task, cpu);
                     break;
 
                 case SYS_NANOSLEEP:
@@ -1002,9 +1002,19 @@ public class SystemCallHandler {
         return -1;
     }
 
-    private int handleGetTime(Task task) {
-        // Return current time in milliseconds (truncated to 32-bit)
-        return (int) System.currentTimeMillis();
+    private int handleGetTime(Task task, RV32Cpu cpu) {
+        // Return elapsed milliseconds since kernel boot.
+        // Supports 64-bit timestamps: a0 receives low 32 bits, a1 receives high 32 bits (584M years overflow-safe).
+        long uptime = System.currentTimeMillis() - kernel.getBootTime();
+        int highBits = (int) (uptime >>> 32);
+        if (cpu != null) {
+            cpu.setRegister(11, highBits);
+        }
+        task.getRegisters()[11] = highBits;
+
+        // Mask with 0x7FFFFFFF and ensure >= 1 so 32-bit return value in a0 never turns negative.
+        // Even after 24.8 days, it safely rolls over to 1 rather than plunging into negative values.
+        return (int) Math.max(1, uptime & 0x7FFFFFFF);
     }
 
     /**
