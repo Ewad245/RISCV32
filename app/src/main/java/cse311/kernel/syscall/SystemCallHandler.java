@@ -907,13 +907,19 @@ public class SystemCallHandler {
 
         // Fall back to host filesystem if not found in fs.img or resources
         if (elfData == null) {
-            String fullPath = ".." + OSConstants.file_seperator + "User_Program_ELF" + OSConstants.file_seperator + path
-                    + ".elf";
+            java.nio.file.Path hostPath = java.nio.file.Files.exists(java.nio.file.Paths.get("User_Program_ELF", path + ".elf"))
+                    ? java.nio.file.Paths.get("User_Program_ELF", path + ".elf")
+                    : java.nio.file.Paths.get("..", "User_Program_ELF", path + ".elf");
             try {
-                elfData = java.nio.file.Files.readAllBytes(java.nio.file.Paths.get(fullPath));
-                FileLogger.log("SYS_EXEC: Loaded from host filesystem: " + fullPath);
+                if (java.nio.file.Files.exists(hostPath)) {
+                    elfData = java.nio.file.Files.readAllBytes(hostPath);
+                    FileLogger.log("SYS_EXEC: Loaded from host filesystem: " + hostPath);
+                } else {
+                    FileLogger.log("SYS_EXEC: Failed to read file: " + hostPath);
+                    return -1;
+                }
             } catch (Exception e) {
-                FileLogger.log("SYS_EXEC: Failed to read file: " + fullPath);
+                FileLogger.log("SYS_EXEC: Failed to read file: " + hostPath);
                 return -1;
             }
         }

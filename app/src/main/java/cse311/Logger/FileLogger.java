@@ -17,10 +17,18 @@ import cse311.Constants.OSConstants;
         "PMD.CloseResource"
 })
 public class FileLogger {
-    private static Path path = Paths
-            .get(".." + OSConstants.file_seperator + "LogFiles" + OSConstants.file_seperator + "log.txt");
-    private static Path exceptionPath = Paths
-            .get(".." + OSConstants.file_seperator + "LogFiles" + OSConstants.file_seperator + "exception_log.txt");
+    private static Path resolveLogPath(String filename) {
+        if (Files.isDirectory(Paths.get("LogFiles"))) {
+            return Paths.get("LogFiles", filename);
+        }
+        if (Files.isDirectory(Paths.get("..", "LogFiles"))) {
+            return Paths.get("..", "LogFiles", filename);
+        }
+        return Paths.get("LogFiles", filename);
+    }
+
+    private static Path path = resolveLogPath("log.txt");
+    private static Path exceptionPath = resolveLogPath("exception_log.txt");
     private static OutputStream logOutputStream;
     private static OutputStream exceptionOutputStream;
     public static FileLogger instance;

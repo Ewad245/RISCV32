@@ -7,7 +7,11 @@ import cse311.kernel.Kernel;
 import cse311.kernel.KernelConfig;
 import javafx.application.Application;
 import javafx.application.Platform;
+import javafx.scene.Node;
 import javafx.scene.Scene;
+import javafx.scene.control.TextInputControl;
+import javafx.scene.input.KeyCode;
+import javafx.scene.input.KeyEvent;
 import javafx.stage.Stage;
 
 import cse311.gui.platform.PlatformEnvironment;
@@ -73,6 +77,26 @@ public class GuiApp extends Application {
         Scene scene = new Scene(root, 1200, 800);
         scene.getStylesheets().add(
                 GuiApp.class.getResource("/css/style.css").toExternalForm());
+
+        // Global hotkeys: Space for Pause/Resume, F10 for Step PC
+        scene.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            Node focusOwner = scene.getFocusOwner();
+            if (event.getCode() == KeyCode.SPACE) {
+                if (!isInputConsumer(focusOwner)) {
+                    if (kernel.isPaused()) {
+                        kernel.resume();
+                    } else {
+                        kernel.pause();
+                    }
+                    event.consume();
+                }
+            } else if (event.getCode() == KeyCode.F10) {
+                if (currentController != null) {
+                    currentController.handleStepInstruction();
+                }
+                event.consume();
+            }
+        });
 
         primaryStage.setTitle("RISC-V OS Simulator");
         primaryStage.setScene(scene);
@@ -174,8 +198,11 @@ public class GuiApp extends Application {
                     FileLogger.log("GUI: Init task created (PID 1).");
             } else {
                 // Fallback to old path for backwards compatibility
-                String oldPath = ".." + file_separator + "User_Program_ELF" + file_separator + "init.elf";
-                File oldFile = new File(oldPath);
+                File oldFile = new File("User_Program_ELF" + File.separator + "init.elf");
+                if (!oldFile.exists()) {
+                    oldFile = new File(".." + File.separator + "User_Program_ELF" + File.separator + "init.elf");
+                }
+                String oldPath = oldFile.getPath();
                 if (oldFile.exists()) {
                     if (FileLogger.isLoggable(FileLogger.LogLevel.DEBUG))
                         FileLogger.log("GUI: Using legacy ELF path: " + oldPath);
@@ -204,6 +231,19 @@ public class GuiApp extends Application {
             kernel.stop();
         }
         super.stop();
+    }
+
+    private boolean isInputConsumer(Node node) {
+        Node current = node;
+        while (current != null) {
+            if (current instanceof TextInputControl || current instanceof cse311.gui.components.ScreenView
+                    || current.getClass().getName().contains("Terminal")
+                    || current.getClass().getName().contains("JediTerm")) {
+                return true;
+            }
+            current = current.getParent();
+        }
+        return false;
     }
 
     public static void main(String[] args) {

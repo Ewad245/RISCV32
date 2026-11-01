@@ -588,3 +588,45 @@
     -fx-text-fill: #64748b;
     -fx-text-alignment: center;
 }
+
+/* --- Assembly & Tracing View Segmented Controls --- */
+.segmented-button-bar {
+    -fx-background-color: #e2e8f0;
+    -fx-background-radius: 4;
+    -fx-padding: 1;
+}
+
+.segment-btn {
+    -fx-background-color: transparent;
+    -fx-text-fill: #475569;
+    -fx-font-size: 11px;
+    -fx-font-weight: 500;
+    -fx-padding: 2 8 2 8;
+    -fx-cursor: hand;
+    -fx-background-radius: 3;
+    -fx-border-width: 0;
+}
+
+.segment-btn:hover {
+    -fx-background-color: #f1f5f9;
+    -fx-text-fill: #1e293b;
+}
+
+.segment-btn:selected {
+    -fx-background-color: #ffffff;
+    -fx-text-fill: #0f172a;
+    -fx-font-weight: bold;
+    -fx-effect: dropshadow(gaussian, rgba(0, 0, 0, 0.1), 2, 0, 0, 1);
+}
+
+.segment-btn-left {
+    -fx-background-radius: 3 0 0 3;
+}
+
+.segment-btn-center {
+    -fx-background-radius: 0;
+}
+
+.segment-btn-right {
+    -fx-background-radius: 0 3 3 0;
+}

@@ -9,6 +9,7 @@ import cse311.kernel.Kernel;
 import cse311.RV32Computer;
 import cse311.RV32Cpu;
 import cse311.Constants.MemoryMode;
+import cse311.Logger.FileLogger;
 
 import cse311.gui.components.AssemblyView;
 import cse311.gui.components.ConsoleView;
@@ -61,6 +62,8 @@ public class MainController implements Initializable {
     @FXML
     private Button btnResume;
     @FXML
+    private Button btnStep;
+    @FXML
     private Slider speedSlider;
     @FXML
     private Label lblStatus;
@@ -97,6 +100,7 @@ public class MainController implements Initializable {
     // Sub-components (Logic remains in Java)
     private CpuView[] cpuViews;
     private AssemblyView[] assemblyViews;
+    private AssemblyView unifiedAssemblyView;
     private SchedulerView schedulerView;
     private MemoryView memoryView;
     private HexMemoryView hexMemoryView;
@@ -148,6 +152,25 @@ public class MainController implements Initializable {
     @FXML
     public void handleResume() {
         kernel.resume();
+    }
+
+    @FXML
+    public void handleStepInstruction() {
+        if (!kernel.isPaused()) {
+            kernel.pause();
+        }
+        int activeCore = (cpuTabs != null && cpuTabs.getSelectionModel().getSelectedIndex() >= 0)
+                ? cpuTabs.getSelectionModel().getSelectedIndex()
+                : 0;
+        RV32Cpu cpu = kernel.getCpu(activeCore);
+        if (cpu != null) {
+            try {
+                cpu.step();
+            } catch (Exception e) {
+                FileLogger.log("Step PC error: " + e.getMessage());
+            }
+            updateUI();
+        }
     }
 
     @SuppressWarnings("PMD.UnusedPrivateMethod")
@@ -310,7 +333,7 @@ public class MainController implements Initializable {
         for (int i = 0; i < coreCount; i++) {
             var cpu = kernel.getCpu(i);
             cpuViews[i] = new CpuView(cpu);
-            assemblyViews[i] = new AssemblyView(cpu, kernel.getMemory());
+            assemblyViews[i] = new AssemblyView(kernel, cpu, kernel.getMemory());
 
             // Create placeholder container for this core's AssemblyView in Dashboard
             dashboardAssemblyContainers[i] = new VBox();
@@ -344,6 +367,18 @@ public class MainController implements Initializable {
             Tab tab = new Tab("Hart " + i, hartSplit);
             tab.setClosable(false);
             cpuTabs.getTabs().add(tab);
+        }
+
+        // Add Unified Multi-Hart Execution tab if more than 1 core
+        if (coreCount > 1) {
+            unifiedAssemblyView = new AssemblyView(kernel, kernel.getCpu(0), kernel.getMemory());
+            unifiedAssemblyView.setTargetScope(AssemblyView.ScopeType.ALL_HARTS, -1);
+            unifiedAssemblyView.setViewMode("trace");
+            VBox unifiedBox = new VBox(unifiedAssemblyView);
+            VBox.setVgrow(unifiedAssemblyView, Priority.ALWAYS);
+            Tab unifiedTab = new Tab("Unified Trace", unifiedBox);
+            unifiedTab.setClosable(false);
+            cpuTabs.getTabs().add(unifiedTab);
         }
 
         // Add Scheduler
@@ -389,7 +424,15 @@ public class MainController implements Initializable {
                 }
             });
 
-
+            final int coreIndex = i;
+            pipelineViews[i].setOnCycleStep(() -> {
+                if (assemblyViews != null && coreIndex < assemblyViews.length && assemblyViews[coreIndex] != null) {
+                    assemblyViews[coreIndex].update();
+                }
+                if (unifiedAssemblyView != null) {
+                    unifiedAssemblyView.update();
+                }
+            });
 
             // Create placeholder container for this core's AssemblyView in Datapath
             datapathAssemblyContainers[i] = new VBox();
@@ -566,7 +609,7 @@ public class MainController implements Initializable {
                     screenContainer.setVisible(true);
                     screenContainer.toFront();
                     if (screenView != null) {
-                        screenView.requestFocus();
+                        javafx.application.Platform.runLater(() -> screenView.requestFocus());
                     }
                 }
             }
@@ -629,12 +672,15 @@ public class MainController implements Initializable {
                 int pid = (task != null) ? task.getId() : 0;
                 cpuTabs.getTabs().get(i).setText("Hart " + i + " [PID: " + pid + "]");
             }
+            if (unifiedAssemblyView != null) {
+                unifiedAssemblyView.update();
+            }
             schedulerView.update();
             memoryView.update();
         }
 
-        // Enable CPU tracing only when Pipeline View tab is visible, paused, or running in slow-motion
-        boolean shouldTrace = datapathTabs.isVisible() || kernel.isPaused() || (speedSlider != null && speedSlider.getValue() > 0);
+        // Enable CPU tracing when Pipeline View or Dashboard is visible, paused, or running in slow-motion
+        boolean shouldTrace = datapathTabs.isVisible() || dashboardPane.isVisible() || kernel.isPaused() || (speedSlider != null && speedSlider.getValue() > 0);
         for (int i = 0; i < kernel.getConfig().getCoreCount(); i++) {
             kernel.getCpu(i).setTracingEnabled(shouldTrace);
         }

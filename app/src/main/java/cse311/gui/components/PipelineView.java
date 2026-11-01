@@ -83,6 +83,7 @@ public class PipelineView extends VBox {
     private ObservableList<String> traceLogItems;
 
     private Runnable onModeToggle;
+    private Runnable onCycleStep;
     private long lastCycleCount = -1;
     private RV32Cpu.ExecutionMode lastMode;
     private boolean forceUpdate = true;
@@ -126,6 +127,10 @@ public class PipelineView extends VBox {
         this.onModeToggle = listener;
     }
 
+    public void setOnCycleStep(Runnable listener) {
+        this.onCycleStep = listener;
+    }
+
     private static String formatPc(int pc) {
         return String.format(PC_FMT, pc);
     }
@@ -150,6 +155,9 @@ public class PipelineView extends VBox {
             if (cpu != null) {
                 cpu.clockTick();
                 update();
+                if (onCycleStep != null) {
+                    onCycleStep.run();
+                }
             }
         });
 

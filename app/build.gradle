@@ -70,6 +70,12 @@ application {
 tasks.named('test') {
     // Use JUnit Platform for unit tests.
     useJUnitPlatform()
+
+    reports {
+        // Configure HTML reports
+        html.required = true
+        html.outputLocation = file("${buildDir}/custom-reports/html")
+    }
 }
 
 

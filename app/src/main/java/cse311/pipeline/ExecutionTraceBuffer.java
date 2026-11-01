@@ -22,6 +22,8 @@ public class ExecutionTraceBuffer {
         public boolean memRead;
         public boolean memWrite;
         public long cycle;
+        public int hartId;
+        public int pid;
         public boolean valid;
 
         public TraceEvent() {
@@ -33,6 +35,8 @@ public class ExecutionTraceBuffer {
             this.memRead = false;
             this.memWrite = false;
             this.cycle = 0;
+            this.hartId = 0;
+            this.pid = 0;
             this.valid = false;
         }
     }
@@ -50,6 +54,12 @@ public class ExecutionTraceBuffer {
 
     public void record(int pc, int instruction, int aluResult, int rd,
                        boolean regWrite, boolean memRead, boolean memWrite, long cycle) {
+        record(pc, instruction, aluResult, rd, regWrite, memRead, memWrite, cycle, 0, 0);
+    }
+
+    public void record(int pc, int instruction, int aluResult, int rd,
+                       boolean regWrite, boolean memRead, boolean memWrite, long cycle,
+                       int hartId, int pid) {
         long seq = headSequence.getAndIncrement();
         int idx = (int) (seq & MASK);
         TraceEvent event = buffer[idx];
@@ -62,20 +72,33 @@ public class ExecutionTraceBuffer {
         event.memRead = memRead;
         event.memWrite = memWrite;
         event.cycle = cycle;
+        event.hartId = hartId;
+        event.pid = pid;
         event.valid = true;
     }
 
     public List<TraceEvent> getSnapshot(int maxEvents) {
+        return getSnapshot(maxEvents, -1, -1);
+    }
+
+    public List<TraceEvent> getSnapshot(int maxEvents, int filterPid, int filterHartId) {
         List<TraceEvent> snapshot = new ArrayList<>();
         long currentHead = headSequence.get();
-        int count = (int) Math.min(currentHead, Math.min(maxEvents, BUFFER_SIZE));
+        int available = (int) Math.min(currentHead, BUFFER_SIZE);
 
-        for (int i = count - 1; i >= 0; i--) {
+        List<TraceEvent> matchingNewestFirst = new ArrayList<>();
+        for (int i = 0; i < available && matchingNewestFirst.size() < maxEvents; i++) {
             long seq = currentHead - 1 - i;
-            if (seq < 0) continue;
+            if (seq < 0) break;
             int idx = (int) (seq & MASK);
             TraceEvent event = buffer[idx];
             if (event.valid) {
+                if (filterPid != -1 && event.pid != filterPid) {
+                    continue;
+                }
+                if (filterHartId != -1 && event.hartId != filterHartId) {
+                    continue;
+                }
                 TraceEvent copy = new TraceEvent();
                 copy.pc = event.pc;
                 copy.instruction = event.instruction;
@@ -85,11 +108,25 @@ public class ExecutionTraceBuffer {
                 copy.memRead = event.memRead;
                 copy.memWrite = event.memWrite;
                 copy.cycle = event.cycle;
+                copy.hartId = event.hartId;
+                copy.pid = event.pid;
                 copy.valid = true;
-                snapshot.add(copy);
+                matchingNewestFirst.add(copy);
             }
         }
+
+        // Reverse so that oldest is first (chronological order)
+        for (int i = matchingNewestFirst.size() - 1; i >= 0; i--) {
+            snapshot.add(matchingNewestFirst.get(i));
+        }
         return snapshot;
+    }
+
+    public void clear() {
+        headSequence.set(0);
+        for (int i = 0; i < BUFFER_SIZE; i++) {
+            buffer[i].valid = false;
+        }
     }
 
     public long getHeadSequence() {

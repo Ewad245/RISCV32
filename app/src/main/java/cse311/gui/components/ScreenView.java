@@ -81,7 +81,30 @@ public class ScreenView extends StackPane {
         StackPane.setMargin(this.fpsLabel, new Insets(10, 10, 0, 0));
         this.fpsLabel.setMouseTransparent(true); // Don't capture mouse events
 
-        getChildren().addAll(imageView, fpsLabel);
+        // 4b. Create retro HUD Focus Status Label
+        Label focusLabel = new Label("[Controls Inactive - Click to Focus]");
+        String activeStyle = "-fx-text-fill: #00ff66; -fx-font-family: 'Consolas', 'Courier New', monospace; " +
+                "-fx-font-weight: bold; -fx-font-size: 12px; -fx-background-color: rgba(0, 0, 0, 0.7); " +
+                "-fx-border-color: rgba(0, 255, 102, 0.4); -fx-border-radius: 4px; -fx-background-radius: 4px; -fx-padding: 3px 8px;";
+        String inactiveStyle = "-fx-text-fill: #f39c12; -fx-font-family: 'Consolas', 'Courier New', monospace; " +
+                "-fx-font-weight: bold; -fx-font-size: 12px; -fx-background-color: rgba(0, 0, 0, 0.7); " +
+                "-fx-border-color: rgba(243, 156, 18, 0.4); -fx-border-radius: 4px; -fx-background-radius: 4px; -fx-padding: 3px 8px;";
+        focusLabel.setStyle(inactiveStyle);
+        StackPane.setAlignment(focusLabel, Pos.TOP_LEFT);
+        StackPane.setMargin(focusLabel, new Insets(10, 0, 0, 10));
+        focusLabel.setMouseTransparent(true);
+
+        focusedProperty().addListener((obs, oldVal, isFocused) -> {
+            if (isFocused) {
+                focusLabel.setText("[Controls Active]");
+                focusLabel.setStyle(activeStyle);
+            } else {
+                focusLabel.setText("[Controls Inactive - Click to Focus]");
+                focusLabel.setStyle(inactiveStyle);
+            }
+        });
+
+        getChildren().addAll(imageView, fpsLabel, focusLabel);
 
         // Styling for dark gaming frame
         setMinSize(0, 0);

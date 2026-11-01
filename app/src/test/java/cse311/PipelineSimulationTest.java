@@ -117,4 +117,29 @@ class PipelineSimulationTest {
             () -> assertEquals(singleRegs[3], pipeRegs[3], "x3 should match between single-cycle and pipeline")
         );
     }
+
+    @Test
+    void testAtomicInstructionZeroRegisterHardwired() throws Exception {
+        cpu.setExecutionMode(RV32Cpu.ExecutionMode.FIVE_STAGE_PIPELINE);
+        cpu.setForwardingEnabled(true);
+
+        memory.writeWord(0x100, 1); // Mutex locked with 1
+        int[] regs = new int[32];
+        regs[1] = 0x100; // rs1 = addr
+        cpu.setRegisters(regs);
+
+        // amoswap.w.rl x0, x0, (x1)
+        int amoswap_x0_x0 = (0x01 << 27) | (1 << 25) | (0 << 20) | (1 << 15) | (2 << 12) | (0 << 7) | 0x2F;
+        memory.writeWord(0x00, amoswap_x0_x0);
+        memory.writeWord(0x04, 0x00000013); // nop
+        memory.writeWord(0x08, 0x00000013); // nop
+
+        cpu.setProgramCounter(0x00);
+        for (int i = 0; i < 6; i++) {
+            cpu.clockTick();
+        }
+
+        assertEquals(0, cpu.getRegisters()[0], "x0 must remain 0 after atomic instruction writing to x0");
+        assertEquals(0, memory.readWord(0x100), "Memory at 0x100 should be 0 after unlock");
+    }
 }

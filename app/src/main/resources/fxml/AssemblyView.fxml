@@ -1,26 +1,55 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
 <?import javafx.scene.control.CheckBox?>
+<?import javafx.scene.control.ComboBox?>
 <?import javafx.scene.control.Label?>
 <?import javafx.scene.control.ListView?>
 <?import javafx.scene.control.Separator?>
+<?import javafx.scene.control.SplitPane?>
+<?import javafx.scene.control.ToggleButton?>
+<?import javafx.scene.control.ToggleGroup?>
 <?import javafx.scene.layout.HBox?>
 <?import javafx.scene.layout.VBox?>
 
 <fx:root type="javafx.scene.layout.VBox" spacing="0" 
          xmlns="http://javafx.com/javafx/17" xmlns:fx="http://javafx.com/fxml/1">
 
-    <HBox spacing="10" alignment="CENTER_LEFT" style="-fx-background-color: #f0f0f0; -fx-border-color: #ccc; -fx-border-width: 0 0 1 0;">
+    <HBox spacing="8" alignment="CENTER_LEFT" style="-fx-background-color: #f8fafc; -fx-border-color: #cbd5e1; -fx-border-width: 0 0 1 0;">
         <padding>
-            <Insets top="5" right="5" bottom="5" left="5"/>
+            <Insets top="4" right="8" bottom="4" left="8"/>
         </padding>
         
-        <Label fx:id="taskLabel" text="Task: Idle" style="-fx-font-weight: bold;"/>
+        <Label text="Scope:" style="-fx-font-size: 11px; -fx-text-fill: #475569; -fx-font-weight: bold;"/>
+        <ComboBox fx:id="cmbTarget" prefWidth="180" style="-fx-font-size: 11px;"/>
+        
+        <Label fx:id="taskLabel" text="Task: Idle" style="-fx-font-weight: bold; -fx-font-size: 11px; -fx-padding: 2 6 2 6; -fx-background-radius: 4; -fx-background-color: #e2e8f0; -fx-text-fill: #334155;"/>
+        
         <Separator orientation="VERTICAL"/>
-        <CheckBox fx:id="chkFollowPc" text="Follow PC" selected="true"/>
+        
+        <!-- Segmented Mode Switch: Disassembly | Trace | Split -->
+        <HBox spacing="0" alignment="CENTER_LEFT" styleClass="segmented-button-bar">
+            <ToggleButton fx:id="btnModeDisasm" text="Code" selected="true" styleClass="segment-btn, segment-btn-left">
+                <toggleGroup>
+                    <ToggleGroup fx:id="viewModeGroup"/>
+                </toggleGroup>
+            </ToggleButton>
+            <ToggleButton fx:id="btnModeTrace" text="Trace" toggleGroup="$viewModeGroup" styleClass="segment-btn, segment-btn-center"/>
+            <ToggleButton fx:id="btnModeSplit" text="Split" toggleGroup="$viewModeGroup" styleClass="segment-btn, segment-btn-right"/>
+        </HBox>
+        
+        <Separator orientation="VERTICAL"/>
+        
+        <CheckBox fx:id="chkFollowPc" text="Follow PC" selected="true" style="-fx-font-size: 11px;"/>
+        <CheckBox fx:id="chkUserOnly" text="User Only" selected="false" style="-fx-font-size: 11px;"/>
+        
+        <Separator orientation="VERTICAL"/>
+        <Button fx:id="btnClearTrace" text="Clear" style="-fx-font-size: 10px; -fx-padding: 2 6 2 6;" onAction="#onClearTraceClicked"/>
     </HBox>
 
-    <ListView fx:id="listView" style="-fx-font-family: 'Monospace';" VBox.vgrow="ALWAYS"/>
+    <SplitPane fx:id="contentSplit" orientation="VERTICAL" VBox.vgrow="ALWAYS">
+        <ListView fx:id="listView" style="-fx-font-family: 'Monospace';" VBox.vgrow="ALWAYS"/>
+    </SplitPane>
 
 </fx:root>

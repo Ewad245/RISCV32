@@ -48,6 +48,7 @@
                 </padding>
                 <Button fx:id="btnPause" text="Pause" onAction="#handlePause"/>
                 <Button fx:id="btnResume" text="Resume" onAction="#handleResume"/>
+                <Button fx:id="btnStep" text="Step PC" onAction="#handleStepInstruction"/>
                 <Separator orientation="VERTICAL"/>
                 <Label text="Delay (ms):"/>
                 <Slider fx:id="speedSlider" min="0" max="500" showTickLabels="true" showTickMarks="true" majorTickUnit="100"/>

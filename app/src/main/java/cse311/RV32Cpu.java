@@ -382,6 +382,27 @@ public class RV32Cpu {
 
 
     public int getLastPC() {
+        if (executionMode == ExecutionMode.FIVE_STAGE_PIPELINE) {
+            if (memWb != null && memWb.valid && memWb.pc != 0) {
+                return memWb.pc;
+            }
+            if (exMem != null && exMem.valid && exMem.pc != 0) {
+                return exMem.pc;
+            }
+            if (idEx != null && idEx.valid && idEx.pc != 0) {
+                return idEx.pc;
+            }
+            if (ifId != null && ifId.valid && ifId.pc != 0) {
+                return ifId.pc;
+            }
+            if (lastPC != -1) {
+                return lastPC;
+            }
+            if (lastCommittedPc != 0) {
+                return lastCommittedPc;
+            }
+            return pc;
+        }
         return lastPC;
     }
 
@@ -458,8 +479,10 @@ wbVal = memWb.memToReg ? memWb.memReadData : memWb.aluResult;
             }
 
             pipelineCommittedInstructions++;
+            lastPC = memWb.pc;
             if (tracingEnabled) {
-                traceBuffer.record(memWb.pc, memWb.instruction, memWb.aluResult, memWb.rd, memWb.regWrite, false, false, pipelineClockCycles);
+                int currentTid = (currentTask != null) ? currentTask.getId() : 0;
+                traceBuffer.record(memWb.pc, memWb.instruction, memWb.aluResult, memWb.rd, memWb.regWrite, false, false, pipelineClockCycles, this.cpuId, currentTid);
                 recordHitCount(memWb.pc);
             }
             memWb.valid = false;
@@ -706,8 +729,8 @@ wbVal = memWb.memToReg ? memWb.memReadData : memWb.aluResult;
                         break;
                     case 0x2F: // RV32A Atomic Instructions
                         InstructionDecoded atomicDec = decode(idEx.instruction);
-                        executeAtomic(atomicDec);
-                        aluRes = x[idEx.rd];
+                        executeAtomic(atomicDec, opA, opB);
+                        aluRes = (idEx.rd != 0) ? x[idEx.rd] : 0;
                         break;
                 }
 
@@ -851,6 +874,9 @@ wbVal = memWb.memToReg ? memWb.memReadData : memWb.aluResult;
             idEx.flush();
             pipelineFlushes++;
         }
+
+        // Hardwired zero register x[0] must always be 0
+        x[0] = 0;
     }
 
     public synchronized void drainPipeline() {
@@ -981,7 +1007,20 @@ wbVal = memWb.memToReg ? memWb.memReadData : memWb.aluResult;
             int instructionFetched = fetch();
             executeFast(instructionFetched);
             if (tracingEnabled) {
-                traceBuffer.record(lastPC, instructionFetched, lastAluResult, 0, regWrite, false, memWrite, cycleCount);
+                int currentTid = (currentTask != null) ? currentTask.getId() : 0;
+                int rd = 0;
+                boolean isRegWrite = false;
+                if ((instructionFetched & 0x3) == 0x3) {
+                    int op = instructionFetched & 0x7F;
+                    if (op == 0b0110011 || op == 0b0010011 || op == 0b0000011 ||
+                        op == 0b1101111 || op == 0b1100111 || op == 0b0110111 ||
+                        op == 0b0010111 || op == 0b0101111) {
+                        rd = (instructionFetched >> 7) & 0x1F;
+                        isRegWrite = (rd != 0);
+                    }
+                }
+                int resultVal = (rd != 0) ? x[rd] : lastAluResult;
+                traceBuffer.record(lastPC, instructionFetched, resultVal, rd, isRegWrite, false, memWrite, cycleCount, this.cpuId, currentTid);
                 recordHitCount(lastPC);
             }
         } catch (MemoryAccessException e) {
@@ -1914,6 +1953,10 @@ wbVal = memWb.memToReg ? memWb.memReadData : memWb.aluResult;
     }
 
     private void executeAtomic(InstructionDecoded instr) {
+        executeAtomic(instr, x[instr.getRs1()], x[instr.getRs2()]);
+    }
+
+    private void executeAtomic(InstructionDecoded instr, int opA, int opB) {
         int funct5 = (instr.getFunc7() >> 2);
         int aq = (instr.getFunc7() >> 1) & 1; // Acquire bit (ordering)
         int rl = instr.getFunc7() & 1; // Release bit (ordering)
@@ -1928,7 +1971,7 @@ wbVal = memWb.memToReg ? memWb.memReadData : memWb.aluResult;
         }
 
         try {
-            int virtualAddr = x[rs1];
+            int virtualAddr = opA;
             // Use mapAddressForWrite to ensure translation and permissions check
             int physAddr = mapAddressForWrite(virtualAddr);
 
@@ -1940,46 +1983,46 @@ wbVal = memWb.memToReg ? memWb.memReadData : memWb.aluResult;
                 // 2. Operation
                 switch (funct5) {
                     case 0x01: // AMOSWAP
-                        result = x[rs2];
+                        result = opB;
                         break;
                     case 0x00: // AMOADD
-                        result = loadedValue + x[rs2];
+                        result = loadedValue + opB;
                         break;
                     case 0x04: // AMOXOR
-                        result = loadedValue ^ x[rs2];
+                        result = loadedValue ^ opB;
                         break;
                     case 0x0C: // AMOAND
-                        result = loadedValue & x[rs2];
+                        result = loadedValue & opB;
                         break;
                     case 0x08: // AMOOR
-                        result = loadedValue | x[rs2];
+                        result = loadedValue | opB;
                         break;
                     case 0x10: // AMOMIN
-                        result = Math.min(loadedValue, x[rs2]);
+                        result = Math.min(loadedValue, opB);
                         break;
                     case 0x14: // AMOMAX
-                        result = Math.max(loadedValue, x[rs2]);
+                        result = Math.max(loadedValue, opB);
                         break;
                     case 0x18: // AMOMINU
-                        result = (Integer.compareUnsigned(loadedValue, x[rs2]) < 0) ? loadedValue : x[rs2];
+                        result = (Integer.compareUnsigned(loadedValue, opB) < 0) ? loadedValue : opB;
                         break;
                     case 0x1C: // AMOMAXU
-                        result = (Integer.compareUnsigned(loadedValue, x[rs2]) > 0) ? loadedValue : x[rs2];
+                        result = (Integer.compareUnsigned(loadedValue, opB) > 0) ? loadedValue : opB;
                         break;
                     case 0x02: // LR.W (Load Reserved)
                         // Register this reservation in MemoryManager (see Step 2b below)
                         memory.registerReservation(physAddr, this.cpuId);
                         result = loadedValue;
                         // LR does NOT write back to memory, it just loads
-                        x[rd] = result;
+                        if (rd != 0) x[rd] = result;
                         return;
                     case 0x03: // SC.W (Store Conditional)
                         // Check if reservation is still valid
                         if (memory.checkReservation(physAddr, this.cpuId)) {
-                            memory.writeWord(physAddr, x[rs2]);
-                            x[rd] = 0; // Success (0)
+                            memory.writeWord(physAddr, opB);
+                            if (rd != 0) x[rd] = 0; // Success (0)
                         } else {
-                            x[rd] = 1; // Failure (nonzero)
+                            if (rd != 0) x[rd] = 1; // Failure (nonzero)
                         }
                         return;
                     default:
@@ -1990,10 +2033,14 @@ wbVal = memWb.memToReg ? memWb.memReadData : memWb.aluResult;
 
                 // 3. Store Back (for AMOs only, not LR/SC)
                 memory.writeWord(physAddr, result);
-                x[rd] = loadedValue; // AMOs write the ORIGINAL value to rd
+                if (rd != 0) {
+                    x[rd] = loadedValue; // AMOs write the ORIGINAL value to rd
+                }
             }
         } catch (MemoryAccessException e) {
-            handleException(7, x[rs1]); // Store/AMO Access Fault
+            handleException(7, opA); // Store/AMO Access Fault
+        } finally {
+            x[0] = 0;
         }
     }
 

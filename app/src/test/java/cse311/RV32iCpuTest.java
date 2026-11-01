@@ -153,4 +153,27 @@ class RV32iCpuTest {
 
         assertEquals(0x12345000, cpu.getRegister(1), "LUI failed");
     }
+
+    @Test
+    void testCpuTracingRecord() throws Exception {
+        cpu.setId(3);
+        cpu.setTracingEnabled(true);
+        int pc = cpu.getProgramCounter();
+        // ADDI x1, x0, 42 -> 0x02a00093
+        memory.writeWord(pc, 0x02a00093);
+
+        cpu.runBatch(1);
+
+        var snapshot = cpu.getTraceBuffer().getSnapshot(5);
+        var ev = !snapshot.isEmpty() ? snapshot.get(snapshot.size() - 1) : null;
+
+        assertAll("cpuTracingRecord",
+            () -> org.junit.jupiter.api.Assertions.assertFalse(snapshot.isEmpty(), "Trace snapshot should not be empty"),
+            () -> assertEquals(pc, ev != null ? ev.pc : 0, "PC should match executed instruction"),
+            () -> assertEquals(3, ev != null ? ev.hartId : 0, "HartId should match CPU ID"),
+            () -> assertEquals(0x02a00093, ev != null ? ev.instruction : 0, "Instruction should match ADDI"),
+            () -> assertEquals(1, ev != null ? ev.rd : 0, "Destination register should be x1"),
+            () -> assertEquals(42, ev != null ? ev.aluResult : 0, "Result value should be 42")
+        );
+    }
 }

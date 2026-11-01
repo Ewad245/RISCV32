@@ -38,7 +38,12 @@ public class App {
             // --------------------------------------------------------
             // 3. MOUNT FILE SYSTEM
             // --------------------------------------------------------
-            String imgPath = ".." + OSConstants.file_seperator + "fs.img";
+            String imgPath = "app" + OSConstants.file_separator + "src" + OSConstants.file_separator + "main"
+                    + OSConstants.file_separator + "resources" + OSConstants.file_separator + "fs.img";
+            if (!new File(imgPath).exists()) {
+                imgPath = "src" + OSConstants.file_separator + "main" + OSConstants.file_separator + "resources"
+                        + OSConstants.file_separator + "fs.img";
+            }
             File diskImage = new File(imgPath);
             if (diskImage.exists()) {
                 kernel.mountFileSystem(imgPath);
@@ -69,9 +74,11 @@ public class App {
                 kernel.createTask(elfPath);
             } else {
                 // Fallback to old path for backwards compatibility
-                String oldPath = ".." + OSConstants.file_seperator + "User_Program_ELF" + OSConstants.file_seperator
-                        + "init.elf";
-                File oldFile = new File(oldPath);
+                File oldFile = new File("User_Program_ELF" + OSConstants.file_separator + "init.elf");
+                if (!oldFile.exists()) {
+                    oldFile = new File(".." + OSConstants.file_separator + "User_Program_ELF" + OSConstants.file_separator + "init.elf");
+                }
+                String oldPath = oldFile.getPath();
                 if (oldFile.exists()) {
                     FileLogger.log("Bootloader: Using legacy ELF path: " + oldPath);
                     kernel.createTask(oldPath);
