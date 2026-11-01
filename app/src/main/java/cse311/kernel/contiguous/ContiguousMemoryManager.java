@@ -61,6 +61,10 @@ public class ContiguousMemoryManager extends MemoryManager {
                 "MemoryManager: Hot-swapped to " + newAllocator.getClass().getSimpleName() + ".");
     }
 
+    public synchronized AllocationStrategy getAllocationStrategy() {
+        return allocator;
+    }
+
     public int getLimitRegister() {
         return getContext().limitRegister;
     }

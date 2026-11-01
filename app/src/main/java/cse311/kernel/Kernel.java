@@ -846,14 +846,20 @@ public class Kernel {
     }
 
     public void setScheduler(Scheduler newScheduler) {
+        if (newScheduler == null) {
+            throw new IllegalArgumentException("newScheduler cannot be null");
+        }
         boolean wasRunning = !this.paused;
         this.pause();
 
         schedulerLock.acquire();
         try {
             if (this.scheduler != null) {
-                for (Task t : this.scheduler.getReadyTasks()) {
-                    newScheduler.addTask(t);
+                java.util.Collection<Task> ready = this.scheduler.getReadyTasks();
+                if (ready != null) {
+                    for (Task t : ready) {
+                        newScheduler.addTask(t);
+                    }
                 }
             }
             this.scheduler = newScheduler;

@@ -78,6 +78,10 @@ public class PagedMemoryManager extends MemoryManager {
                 "PagedMemoryManager: Hot-swapped to " + pager.getClass().getSimpleName() + ".");
     }
 
+    public synchronized Pager getPager() {
+        return pager;
+    }
+
     // ---- Address-space lifecycle ----
     public synchronized AddressSpace createAddressSpace(int pid) {
         AddressSpace as = new AddressSpace(pid, this);

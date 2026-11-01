@@ -16,6 +16,10 @@ public class DemandPager implements Pager {
         this.repl = repl;
     }
 
+    public ReplacementPolicy getReplacementPolicy() {
+        return repl;
+    }
+
     @Override
     public int ensureResident(AddressSpace as, int va, VmAccess access) throws MemoryAccessException {
         if (PagedMemoryManager.isUart(va))

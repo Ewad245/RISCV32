@@ -34,7 +34,7 @@
                     <MenuItem text="Import Custom Memory Allocator..." onAction="#onImportMemoryAllocatorClicked" />
                     <MenuItem text="Import Page Replacement Policy..." onAction="#onImportPageReplacementClicked" />
                     <SeparatorMenuItem />
-                    <MenuItem text="Manage Plugins" disable="true" />
+                    <MenuItem text="Manage Plugins..." onAction="#onManagePluginsClicked" />
                 </Menu>
 
                 <Menu text="Help">
@@ -76,13 +76,13 @@
                         </VBox>
                         <VBox fx:id="schedulerContainer" spacing="5">
                             <padding><Insets top="10" right="10" bottom="10" left="10"/></padding>
-                            <Label text="Scheduler Queues"/>
+                            <Label fx:id="lblSchedulerTitle" text="Scheduler Queues"/>
                             </VBox>
                     </SplitPane>
                     
                     <VBox fx:id="memoryContainer" spacing="5">
                         <padding><Insets top="10" right="10" bottom="10" left="10"/></padding>
-                        <Label text="Memory Visualization"/>
+                        <Label fx:id="lblMemoryTitle" text="Memory Visualization"/>
                         </VBox>
                 </SplitPane>
 

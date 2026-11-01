@@ -48,6 +48,10 @@ public class GuiApp extends Application {
     }
 
     public void restartInMode(MemoryMode mode) {
+        restartInMode(mode, null);
+    }
+
+    public void restartInMode(MemoryMode mode, Runnable onReady) {
         currentMode = mode;
         if (kernel != null) {
             kernel.stop();
@@ -57,6 +61,9 @@ public class GuiApp extends Application {
         }
         try {
             rebuildScene(mode);
+            if (onReady != null) {
+                javafx.application.Platform.runLater(onReady);
+            }
         } catch (Exception e) {
             FileLogger.log(FileLogger.LogLevel.ERROR,
                     "GUI: Failed to restart in " + mode + " mode: " + e.getMessage());

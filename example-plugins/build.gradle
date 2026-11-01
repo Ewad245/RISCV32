@@ -2,6 +2,10 @@ plugins {
     id 'java-library'
 }
 
+repositories {
+    mavenCentral()
+}
+
 java {
     toolchain {
         languageVersion = JavaLanguageVersion.of(17)
@@ -11,4 +15,12 @@ java {
 dependencies {
     // The main simulator provides the plugin API at compile time only.
     compileOnly project(':app')
+
+    // Google AutoService to automatically generate META-INF/services files
+    compileOnly 'com.google.auto.service:auto-service-annotations:1.1.1'
+    annotationProcessor 'com.google.auto.service:auto-service:1.1.1'
+}
+
+tasks.withType(Jar).configureEach {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }

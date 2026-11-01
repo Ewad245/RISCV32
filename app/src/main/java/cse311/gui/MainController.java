@@ -47,6 +47,16 @@ import javafx.scene.layout.Priority;
 import javafx.application.Platform;
 import cse311.gui.platform.PlatformEnvironment;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
+import javafx.scene.control.ChoiceDialog;
+import javafx.scene.control.Dialog;
+import javafx.scene.control.Separator;
+import javafx.scene.layout.GridPane;
+import cse311.kernel.scheduler.RoundRobinScheduler;
+import cse311.kernel.contiguous.FirstFitStrategy;
+import cse311.kernel.NonContiguous.paging.ClockPolicy;
+import cse311.kernel.NonContiguous.paging.Pager;
 
 @SuppressWarnings({
         "PMD.AvoidDuplicateLiterals",
@@ -76,7 +86,11 @@ public class MainController implements Initializable {
     @FXML
     private VBox schedulerContainer;
     @FXML
+    private Label lblSchedulerTitle;
+    @FXML
     private VBox memoryContainer; // Dashboard memory view
+    @FXML
+    private Label lblMemoryTitle;
     @FXML
     private VBox memoryTabContainer; // Full memory tab view
     @FXML
@@ -230,24 +244,25 @@ public class MainController implements Initializable {
     @FXML
     public void onImportSchedulerClicked() {
         PlatformEnvironment.getManager().chooseOpenFile(
-            btnPause, "Select Custom Scheduler JAR", "JAR Files", "*.jar", selectedFile -> {
-                try {
-                    Scheduler customScheduler = PluginLoader.loadCustomScheduler(selectedFile);
-                    customScheduler.setTimeSlice(kernel.getConfig().getTimeSlice());
-                    kernel.setScheduler(customScheduler);
-                    
-                    PlatformEnvironment.getManager().showInfoAlert("Success", "Scheduler Loaded", 
-                        "Successfully loaded and activated: " + customScheduler.getClass().getSimpleName(), 
-                        btnPause.getScene().getWindow());
-                } catch (Exception e) {
-                    if (cse311.Logger.FileLogger.isLoggable(cse311.Logger.FileLogger.LogLevel.ERROR))
-                        cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
-                                "Failed to load scheduler plugin: " + e.getMessage());
-                    cse311.Logger.FileLogger.log(e);
-                    PlatformEnvironment.getManager().showErrorAlert("Error", "Failed to Load Scheduler", 
-                        "Error: " + e.getMessage(), btnPause.getScene().getWindow());
-                }
-            });
+            btnPause, "Select Custom Scheduler JAR", "JAR Files", "*.jar", this::loadSchedulerFromFile);
+    }
+
+    private void loadSchedulerFromFile(File selectedFile) {
+        try {
+            Scheduler customScheduler = PluginLoader.loadCustomScheduler(selectedFile);
+            customScheduler.setTimeSlice(kernel.getConfig().getTimeSlice());
+            kernel.setScheduler(customScheduler);
+            updateAlgorithmLabels();
+
+            PlatformEnvironment.getManager().showInfoAlert("Success", "Scheduler Loaded", 
+                "Successfully loaded and activated: " + customScheduler.getClass().getSimpleName(), 
+                btnPause.getScene().getWindow());
+        } catch (Throwable t) {
+            FileLogger.log(FileLogger.LogLevel.ERROR, "Failed to load scheduler plugin: " + t.getMessage());
+            FileLogger.log(t);
+            PlatformEnvironment.getManager().showErrorAlert("Error", "Failed to Load Scheduler", 
+                "Error: " + t.getMessage(), btnPause.getScene().getWindow());
+        }
     }
 
     @SuppressWarnings("PMD.UnusedPrivateMethod")
@@ -259,30 +274,42 @@ public class MainController implements Initializable {
             PlatformEnvironment.getManager().showConfirmationAlert("Mode Mismatch", "Switch to Contiguous Memory Mode?",
                 "Allocation strategies only apply to Contiguous memory mode.\nSwitching will restart the simulator and reset all running processes.",
                 btnPause.getScene().getWindow(), () -> {
-                    guiApp.restartInMode(MemoryMode.CONTIGUOUS);
+                    guiApp.restartInMode(MemoryMode.CONTIGUOUS, this::onImportMemoryAllocatorClicked);
                 });
             return;
         }
 
-        PlatformEnvironment.getManager().chooseOpenFile(btnPause, "Select Custom Memory Allocator JAR", "JAR Files", "*.jar", selectedFile -> {
-            try {
-                AllocationStrategy customAllocator = PluginLoader.loadCustomAllocator(selectedFile);
-                boolean wasRunning = !kernel.isPaused();
-                kernel.pause();
-                ((ContiguousMemoryManager) currentMemory).setAllocationStrategy(customAllocator);
-                if (wasRunning) kernel.resume();
-                PlatformEnvironment.getManager().showInfoAlert("Success", "Allocator Loaded", 
-                    "Successfully hot-swapped memory allocator to: " + customAllocator.getClass().getSimpleName(), 
-                    btnPause.getScene().getWindow());
-            } catch (Exception e) {
-                if (cse311.Logger.FileLogger.isLoggable(cse311.Logger.FileLogger.LogLevel.ERROR))
-                    cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
-                            "Failed to load allocator plugin: " + e.getMessage());
-                cse311.Logger.FileLogger.log(e);
-                PlatformEnvironment.getManager().showErrorAlert("Import Error", "Failed to load plugin", 
-                    e.getMessage(), btnPause.getScene().getWindow());
-            }
-        });
+        PlatformEnvironment.getManager().chooseOpenFile(
+            btnPause, "Select Custom Memory Allocator JAR", "JAR Files", "*.jar", this::loadAllocatorFromFile);
+    }
+
+    private void loadAllocatorFromFile(File selectedFile) {
+        MemoryManager currentMemory = kernel.getMemory();
+        if (!(currentMemory instanceof ContiguousMemoryManager)) {
+            PlatformEnvironment.getManager().showConfirmationAlert("Mode Mismatch", "Switch to Contiguous Memory Mode?",
+                "Allocation strategies only apply to Contiguous memory mode.\nSwitching will restart the simulator and reset all running processes.",
+                btnPause.getScene().getWindow(), () -> {
+                    guiApp.restartInMode(MemoryMode.CONTIGUOUS, () -> loadAllocatorFromFile(selectedFile));
+                });
+            return;
+        }
+
+        try {
+            AllocationStrategy customAllocator = PluginLoader.loadCustomAllocator(selectedFile);
+            boolean wasRunning = !kernel.isPaused();
+            kernel.pause();
+            ((ContiguousMemoryManager) currentMemory).setAllocationStrategy(customAllocator);
+            if (wasRunning) kernel.resume();
+            updateAlgorithmLabels();
+            PlatformEnvironment.getManager().showInfoAlert("Success", "Allocator Loaded", 
+                "Successfully hot-swapped memory allocator to: " + customAllocator.getClass().getSimpleName(), 
+                btnPause.getScene().getWindow());
+        } catch (Throwable t) {
+            FileLogger.log(FileLogger.LogLevel.ERROR, "Failed to load allocator plugin: " + t.getMessage());
+            FileLogger.log(t);
+            PlatformEnvironment.getManager().showErrorAlert("Import Error", "Failed to load plugin", 
+                t.getMessage(), btnPause.getScene().getWindow());
+        }
     }
 
     @SuppressWarnings("PMD.UnusedPrivateMethod")
@@ -294,31 +321,250 @@ public class MainController implements Initializable {
             PlatformEnvironment.getManager().showConfirmationAlert("Mode Mismatch", "Switch to Paging Memory Mode?",
                 "Page replacement policies only apply to Paging memory mode.\nSwitching will restart the simulator and reset all running processes.",
                 btnPause.getScene().getWindow(), () -> {
-                    guiApp.restartInMode(MemoryMode.PAGING);
+                    guiApp.restartInMode(MemoryMode.PAGING, this::onImportPageReplacementClicked);
+                });
+            return;
+        }
+
+        PlatformEnvironment.getManager().chooseOpenFile(
+            btnPause, "Select Custom Page Replacement JAR", "JAR Files", "*.jar", this::loadReplacementPolicyFromFile);
+    }
+
+    private void loadReplacementPolicyFromFile(File selectedFile) {
+        MemoryManager currentMemory = kernel.getMemory();
+        if (!(currentMemory instanceof PagedMemoryManager)) {
+            PlatformEnvironment.getManager().showConfirmationAlert("Mode Mismatch", "Switch to Paging Memory Mode?",
+                "Page replacement policies only apply to Paging memory mode.\nSwitching will restart the simulator and reset all running processes.",
+                btnPause.getScene().getWindow(), () -> {
+                    guiApp.restartInMode(MemoryMode.PAGING, () -> loadReplacementPolicyFromFile(selectedFile));
                 });
             return;
         }
 
         PagedMemoryManager pmm = (PagedMemoryManager) currentMemory;
+        try {
+            ReplacementPolicy customPolicy = PluginLoader.loadCustomReplacementPolicy(selectedFile);
 
-        PlatformEnvironment.getManager().chooseOpenFile(btnPause, "Select Custom Page Replacement JAR", "JAR Files", "*.jar", selectedFile -> {
-            try {
-                ReplacementPolicy customPolicy = PluginLoader.loadCustomReplacementPolicy(selectedFile);
-                DemandPager newPager = new DemandPager(pmm, customPolicy);
+            // Replay mapped frames so the replacement policy is aware of resident pages
+            for (int i = 0; i < pmm.getTotalFrames(); i++) {
+                if (pmm.getFrameOwner(i) != null) {
+                    customPolicy.onMap(i);
+                }
+            }
+
+            DemandPager newPager = new DemandPager(pmm, customPolicy);
+            boolean wasRunning = !kernel.isPaused();
+            kernel.pause();
+            pmm.setPager(newPager);
+            if (wasRunning) kernel.resume();
+            updateAlgorithmLabels();
+            PlatformEnvironment.getManager().showInfoAlert("Success", "Policy Loaded", 
+                "Successfully hot-swapped page replacement to: " + customPolicy.getClass().getSimpleName(), 
+                btnPause.getScene().getWindow());
+        } catch (Throwable t) {
+            FileLogger.log(FileLogger.LogLevel.ERROR, "Failed to load page replacement plugin: " + t.getMessage());
+            FileLogger.log(t);
+            PlatformEnvironment.getManager().showErrorAlert("Import Error", "Failed to load plugin", 
+                t.getMessage(), btnPause.getScene().getWindow());
+        }
+    }
+
+    @FXML
+    public void onManagePluginsClicked() {
+        Dialog<Void> dialog = new Dialog<>();
+        dialog.setTitle("Manage Plugins");
+        dialog.setHeaderText("Installed Components & Dynamic Extension Points");
+        if (btnPause != null && btnPause.getScene() != null) {
+            dialog.initOwner(btnPause.getScene().getWindow());
+        }
+
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(12);
+        grid.setStyle("-fx-padding: 15;");
+
+        // 1. Scheduler
+        String schedName = kernel.getScheduler().getClass().getSimpleName();
+        Label lblSched = new Label("CPU Scheduler: " + schedName);
+        lblSched.setStyle("-fx-font-weight: bold;");
+        Button btnImportSched = new Button("Import JAR...");
+        btnImportSched.setOnAction(e -> {
+            dialog.close();
+            onImportSchedulerClicked();
+        });
+        Button btnResetSched = new Button("Reset to Default");
+        btnResetSched.setOnAction(e -> {
+            kernel.setScheduler(new RoundRobinScheduler(kernel.getConfig().getTimeSlice()));
+            PluginLoader.unloadPlugin(Scheduler.class);
+            updateAlgorithmLabels();
+            lblSched.setText("CPU Scheduler: RoundRobinScheduler");
+        });
+
+        // 2. Memory Allocator
+        MemoryManager mem = kernel.getMemory();
+        boolean isContiguous = mem instanceof ContiguousMemoryManager;
+        String allocName = isContiguous
+                ? ((ContiguousMemoryManager) mem).getAllocationStrategy().getClass().getSimpleName()
+                : "Disabled (Paging Mode)";
+        Label lblAlloc = new Label("Contiguous Allocator: " + allocName);
+        lblAlloc.setStyle("-fx-font-weight: bold;");
+        Button btnImportAlloc = new Button("Import JAR...");
+        btnImportAlloc.setOnAction(e -> {
+            dialog.close();
+            onImportMemoryAllocatorClicked();
+        });
+        Button btnResetAlloc = new Button("Reset to Default");
+        btnResetAlloc.setDisable(!isContiguous);
+        btnResetAlloc.setOnAction(e -> {
+            if (isContiguous) {
+                ((ContiguousMemoryManager) mem).setAllocationStrategy(new FirstFitStrategy());
+                PluginLoader.unloadPlugin(AllocationStrategy.class);
+                updateAlgorithmLabels();
+                lblAlloc.setText("Contiguous Allocator: FirstFitStrategy");
+            }
+        });
+
+        // 3. Page Replacement
+        boolean isPaging = mem instanceof PagedMemoryManager;
+        String replName;
+        if (isPaging) {
+            Pager pager = ((PagedMemoryManager) mem).getPager();
+            replName = (pager instanceof DemandPager && ((DemandPager) pager).getReplacementPolicy() != null)
+                    ? ((DemandPager) pager).getReplacementPolicy().getClass().getSimpleName()
+                    : (pager != null ? pager.getClass().getSimpleName() : "None");
+        } else {
+            replName = "Disabled (Contiguous Mode)";
+        }
+        Label lblRepl = new Label("Page Replacement: " + replName);
+        lblRepl.setStyle("-fx-font-weight: bold;");
+        Button btnImportRepl = new Button("Import JAR...");
+        btnImportRepl.setOnAction(e -> {
+            dialog.close();
+            onImportPageReplacementClicked();
+        });
+        Button btnResetRepl = new Button("Reset to Default");
+        btnResetRepl.setDisable(!isPaging);
+        btnResetRepl.setOnAction(e -> {
+            if (isPaging) {
+                PagedMemoryManager pmm = (PagedMemoryManager) mem;
+                ClockPolicy defaultPolicy = new ClockPolicy(pmm.getTotalFrames());
+                for (int i = 0; i < pmm.getTotalFrames(); i++) {
+                    if (pmm.getFrameOwner(i) != null) {
+                        defaultPolicy.onMap(i);
+                    }
+                }
                 boolean wasRunning = !kernel.isPaused();
                 kernel.pause();
-                pmm.setPager(newPager);
+                pmm.setPager(new DemandPager(pmm, defaultPolicy));
                 if (wasRunning) kernel.resume();
-                PlatformEnvironment.getManager().showInfoAlert("Success", "Policy Loaded", 
-                    "Successfully hot-swapped page replacement to: " + customPolicy.getClass().getSimpleName(), 
-                    btnPause.getScene().getWindow());
-            } catch (Exception e) {
-                if (cse311.Logger.FileLogger.isLoggable(cse311.Logger.FileLogger.LogLevel.ERROR))
-                    cse311.Logger.FileLogger.log(cse311.Logger.FileLogger.LogLevel.ERROR,
-                            "Failed to load page replacement plugin: " + e.getMessage());
-                cse311.Logger.FileLogger.log(e);
-                PlatformEnvironment.getManager().showErrorAlert("Import Error", "Failed to load plugin", 
-                    e.getMessage(), btnPause.getScene().getWindow());
+                PluginLoader.unloadPlugin(ReplacementPolicy.class);
+                updateAlgorithmLabels();
+                lblRepl.setText("Page Replacement: ClockPolicy");
+            }
+        });
+
+        // 4. Universal Import
+        Button btnUniversalImport = new Button("Import Any Plugin JAR (Auto-Detect)...");
+        btnUniversalImport.setStyle("-fx-font-weight: bold;");
+        btnUniversalImport.setOnAction(e -> {
+            dialog.close();
+            onUniversalImportClicked();
+        });
+
+        grid.add(lblSched, 0, 0);
+        grid.add(btnImportSched, 1, 0);
+        grid.add(btnResetSched, 2, 0);
+
+        grid.add(lblAlloc, 0, 1);
+        grid.add(btnImportAlloc, 1, 1);
+        grid.add(btnResetAlloc, 2, 1);
+
+        grid.add(lblRepl, 0, 2);
+        grid.add(btnImportRepl, 1, 2);
+        grid.add(btnResetRepl, 2, 2);
+
+        grid.add(new Separator(), 0, 3, 3, 1);
+        grid.add(btnUniversalImport, 0, 4, 3, 1);
+
+        dialog.getDialogPane().setContent(grid);
+        dialog.getDialogPane().getButtonTypes().add(ButtonType.CLOSE);
+        dialog.show();
+    }
+
+    public void onUniversalImportClicked() {
+        PlatformEnvironment.getManager().chooseOpenFile(
+            btnPause, "Select Plugin JAR", "JAR Files", "*.jar", selectedFile -> {
+                try {
+                    PluginLoader.PluginManifest manifest = PluginLoader.inspectJar(selectedFile);
+                    if (manifest.isEmpty()) {
+                        PlatformEnvironment.getManager().showErrorAlert(
+                            "Invalid Plugin", "No SPI Services Detected",
+                            "The selected JAR contains no META-INF/services entries for Scheduler, Allocator, or ReplacementPolicy.",
+                            btnPause.getScene().getWindow());
+                        return;
+                    }
+
+                    int count = (manifest.hasScheduler() ? 1 : 0)
+                            + (manifest.hasAllocator() ? 1 : 0)
+                            + (manifest.hasReplacementPolicy() ? 1 : 0);
+
+                    if (count == 1) {
+                        if (manifest.hasScheduler()) {
+                            loadSchedulerFromFile(selectedFile);
+                        } else if (manifest.hasAllocator()) {
+                            loadAllocatorFromFile(selectedFile);
+                        } else if (manifest.hasReplacementPolicy()) {
+                            loadReplacementPolicyFromFile(selectedFile);
+                        }
+                    } else {
+                        List<String> options = new ArrayList<>();
+                        if (manifest.hasScheduler()) options.add("CPU Scheduler");
+                        if (manifest.hasAllocator()) options.add("Contiguous Allocator");
+                        if (manifest.hasReplacementPolicy()) options.add("Page Replacement");
+
+                        ChoiceDialog<String> choice = new ChoiceDialog<>(options.get(0), options);
+                        choice.setTitle("Select Plugin Component");
+                        choice.setHeaderText("Multiple plugin components found in " + selectedFile.getName());
+                        choice.setContentText("Choose component to activate:");
+                        if (btnPause != null && btnPause.getScene() != null) {
+                            choice.initOwner(btnPause.getScene().getWindow());
+                        }
+                        choice.showAndWait().ifPresent(selected -> {
+                            if ("CPU Scheduler".equals(selected)) {
+                                loadSchedulerFromFile(selectedFile);
+                            } else if ("Contiguous Allocator".equals(selected)) {
+                                loadAllocatorFromFile(selectedFile);
+                            } else if ("Page Replacement".equals(selected)) {
+                                loadReplacementPolicyFromFile(selectedFile);
+                            }
+                        });
+                    }
+                } catch (Throwable t) {
+                    PlatformEnvironment.getManager().showErrorAlert(
+                        "Error", "Plugin Inspection Failed", t.getMessage(), btnPause.getScene().getWindow());
+                }
+            });
+    }
+
+    public void updateAlgorithmLabels() {
+        Platform.runLater(() -> {
+            if (lblSchedulerTitle != null && kernel != null && kernel.getScheduler() != null) {
+                lblSchedulerTitle.setText("Scheduler Queues (" + kernel.getScheduler().getClass().getSimpleName() + ")");
+            }
+            if (lblMemoryTitle != null && kernel != null) {
+                MemoryManager mm = kernel.getMemory();
+                String policyName = "Memory";
+                if (mm instanceof ContiguousMemoryManager) {
+                    policyName = ((ContiguousMemoryManager) mm).getAllocationStrategy().getClass().getSimpleName();
+                } else if (mm instanceof PagedMemoryManager) {
+                    Pager pager = ((PagedMemoryManager) mm).getPager();
+                    if (pager instanceof DemandPager && ((DemandPager) pager).getReplacementPolicy() != null) {
+                        policyName = ((DemandPager) pager).getReplacementPolicy().getClass().getSimpleName();
+                    } else if (pager != null) {
+                        policyName = pager.getClass().getSimpleName();
+                    }
+                }
+                lblMemoryTitle.setText("Memory Visualization (" + policyName + ")");
             }
         });
     }
@@ -395,6 +641,8 @@ public class MainController implements Initializable {
         hexMemoryView = new HexMemoryView(kernel.getMemory());
         memoryTabContainer.getChildren().add(hexMemoryView);
         VBox.setVgrow(hexMemoryView, Priority.ALWAYS);
+
+        updateAlgorithmLabels();
     }
 
     @FXML

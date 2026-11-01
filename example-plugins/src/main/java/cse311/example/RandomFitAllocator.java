@@ -3,12 +3,14 @@ package cse311.example;
 import java.util.List;
 import java.util.Random;
 
+import com.google.auto.service.AutoService;
 import cse311.kernel.contiguous.AllocationStrategy;
 import cse311.kernel.contiguous.MemoryBlock;
 
 /**
  * Example SPI plugin allocator that picks a random hole that fits the request.
  */
+@AutoService(AllocationStrategy.class)
 public class RandomFitAllocator implements AllocationStrategy {
 
     private final Random random = new Random();
